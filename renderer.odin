@@ -1,0 +1,136 @@
+package main
+
+import "base:runtime"
+import c "core:c/libc"
+import "core:fmt"
+import diagnostic "diagnostic"
+import library "spotify/library"
+import ui "ui"
+import clay "vendor/clay"
+import sdl "vendor:sdl3"
+import ttf "vendor:sdl3/ttf"
+
+Textures :: struct {
+	by_key:    map[u64]^sdl.Texture,
+	requested: map[u64]bool,
+}
+
+clay_error :: proc "c" (data: clay.ErrorData) {
+	context = runtime.default_context()
+	message := string(data.errorText.chars[:data.errorText.length])
+	fmt.eprintln("clay:", message)
+	diagnostic.write(message)
+}
+
+measure_text :: proc "c" (
+	text: clay.StringSlice,
+	config: ^clay.TextElementConfig,
+	user_data: rawptr,
+) -> clay.Dimensions {
+	context = runtime.default_context()
+	state := (^ui.State)(user_data)
+	font := ui.font_for_size(state, f32(config.fontSize) * ui.scale(state), config.fontId)
+	if font == nil {return {}}
+	width, height: c.int
+	_ = ttf.GetStringSize(font, cstring(text.chars), uint(text.length), &width, &height)
+	return {f32(width), f32(height)}
+}
+
+render :: proc(
+	commands: ^clay.ClayArray(clay.RenderCommand),
+	state: ^ui.State,
+	textures: ^Textures,
+) {
+	clip_stack: [64]sdl.Rect
+	clip_depth := 0
+	for i in 0 ..< commands.length {
+		command := clay.RenderCommandArray_Get(commands, i)
+		box := command.boundingBox
+		#partial switch command.commandType {
+		case .Rectangle:
+			color := command.renderData.rectangle.backgroundColor
+			radius := command.renderData.rectangle.cornerRadius
+			ui.fill_rounded(
+				state,
+				{box.x, box.y, box.width, box.height},
+				max(
+					max(radius.topLeft, radius.topRight),
+					max(radius.bottomLeft, radius.bottomRight),
+				),
+				{u8(color.r), u8(color.g), u8(color.b), u8(color.a)},
+			)
+		case .Image:
+			key := u64(uintptr(command.renderData.image.imageData))
+			ui.draw_texture(state, textures.by_key[key], {box.x, box.y, box.width, box.height})
+		case .Text:
+			text := command.renderData.text
+			color := text.textColor
+			ui.text(
+				state,
+				string(text.stringContents.chars[:text.stringContents.length]),
+				box.x,
+				box.y,
+				f32(text.fontSize) * ui.scale(state),
+				{u8(color.r), u8(color.g), u8(color.b), u8(color.a)},
+				text.fontId,
+			)
+		case .ScissorStart:
+			clip := sdl.Rect{i32(box.x), i32(box.y), i32(box.width), i32(box.height)}
+			if clip_depth > 0 {
+				parent := clip_stack[clip_depth - 1]
+				left := max(clip.x, parent.x)
+				top := max(clip.y, parent.y)
+				right := min(clip.x + clip.w, parent.x + parent.w)
+				bottom := min(clip.y + clip.h, parent.y + parent.h)
+				clip = {left, top, max(0, right - left), max(0, bottom - top)}
+			}
+			if clip_depth < len(clip_stack) {
+				clip_stack[clip_depth] = clip
+				clip_depth += 1
+			}
+			_ = sdl.SetRenderClipRect(state.renderer, &clip)
+		case .ScissorEnd:
+			if clip_depth > 0 {clip_depth -= 1}
+			if clip_depth > 0 {
+				_ = sdl.SetRenderClipRect(state.renderer, &clip_stack[clip_depth - 1])
+			} else {
+				_ = sdl.SetRenderClipRect(state.renderer, nil)
+			}
+		}
+	}
+}
+
+cover_key :: proc(url: string) -> u64 {
+	return library.url_key(url)
+}
+
+// Covers and icons both draw as Clay image elements keyed by a u64.
+image_element :: proc(key: u64, size: f32) {
+	clay.UI()(
+	{
+		layout = {sizing = {width = clay.SizingFixed(size), height = clay.SizingFixed(size)}},
+		image = {imageData = rawptr(uintptr(key))},
+	},
+	)
+}
+
+cover_element :: proc(textures: ^Textures, url: string, size, radius: f32) {
+	if len(url) == 0 || textures.by_key[cover_key(url)] == nil {
+		clay.UI()(
+		{
+			layout = {sizing = {width = clay.SizingFixed(size), height = clay.SizingFixed(size)}},
+			backgroundColor = CARD,
+			cornerRadius = clay.CornerRadiusAll(radius),
+		},
+		)
+		return
+	}
+	// Cover pixels already contain a supersampled rounded alpha edge.
+	image_element(cover_key(url), size)
+}
+
+icon_element :: proc(textures: ^Textures, name: string, tint: Icon_Tint, size: f32) {
+	key := icon_key(name, tint)
+	if textures.by_key[key] == nil {return}
+	image_element(key, size)
+}

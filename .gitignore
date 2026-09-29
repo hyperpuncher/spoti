@@ -1,0 +1,5 @@
+spoti
+spoti.exe
+*.pdb
+build/
+.envrc
