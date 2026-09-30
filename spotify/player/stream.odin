@@ -2,7 +2,6 @@
 package player
 
 import audio "../audio"
-import "core:crypto"
 import "core:sync"
 import "core:sync/chan"
 
@@ -26,9 +25,7 @@ Packet :: struct {
 }
 
 Work :: struct {
-	url:      string, // borrowed until worker exits
-	key:      [16]u8,
-	file_id:  [20]u8,
+	media:    ^audio.Seek_Stream, // owned by the playback source across seeks
 	queue:    chan.Chan(Packet),
 	cancel:   ^bool,
 	start_ms: int,
@@ -36,16 +33,10 @@ Work :: struct {
 
 decode :: proc(pointer: rawptr) -> (ok: bool) {
 	work := (^Work)(pointer)
-	defer crypto.zero_explicit(&work.key, size_of(work.key))
-	media := audio.Seek_Stream {
-		url    = work.url,
-		key    = work.key,
-		file_id = work.file_id,
-		cancel = work.cancel,
-	}
-	defer audio.close_seek_stream(&media)
-	if !audio.open_seek_stream(&media) ||
-	   (work.start_ms > 0 && !audio.seek_to_ms(&media, work.start_ms)) {
+	media := work.media
+	media.failed = false
+	if (media.handle == nil && !audio.open_seek_stream(media)) ||
+	   !audio.seek_to_ms(media, work.start_ms) {
 		if work.cancel == nil ||
 		   !sync.atomic_load(work.cancel) {_ = chan.send(work.queue, Packet{kind = .Failed})}
 		return
@@ -53,8 +44,8 @@ decode :: proc(pointer: rawptr) -> (ok: bool) {
 	for {
 		if work.cancel != nil && sync.atomic_load(work.cancel) {return}
 		pcm := make([]i16, BUFFER_FRAMES * 2)
-		position := audio.seek_frame_position(&media)
-		frames, ok := audio.read_seek_pcm(&media, pcm)
+		position := audio.seek_frame_position(media)
+		frames, ok := audio.read_seek_pcm(media, pcm)
 		if work.cancel != nil && sync.atomic_load(work.cancel) {delete(pcm); return}
 		if !ok || (frames > 0 && media.sample_rate <= 0) {
 			delete(pcm)

@@ -7,6 +7,7 @@ import "core:strings"
 import "core:sync"
 import "core:sync/chan"
 import "core:thread"
+import audio "spotify/audio"
 import library "spotify/library"
 import player "spotify/player"
 import session "spotify/session"
@@ -92,9 +93,11 @@ advance_play_item :: proc(
 Play_Source :: struct {
 	track:  string,
 	source: session.Source,
+	media:  audio.Seek_Stream,
 }
 
 clear_play_source :: proc(cache: ^Play_Source) {
+	audio.close_seek_stream(&cache.media)
 	session.close_source(&cache.source)
 	delete(cache.track)
 	cache^ = {}
@@ -144,10 +147,11 @@ login_and_decode :: proc(pointer: rawptr) {
 		delete(name)
 		return
 	}
+	media := &work.source.media
+	media.url, media.key, media.file_id = source.url, source.key, source.file_id
+	media.cancel = work.cancel
 	decode := player.Work {
-		url      = source.url,
-		key      = source.key,
-		file_id  = source.file_id,
+		media    = media,
 		queue    = work.queue,
 		cancel   = work.cancel,
 		start_ms = work.start_ms,
