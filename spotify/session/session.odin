@@ -22,6 +22,7 @@ Source :: struct {
 	format:      track.Audio_Format,
 	duration_ms: int,
 	key:         [16]u8,
+	file_id:     [20]u8,
 	storage:     [dynamic]u8, // contains the signed URL, never print it
 	url:         string, // view into storage
 }
@@ -125,6 +126,7 @@ open :: proc(
 		if !got_metadata {fmt.eprintln("no supported playable Vorbis file in metadata"); return}
 		source.name = strings.clone(metadata.name)
 		source.format = metadata.format
+		source.file_id = metadata.file_id
 		source.duration_ms = metadata.duration_ms
 		break
 	}

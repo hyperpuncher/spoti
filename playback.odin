@@ -147,6 +147,7 @@ login_and_decode :: proc(pointer: rawptr) {
 	decode := player.Work {
 		url      = source.url,
 		key      = source.key,
+		file_id  = source.file_id,
 		queue    = work.queue,
 		cancel   = work.cancel,
 		start_ms = work.start_ms,

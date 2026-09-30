@@ -6,6 +6,43 @@ import "core:os"
 import "core:testing"
 
 @(test)
+complete_encrypted_disk_cache_decodes_without_a_cdn_url :: proc(t: ^testing.T) {
+	dir, dir_err := os.make_directory_temp("/tmp", "spoti-cached-playback-*", context.allocator)
+	testing.expect(t, dir_err == nil)
+	if dir_err != nil {return}
+	defer {_ = os.remove_all(dir); delete(dir)}
+	ogg, err := os.read_entire_file("spotify/audio/testdata/tone.ogg", context.allocator)
+	testing.expect(t, err == nil)
+	if err != nil {return}
+	defer delete(ogg)
+	ciphertext := make([]u8, SPOTIFY_OGG_OFFSET + len(ogg))
+	defer delete(ciphertext)
+	copy(ciphertext[SPOTIFY_OGG_OFFSET:], ogg)
+	key: [16]u8
+	key[0] = 17
+	cipher := init(key)
+	process(&cipher, ciphertext)
+	reset(&cipher)
+	id: [20]u8
+	id[0] = 19
+	disk := open_disk_cache(id, dir)
+	write_disk_range(&disk, 0, len(ciphertext), ciphertext)
+	close_disk_cache(&disk)
+	media := Seek_Stream {
+		key  = key,
+		disk = open_disk_cache(id, dir),
+	}
+	defer close_seek_stream(&media)
+	opened := open_seek_stream(&media)
+	testing.expect(t, opened, "a complete cache must not require a CDN request")
+	if !opened {return}
+	testing.expect(t, seek_to_ms(&media, 150))
+	pcm: [256]i16
+	frames, ok := read_seek_pcm(&media, pcm[:])
+	testing.expect(t, ok && frames == 128)
+}
+
+@(test)
 vorbisfile_seeks_forward_backward_and_to_eof_with_exact_samples :: proc(t: ^testing.T) {
 	ogg, err := os.read_entire_file("spotify/audio/testdata/tone.ogg", context.allocator)
 	testing.expect(t, err == nil)

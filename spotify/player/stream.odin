@@ -28,6 +28,7 @@ Packet :: struct {
 Work :: struct {
 	url:      string, // borrowed until worker exits
 	key:      [16]u8,
+	file_id:  [20]u8,
 	queue:    chan.Chan(Packet),
 	cancel:   ^bool,
 	start_ms: int,
@@ -39,6 +40,7 @@ decode :: proc(pointer: rawptr) -> (ok: bool) {
 	media := audio.Seek_Stream {
 		url    = work.url,
 		key    = work.key,
+		file_id = work.file_id,
 		cancel = work.cancel,
 	}
 	defer audio.close_seek_stream(&media)

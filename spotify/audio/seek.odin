@@ -41,16 +41,31 @@ Seek_Stream :: struct {
 	cache:                        [dynamic]u8,
 	failed:                       bool,
 	allocator:                    mem.Allocator,
+	file_id:                      [20]u8,
+	disk:                         Disk_Cache,
 }
 
 load_seek_range :: proc(s: ^Seek_Stream, start: int) -> bool {
 	if s.cancel != nil && sync.atomic_load(s.cancel) {s.failed = true; return false}
 	end := start + RANGE_SIZE - 1
 	if s.size > 0 {end = min(end, s.size - 1)}
+	if bytes, found := read_disk_range(&s.disk, start); found {
+		defer delete(bytes)
+		info := http.Range_Info {
+			start = start,
+			end   = start + len(bytes) - 1,
+			total = s.disk.total,
+			valid = true,
+		}
+		return cache_seek_range(s, start, end, info, &bytes)
+	}
 	range := fmt.aprintf("%d-%d", start, end)
 	defer delete(range)
 	info: http.Range_Info
-	bytes, status, ok := http.get(s.url, {range = range, limit = RANGE_SIZE, range_info = &info})
+	bytes, status, ok := http.get(
+		s.url,
+		{range = range, limit = RANGE_SIZE, range_info = &info, cancel = s.cancel},
+	)
 	defer delete(bytes)
 	if !ok || status != 206 || (s.cancel != nil && sync.atomic_load(s.cancel)) {
 		s.failed = true
@@ -77,6 +92,7 @@ cache_seek_range :: proc(
 		s.failed = true
 		return false
 	}
+	write_disk_range(&s.disk, start, info.total, bytes^[:])
 	if len(s.cache) > 0 {crypto.zero_explicit(raw_data(s.cache), len(s.cache))}
 	delete(s.cache)
 	s.cache = bytes^
@@ -136,6 +152,7 @@ seek_tell :: proc "c" (source: rawptr) -> c.long {
 
 open_seek_stream :: proc(s: ^Seek_Stream) -> bool {
 	s.allocator = context.allocator
+	if s.disk.path == "" {s.disk = open_disk_cache(s.file_id)}
 	if s.size == 0 && !load_seek_range(s, 0) {return false}
 	s.handle = spoti_vorbis_open(s, {read = seek_read, seek = seek_position, tell = seek_tell})
 	if s.handle == nil || s.failed {return false}
@@ -145,6 +162,7 @@ open_seek_stream :: proc(s: ^Seek_Stream) -> bool {
 
 close_seek_stream :: proc(s: ^Seek_Stream) {
 	if s.handle != nil {spoti_vorbis_close(s.handle); s.handle = nil}
+	close_disk_cache(&s.disk)
 	crypto.zero_explicit(&s.key, size_of(s.key))
 	if len(s.cache) > 0 {crypto.zero_explicit(raw_data(s.cache), len(s.cache))}
 	delete(s.cache)
