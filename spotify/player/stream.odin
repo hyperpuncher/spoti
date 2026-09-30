@@ -44,16 +44,16 @@ decode :: proc(pointer: rawptr) -> (ok: bool) {
 	for {
 		if work.cancel != nil && sync.atomic_load(work.cancel) {return}
 		pcm := make([]i16, BUFFER_FRAMES * 2)
+		// Each iteration owns its buffer until a successful channel transfer.
+		defer delete(pcm)
 		position := audio.seek_frame_position(media)
 		frames, ok := audio.read_seek_pcm(media, pcm)
-		if work.cancel != nil && sync.atomic_load(work.cancel) {delete(pcm); return}
+		if work.cancel != nil && sync.atomic_load(work.cancel) {return}
 		if !ok || (frames > 0 && media.sample_rate <= 0) {
-			delete(pcm)
 			_ = chan.send(work.queue, Packet{kind = .Failed})
 			return
 		}
 		if frames == 0 {
-			delete(pcm)
 			_ = chan.send(work.queue, Packet{kind = .End})
 			return true
 		}
@@ -66,9 +66,7 @@ decode :: proc(pointer: rawptr) -> (ok: bool) {
 				sample_rate = media.sample_rate,
 				position_frames = position,
 			},
-		) {
-			delete(pcm)
-			return
-		}
+		) {return}
+		pcm = nil // The receiver now owns the complete allocation.
 	}
 }
