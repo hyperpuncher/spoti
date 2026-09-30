@@ -27,6 +27,7 @@ test:
 	odin test spotify/library
 	odin test spotify/track
 	odin test spotify/audio
+	odin test spotify/artwork
 	odin test spotify/http
 
 # Network diagnostic: connects to a Spotify AP without signing in.

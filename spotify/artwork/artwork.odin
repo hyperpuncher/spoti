@@ -19,6 +19,9 @@ free_image :: proc(image: ^Image) {
 
 decode :: proc(encoded: []u8) -> (image: Image, ok: bool) {
 	if len(encoded) == 0 {return}
+	if len(encoded) >= 12 && string(encoded[:4]) == "RIFF" && string(encoded[8:12]) == "WEBP" {
+		return decode_webp(encoded)
+	}
 	width, height, channels: c.int
 	data := stb.load_from_memory(
 		raw_data(encoded),
