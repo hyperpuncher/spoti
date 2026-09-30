@@ -9,9 +9,9 @@ import "core:net"
 import "core:time"
 
 main :: proc() {
-	socket, err := net.dial_tcp("ap.spotify.com:443")
-	if err != nil {
-		fmt.eprintln("could not reach Spotify access point:", err)
+	socket, connection := ap.connect()
+	if connection != .Connected {
+		fmt.eprintln("could not connect to Spotify access point:", connection)
 		return
 	}
 	defer net.close(socket)

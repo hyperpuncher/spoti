@@ -58,8 +58,9 @@ open :: proc(
 	defer oauth.wipe_tokens(&tokens)
 
 	if cancel != nil && sync.atomic_load(cancel) {return}
-	socket, err := net.dial_tcp("ap.spotify.com:443")
-	if err != nil {fmt.eprintln("could not reach Spotify access point:", err); return}
+	socket, connection := ap.connect(cancel)
+	if connection !=
+	   .Connected {fmt.eprintln("could not connect to Spotify access point:", connection); return}
 	defer net.close(socket)
 	_ = net.set_option(socket, .Receive_Timeout, time.Duration(8 * time.Second))
 	_ = net.set_option(socket, .Send_Timeout, time.Duration(8 * time.Second))
