@@ -93,6 +93,7 @@ Login_Work :: struct {
 	cancel:    ^bool,
 	track_url: string, // owned by the worker
 	remember:  bool,
+	start_ms:  int,
 }
 
 login_and_decode :: proc(pointer: rawptr) {
@@ -120,10 +121,11 @@ login_and_decode :: proc(pointer: rawptr) {
 		return
 	}
 	decode := player.Work {
-		url    = source.url,
-		key    = source.key,
-		queue  = work.queue,
-		cancel = work.cancel,
+		url      = source.url,
+		key      = source.key,
+		queue    = work.queue,
+		cancel   = work.cancel,
+		start_ms = work.start_ms,
 	}
 	player.decode(&decode)
 }
@@ -143,6 +145,11 @@ release_worker :: proc(
 		delete(packet.name)
 	}
 	chan.destroy(queue)
+}
+
+seek_position_ms :: proc(x, left, width: f32, duration_ms: int) -> int {
+	if width <= 0 || duration_ms <= 0 {return 0}
+	return min(duration_ms - 1, int(clamp((x - left) / width, 0, 1) * f32(duration_ms)))
 }
 
 duration_text :: proc(duration_ms: int, buffer: []u8) -> string {

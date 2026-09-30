@@ -1,4 +1,4 @@
-// Shared bounded Vorbis decode worker for the separate player and Clay app.
+// Bounded, seekable libvorbisfile playback worker.
 package player
 
 import audio "../audio"
@@ -16,31 +16,45 @@ Packet_Kind :: enum {
 	Failed,
 }
 Packet :: struct {
-	kind:        Packet_Kind,
-	pcm:         []i16, // receiver owns Audio packets
-	sample_rate: int,
-	name:        string, // receiver owns Ready packet names
-	duration_ms: int,
+	kind:            Packet_Kind,
+	pcm:             []i16, // receiver owns Audio packets
+	sample_rate:     int,
+	name:            string, // receiver owns Ready packet names
+	duration_ms:     int,
+	position_frames: int, // absolute PCM position, including a seek offset
+	frames:          int, // valid frames in the owned, fixed-size PCM allocation
 }
 
 Work :: struct {
-	url:    string, // borrowed until worker exits
-	key:    [16]u8,
-	queue:  chan.Chan(Packet),
-	cancel: ^bool,
+	url:      string, // borrowed until worker exits
+	key:      [16]u8,
+	queue:    chan.Chan(Packet),
+	cancel:   ^bool,
+	start_ms: int,
 }
 
 decode :: proc(pointer: rawptr) {
 	work := (^Work)(pointer)
 	defer crypto.zero_explicit(&work.key, size_of(work.key))
-	media := audio.new_stream(work.url, work.key)
-	defer audio.close_stream(&media)
+	media := audio.Seek_Stream {
+		url    = work.url,
+		key    = work.key,
+		cancel = work.cancel,
+	}
+	defer audio.close_seek_stream(&media)
+	if !audio.open_seek_stream(&media) ||
+	   (work.start_ms > 0 && !audio.seek_to_ms(&media, work.start_ms)) {
+		if work.cancel == nil ||
+		   !sync.atomic_load(work.cancel) {_ = chan.send(work.queue, Packet{kind = .Failed})}
+		return
+	}
 	for {
 		if work.cancel != nil && sync.atomic_load(work.cancel) {return}
 		pcm := make([]i16, BUFFER_FRAMES * 2)
-		frames, ok := audio.fill_pcm(&media, pcm)
+		position := audio.seek_frame_position(&media)
+		frames, ok := audio.read_seek_pcm(&media, pcm)
 		if work.cancel != nil && sync.atomic_load(work.cancel) {delete(pcm); return}
-		if !ok || (frames > 0 && media.decoder.sample_rate <= 0) {
+		if !ok || (frames > 0 && media.sample_rate <= 0) {
 			delete(pcm)
 			_ = chan.send(work.queue, Packet{kind = .Failed})
 			return
@@ -52,7 +66,13 @@ decode :: proc(pointer: rawptr) {
 		}
 		if !chan.send(
 			work.queue,
-			Packet{kind = .Audio, pcm = pcm, sample_rate = media.decoder.sample_rate},
+			Packet {
+				kind = .Audio,
+				pcm = pcm,
+				frames = frames,
+				sample_rate = media.sample_rate,
+				position_frames = position,
+			},
 		) {
 			delete(pcm)
 			return

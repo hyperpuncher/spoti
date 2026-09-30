@@ -49,7 +49,9 @@ update_cursor :: proc(
 	client: ^library.Client,
 	resizing: bool,
 	visible: Frame_Visible,
+	seek_enabled: bool,
 ) {
+	if seek_enabled && pointer_over("seek_slider") {ui.set_cursor(state, .Pointer); return}
 	if resizing || pointer_over("sidebar_handle") {
 		ui.set_cursor(state, .Resize)
 		return
@@ -248,6 +250,8 @@ main :: proc() {
 	repeat, replay_pending, play_after_stop := false, false, false
 	shuffle, volume_dragging := false, false
 	volume: f32 = 0.5
+	seek_dragging, start_paused := false, false
+	seek_ms := 0
 	sent_frames, sample_rate, duration_ms := 0, 0, 0
 	displayed_ms := 0
 	last := sdl.GetTicksNS()
@@ -381,6 +385,11 @@ main :: proc() {
 				delete(cover.image.pixels)
 			}
 		}
+		if stop_pressed {
+			seek_dragging, start_paused = false, false
+			seek_ms = 0
+			play_after_stop, replay_pending = false, false
+		}
 		if stop_pressed && worker != nil && stage != .Stopping {
 			sync.atomic_store(&cancel, true)
 			chan.close(queue)
@@ -405,6 +414,7 @@ main :: proc() {
 			}
 		}
 		if stage == .Failed && worker != nil {
+			start_paused = false
 			sync.atomic_store(&cancel, true)
 			if !closed {
 				chan.close(queue)
@@ -445,21 +455,23 @@ main :: proc() {
 						)
 						if stream != nil {
 							_ = sdl.SetAudioStreamGain(stream, volume)
-							_ = sdl.ResumeAudioStreamDevice(stream)
+							if !start_paused {_ = sdl.ResumeAudioStreamDevice(stream)}
 						}
+						sent_frames = packet.position_frames
 						sample_rate = packet.sample_rate
 					}
 					if stream == nil ||
 					   !sdl.PutAudioStreamData(
 							   stream,
 							   raw_data(packet.pcm),
-							   c.int(player.PCM_BYTES),
+							   c.int(packet.frames * 2 * size_of(i16)),
 						   ) {
 						fmt.eprintln("SDL3 audio device or stream failed:", sdl.GetError())
 						stage = .Failed
 					} else {
-						sent_frames += player.BUFFER_FRAMES
-						stage = .Playing
+						sent_frames += packet.frames
+						stage = start_paused ? .Paused : .Playing
+						start_paused = false
 					}
 					delete(packet.pcm)
 				case .End:
@@ -478,9 +490,10 @@ main :: proc() {
 		   stream != nil &&
 		   sdl.GetAudioStreamQueued(stream) == 0 {
 			stage = .Ended
-			if repeat {
+			if !seek_dragging && repeat {
 				replay_pending = true
-			} else if advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover) {
+			} else if !seek_dragging &&
+			   advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover) {
 				replay_pending = true
 			}
 			redraw = true
@@ -498,6 +511,18 @@ main :: proc() {
 			measured_ms := (sent_frames - int(queued) / 4) * 1000 / sample_rate
 			displayed_ms = max(displayed_ms, clamp(measured_ms, 0, duration_ms))
 			progress = f32(displayed_ms) / f32(duration_ms)
+		}
+		shown_ms := displayed_ms
+		seek_enabled :=
+			duration_ms > 0 && (stage == .Playing || stage == .Paused || stage == .Ended)
+		if seek_dragging && seek_enabled {
+			box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
+			mouse_x: f32
+			_ = sdl.GetMouseState(&mouse_x, nil)
+			point := ui.mouse_position(&state, mouse_x, 0)
+			preview := seek_position_ms(point.x, box.x, box.width, duration_ms)
+			progress = f32(preview) / f32(duration_ms)
+			shown_ms = preview
 		}
 		button := "play"
 		if stage == .Playing {button = "pause"}
@@ -535,7 +560,7 @@ main :: proc() {
 			status       = status,
 			button       = button,
 			progress     = progress,
-			elapsed      = duration_text(displayed_ms, times[0][:]),
+			elapsed      = duration_text(shown_ms, times[0][:]),
 			total        = duration_text(duration_ms, times[1][:]),
 			input        = shown_input,
 			cover        = displayed_cover,
@@ -572,7 +597,7 @@ main :: proc() {
 			dt,
 			density,
 		)
-		update_cursor(&state, &library_client, resizing, visible)
+		update_cursor(&state, &library_client, resizing, visible, seek_enabled)
 		_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
 		_ = sdl.RenderClear(state.renderer)
 		render(&commands, &state, &textures)
@@ -710,6 +735,20 @@ main :: proc() {
 			repeat = !repeat
 			replay_pending = repeat && stage == .Ended
 		}
+		seek_requested := false
+		if clicked && seek_enabled && hit("seek_slider", mouse_click) {seek_dragging = true}
+		if seek_dragging {
+			if !seek_enabled {seek_dragging = false} else {
+				if .LEFT not_in buttons {
+					box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
+					seek_ms = seek_position_ms(mouse.x, box.x, box.width, duration_ms)
+					start_paused = stage == .Paused
+					seek_requested = true
+					seek_dragging = false
+				}
+				first_frame = true
+			}
+		}
 		hero_pressed := clicked && hit("hero_play", mouse_click)
 		hero_start := hero_pressed && detail_play_enabled(&library_client)
 		restart_playback := track_selected || hero_start
@@ -729,7 +768,8 @@ main :: proc() {
 		   advance_play_item(play_queue[:], &play_index, track_delta, &selected, &player_cover) {
 			restart_playback = true
 		}
-		if restart_playback {
+		if restart_playback {seek_ms = 0; start_paused = false; seek_dragging = false}
+		if restart_playback || seek_requested {
 			replay_pending = false
 			if worker != nil {
 				sync.atomic_store(&cancel, true)
@@ -759,6 +799,7 @@ main :: proc() {
 							queue     = queue,
 							cancel    = &cancel,
 							track_url = strings.clone(selected),
+							start_ms  = seek_ms,
 							remember  = os.get_env(
 								"SPOTI_REMEMBER_LOGIN",
 								context.temp_allocator,
@@ -777,7 +818,8 @@ main :: proc() {
 							}
 							finished = false
 							sent_frames, sample_rate, duration_ms = 0, 0, 0
-							displayed_ms = 0
+							displayed_ms = seek_ms
+							seek_ms = 0
 							stage = .Signing_In
 						}
 					}

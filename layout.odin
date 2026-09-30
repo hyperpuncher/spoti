@@ -213,31 +213,40 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 					view.elapsed,
 					clay.TextElementConfig{fontId = 1, fontSize = 12, textColor = MUTED},
 				)
-				if clay.UI()(
+				if clay.UI_WithId(clay.ID("seek_slider"))(
 				{
 					layout = {
-						sizing = {
-							width = clay.SizingFixed(300 * d),
-							height = clay.SizingFixed(4 * d),
-						},
+						sizing = {width = clay.SizingFixed(300 * d), height = clay.SizingFixed(24 * d)},
+						childAlignment = {y = .Center},
 					},
-					backgroundColor = CARD,
-					cornerRadius = clay.CornerRadiusAll(2 * d),
 				},
 				) {
-					if view.progress > 0 {
-						clay.UI()(
-						{
-							layout = {
-								sizing = {
-									width = clay.SizingFixed(300 * d * view.progress),
-									height = clay.SizingFixed(4 * d),
-								},
+					if clay.UI()(
+					{
+						layout = {
+							sizing = {
+								width = clay.SizingFixed(300 * d),
+								height = clay.SizingFixed(4 * d),
 							},
-							backgroundColor = WHITE,
-							cornerRadius = clay.CornerRadiusAll(2 * d),
 						},
-						)
+						backgroundColor = CARD,
+						cornerRadius = clay.CornerRadiusAll(2 * d),
+					},
+					) {
+						if view.progress > 0 {
+							clay.UI()(
+							{
+								layout = {
+									sizing = {
+										width = clay.SizingFixed(300 * d * view.progress),
+										height = clay.SizingFixed(4 * d),
+									},
+								},
+								backgroundColor = WHITE,
+								cornerRadius = clay.CornerRadiusAll(2 * d),
+							},
+							)
+						}
 					}
 				}
 				clay.Text(
