@@ -12,6 +12,7 @@ Options :: struct {
 	range:      string, // optional HTTP byte range, e.g. "0-65535"
 	limit:      int,
 	range_info: ^Range_Info, // optional validated Content-Range from a ranged GET
+	cancel:     ^bool, // optional worker cancellation, observed by curl during transfer
 }
 
 Range_Info :: struct {
@@ -61,6 +62,13 @@ range_number :: proc(value: string) -> (number: int, ok: bool) {
 Response_Buffer :: struct {
 	bytes: [dynamic]u8,
 	limit: int,
+}
+
+transfer_progress :: proc "c" (
+	user: rawptr,
+	download_total, downloaded, upload_total, uploaded: i64,
+) -> c.int {
+	return sync.atomic_load((^bool)(user)) ? 1 : 0
 }
 
 curl_once: sync.Once
@@ -160,6 +168,12 @@ request :: proc(
 	   easy_setopt(client, CURL_WRITEFUNCTION, write_response) != 0 ||
 	   easy_setopt(client, CURL_WRITEDATA, &received) != 0 {
 		return nil, 0, false
+	}
+	if options.cancel != nil {
+		if sync.atomic_load(options.cancel) {return nil, 0, false}
+		if easy_setopt(client, CURL_NOPROGRESS, c.long(0)) != 0 ||
+		   easy_setopt(client, CURL_XFERINFOFUNCTION, transfer_progress) != 0 ||
+		   easy_setopt(client, CURL_XFERINFODATA, options.cancel) != 0 {return nil, 0, false}
 	}
 	if options.range_info != nil {
 		options.range_info^ = {}

@@ -3,6 +3,14 @@ package http
 import "core:testing"
 
 @(test)
+cancelled_range_transfer_stops_before_network_work :: proc(t: ^testing.T) {
+	cancel := true
+	bytes, status, ok := get("https://example.invalid/audio", {cancel = &cancel})
+	testing.expect(t, !ok && status == 0 && len(bytes) == 0)
+	delete(bytes)
+}
+
+@(test)
 content_range_requires_complete_consistent_byte_bounds :: proc(t: ^testing.T) {
 	info := parse_content_range("bytes 65536-131071/200000")
 	testing.expect(t, info.valid)
