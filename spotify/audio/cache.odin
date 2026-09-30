@@ -19,6 +19,8 @@ CACHE_BLOCK_META_BYTES :: 5 // presence byte plus ciphertext CRC32
 
 // One sparse file contains range metadata and the original encrypted bytes.
 // No audio key, token, signed URL, track title, or decoded PCM reaches disk.
+// Each handle belongs to one worker. The shared lock only coordinates file
+// creation/eviction and active-path registration, not steady-state range I/O.
 Disk_Cache :: struct {
 	file:            ^os.File,
 	path, directory: string,
@@ -140,8 +142,6 @@ cache_make_room :: proc(directory: string, limit, reserve: i64) -> bool {
 
 read_disk_range :: proc(cache: ^Disk_Cache, start: int) -> (bytes: [dynamic]u8, found: bool) {
 	if cache.file == nil || start < 0 || start >= cache.total || start % RANGE_SIZE != 0 {return}
-	sync.mutex_lock(&cache_mutex)
-	defer sync.mutex_unlock(&cache_mutex)
 	index := start / RANGE_SIZE * CACHE_BLOCK_META_BYTES
 	if cache.blocks[index] != 1 {return}
 	bytes = make([dynamic]u8, min(RANGE_SIZE, cache.total - start))
@@ -169,9 +169,8 @@ write_disk_range :: proc(cache: ^Disk_Cache, start, total: int, bytes: []u8) {
 	   start >= total ||
 	   start % RANGE_SIZE != 0 ||
 	   len(bytes) != min(RANGE_SIZE, total - start) {return}
-	sync.mutex_lock(&cache_mutex)
-	defer sync.mutex_unlock(&cache_mutex)
 	if cache.file == nil {
+		sync.mutex_guard(&cache_mutex)
 		payload := cache_payload_offset(total)
 		if i64(payload + total) > cache.limit {return}
 		err := os.make_directory_all(cache.directory)

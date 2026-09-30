@@ -3,7 +3,55 @@ package audio
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:thread"
 import "core:time"
+
+@(test)
+independent_cache_handles_read_and_write_concurrently :: proc(t: ^testing.T) {
+	dir, err := os.make_directory_temp("/tmp", "spoti-audio-parallel-*", context.allocator)
+	if !testing.expect(t, err == nil) {return}
+	defer {_ = os.remove_all(dir); delete(dir)}
+	Work :: struct {
+		cache: Disk_Cache,
+		byte:  u8,
+		ok:    bool,
+	}
+	works: [2]Work
+	workers: [2]^thread.Thread
+	defer {
+		for worker in workers {if worker != nil {thread.join(worker); thread.destroy(worker)}}
+		for &work in works {close_disk_cache(&work.cache)}
+	}
+	for &work, index in works {
+		id: [20]u8
+		id[0] = u8(index + 20)
+		work.cache = open_disk_cache(id, dir)
+		work.byte = u8(index + 1)
+		bytes: [RANGE_SIZE]u8
+		for &byte in bytes {byte = work.byte}
+		write_disk_range(&work.cache, 0, 2 * RANGE_SIZE, bytes[:])
+		workers[index] = thread.create_and_start_with_data(&work, proc(pointer: rawptr) {
+			work := (^Work)(pointer)
+			bytes: [RANGE_SIZE]u8
+			for &byte in bytes {byte = work.byte}
+			write_disk_range(&work.cache, RANGE_SIZE, 2 * RANGE_SIZE, bytes[:])
+			work.ok = true
+			for start in ([]int{0, RANGE_SIZE}) {
+				cached, found := read_disk_range(&work.cache, start)
+				defer delete(cached)
+				work.ok = work.ok && found && len(cached) == RANGE_SIZE
+				for byte in cached {work.ok = work.ok && byte == work.byte}
+			}
+		})
+		if !testing.expect(t, workers[index] != nil) {return}
+	}
+	for &worker, index in workers {
+		thread.join(worker)
+		thread.destroy(worker)
+		worker = nil
+		testing.expect(t, works[index].ok)
+	}
+}
 
 @(test)
 encrypted_ranges_survive_reopening_and_missing_ranges_stay_missing :: proc(t: ^testing.T) {
