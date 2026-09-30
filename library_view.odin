@@ -168,10 +168,9 @@ sidebar :: proc(
 		) {
 			page := &client.pages[filter]
 			// Cards own their padding, so rows do not add a second outer gap.
-			gap: f32 = 0
 			usable := max(180 * d, width * d - 36 * d)
-			columns := clamp(int((usable + gap) / (140 * d + gap)), 2, 4)
-			card_width := (usable - f32(columns - 1) * gap) / f32(columns)
+			columns := clamp(int(usable / (140 * d)), 2, 4)
+			card_width := usable / f32(columns)
 			row_height := card_row_height(card_width, card_text_height, d)
 			visible = scroll_items(
 				"library_grid",
@@ -182,9 +181,7 @@ sidebar :: proc(
 			)
 			list_spacer(visible.before)
 			for index := visible.first; index < visible.last; index += columns {
-				if clay.UI()(
-				{layout = {sizing = {height = clay.SizingFixed(row_height)}, childGap = u16(gap)}},
-				) {
+				if clay.UI()({layout = {sizing = {height = clay.SizingFixed(row_height)}}}) {
 					for column in 0 ..< columns {
 						next := index + column
 						if next >= len(page.items) {break}

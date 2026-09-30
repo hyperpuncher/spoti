@@ -147,6 +147,21 @@ load_more_near_bottom :: proc(client: ^library.Client, filter: library.Kind, d: 
 	if remaining <= 480 * d {library.more(client, filter)}
 }
 
+// Spend the frame's request budget only when the artwork worker accepts it.
+ensure_cover :: proc(client: ^library.Client, textures: ^Textures, url: string, budget: ^int) {
+	if budget^ == 0 || url == "" {return}
+	key := cover_key(url)
+	previous := textures.requested[key]
+	if key in textures.by_key || previous.pending || previous.attempts >= 2 {return}
+	if library.request_cover(client, url, key) {
+		textures.requested[key] = {
+			pending  = true,
+			attempts = previous.attempts + 1,
+		}
+		budget^ -= 1
+	}
+}
+
 ensure_covers :: proc(
 	client: ^library.Client,
 	textures: ^Textures,
@@ -154,33 +169,21 @@ ensure_covers :: proc(
 	player_cover: string,
 	visible: Frame_Visible,
 ) {
-	urls: [dynamic]string
-	defer delete(urls)
-	append(&urls, player_cover)
-	for entry in client.pages[filter].items[visible.cards.first:visible.cards.last] {append(&urls, entry.image)}
-	if client.detail.ready {
-		append(&urls, client.detail.image)
-		append(&urls, client.detail.image_preview)
-		append(&urls, client.detail.image_small)
-		for row in client.detail.rows[visible.tracks.first:visible.tracks.last] {
-			append(&urls, row.image)
-			append(&urls, row.image_small)
-		}
-		for release in client.detail.releases[visible.releases.first:visible.releases.last] {append(&urls, release.image)}
+	budget := 4
+	ensure_cover(client, textures, player_cover, &budget)
+	for entry in client.pages[filter].items[visible.cards.first:visible.cards.last] {
+		ensure_cover(client, textures, entry.image, &budget)
 	}
-	requested := 0
-	for url in urls {
-		if requested >= 4 {break}
-		if len(url) == 0 {continue}
-		key := cover_key(url)
-		previous := textures.requested[key]
-		if key in textures.by_key || previous.pending || previous.attempts >= 2 {continue}
-		if library.request_cover(client, url, key) {
-			textures.requested[key] = {
-				pending  = true,
-				attempts = previous.attempts + 1,
-			}
-			requested += 1
+	if client.detail.ready {
+		ensure_cover(client, textures, client.detail.image, &budget)
+		ensure_cover(client, textures, client.detail.image_preview, &budget)
+		ensure_cover(client, textures, client.detail.image_small, &budget)
+		for row in client.detail.rows[visible.tracks.first:visible.tracks.last] {
+			ensure_cover(client, textures, row.image, &budget)
+			ensure_cover(client, textures, row.image_small, &budget)
+		}
+		for release in client.detail.releases[visible.releases.first:visible.releases.last] {
+			ensure_cover(client, textures, release.image, &budget)
 		}
 	}
 }
