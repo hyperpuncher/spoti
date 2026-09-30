@@ -38,6 +38,8 @@
 - `ui/font.odin`: fontconfig and per-size SDL_ttf cache
 - `spotify/library/`: Web API auth, pagination, detail pages, cache, cover worker
 - `spotify/player/stream.odin`: bounded decode worker
+- `spotify/session/connection.odin`: shared AP connection, serialized requests, idle ping handling and reconnect
+- `ui/text.odin`: SDL_ttf text pool bounded by the visible frame
 - `spotify/ap/`, `spotify/audio/`, `spotify/track/`: Spotify protocol and streaming
 
 ## product rules

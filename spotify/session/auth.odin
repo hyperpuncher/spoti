@@ -23,6 +23,7 @@ clone_authorization :: proc(tokens: oauth.Tokens) -> oauth.Tokens {
 }
 
 clear_authorization :: proc() {
+	clear_connection()
 	sync.mutex_guard(&authorization_mutex)
 	oauth.wipe_tokens(&authorization_tokens)
 }

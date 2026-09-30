@@ -1,5 +1,5 @@
-// One-track Spotify session. Login, track metadata, key and CDN resolution
-// are shared by the diagnostic and the streaming player.
+// Persistent AP login, track metadata, keys and CDN resolution, shared by
+// the diagnostic, playback and next-track preload workers.
 package session
 
 import ap "../ap"
@@ -10,10 +10,8 @@ import track "../track"
 import "core:crypto"
 import "core:encoding/hex"
 import "core:fmt"
-import "core:net"
 import "core:strings"
 import "core:sync"
-import "core:time"
 
 TRACK_URL :: "https://open.spotify.com/track/1TifAMm1r1MascYZ5xGiQk"
 
@@ -32,6 +30,7 @@ close_source :: proc(source: ^Source) {
 	crypto.zero_explicit(raw_data(source.storage), len(source.storage))
 	delete(source.storage)
 	delete(source.name)
+	source^ = {}
 }
 
 // Only encrypted audio ranges may be cached on disk. Audio keys and signed
@@ -52,140 +51,114 @@ open :: proc(
 	ok: bool,
 ) {
 	defer if !ok {close_source(&source)}
-	id, valid_id := track.parse_id(track_url)
-	if !valid_id {fmt.eprintln("invalid Spotify track link or URI"); return}
+	id, valid := track.parse_id(track_url)
+	if !valid {fmt.eprintln("invalid Spotify track link or URI"); return}
 	tokens, authorized := authorize(keyring_mode, cancel)
 	if !authorized {return}
 	defer oauth.wipe_tokens(&tokens)
-
-	if cancel != nil && sync.atomic_load(cancel) {return}
-	socket, connection := ap.connect(cancel)
-	if connection !=
-	   .Connected {fmt.eprintln("could not connect to Spotify access point:", connection); return}
-	defer net.close(socket)
-	_ = net.set_option(socket, .Receive_Timeout, time.Duration(8 * time.Second))
-	_ = net.set_option(socket, .Send_Timeout, time.Duration(8 * time.Second))
-	keys, handshake_error := ap.handshake(socket)
-	if handshake_error != .None {fmt.eprintln("AP handshake failed:", handshake_error); return}
-	defer crypto.zero_explicit(&keys, size_of(keys))
-	sender := ap.packet_cipher(keys.send[:])
-	receiver := ap.packet_cipher(keys.receive[:])
-	defer {
-		crypto.zero_explicit(&sender, size_of(sender))
-		crypto.zero_explicit(&receiver, size_of(receiver))
-	}
-	device_bytes: [20]u8
-	crypto.rand_bytes(device_bytes[:])
-	device_id := hex.encode(device_bytes[:])
-	crypto.zero_explicit(&device_bytes, size_of(device_bytes))
-	defer delete(device_id)
-	body := ap.client_login_token(tokens.access, string(device_id))
-	defer {crypto.zero_explicit(raw_data(body), len(body)); delete(body)}
-	packet := ap.seal_packet(&sender, 0xab, body[:])
-	defer {crypto.zero_explicit(raw_data(packet), len(packet)); delete(packet)}
-	if packet == nil ||
-	   !ap.send_full(socket, packet[:]) {fmt.eprintln("AP login could not be sent"); return}
-	command, response, received := ap.read_packet(socket, &receiver)
-	if !received {fmt.eprintln("AP login response missing or invalid MAC"); return}
-	defer {crypto.zero_explicit(raw_data(response), len(response)); delete(response)}
-	_, failure, kind := ap.parse_login_reply(command, response)
-	switch kind {
-	case .Welcome:
-		fmt.println("Playback connection authenticated.")
-	case .Failure:
-		fmt.eprintln("AP login refused; Spotify error code:", failure); return
-	case .Invalid:
-		fmt.eprintln("unexpected AP login response"); return
-	}
-
-	track_hex := track.hex_id(id)
-	defer delete(track_hex)
-	uri := fmt.aprintf("hm://metadata/4/track/%s", track_hex)
-	defer delete(uri)
-	request := ap.mercury_get(uri, 0)
-	defer delete(request)
-	wire := ap.seal_packet(&sender, 0xb2, request[:])
-	defer delete(wire)
-	if wire == nil ||
-	   !ap.send_full(
-			   socket,
-			   wire[:],
-		   ) {fmt.eprintln("track metadata request could not be sent"); return}
-	metadata: track.Metadata
-	got_metadata := false
-	for _ in 0 ..< 12 {
-		cmd, reply, received := ap.read_packet(socket, &receiver)
-		if !received {fmt.eprintln("track metadata response missing or invalid MAC"); return}
-		defer delete(reply)
-		if cmd == 0x04 {send_pong(socket, &sender); continue}
-		if cmd != 0xb2 {continue}
-		payload, code, parsed := ap.mercury_body(reply, 0)
-		if !parsed ||
-		   code != 200 {fmt.eprintln("track metadata response invalid or refused:", code); return}
-		metadata, got_metadata = track.parse_metadata(payload, id)
-		if !got_metadata {fmt.eprintln("no supported playable Vorbis file in metadata"); return}
-		source.name = strings.clone(metadata.name)
-		source.format = metadata.format
-		source.file_id = metadata.file_id
-		source.duration_ms = metadata.duration_ms
-		break
-	}
-	if !got_metadata {fmt.eprintln("track metadata reply not seen"); return}
-	if cancel != nil && sync.atomic_load(cancel) {return}
-	fmt.println("track metadata found:", source.name, "(Vorbis format", source.format, ")")
-
-	key_request := ap.request_audio_key(metadata.file_id, id, 0)
-	key_packet := ap.seal_packet(&sender, 0x0c, key_request[:])
-	defer delete(key_packet)
-	if key_packet == nil ||
-	   !ap.send_full(
-			   socket,
-			   key_packet[:],
-		   ) {fmt.eprintln("audio key request could not be sent"); return}
-	got_key := false
-	for _ in 0 ..< 12 {
-		cmd, reply, received := ap.read_packet(socket, &receiver)
-		if !received {fmt.eprintln("audio key response missing or invalid MAC"); return}
-		defer {crypto.zero_explicit(raw_data(reply), len(reply)); delete(reply)}
-		if cmd == 0x04 {send_pong(socket, &sender); continue}
-		if cmd != 0x0d && cmd != 0x0e {continue}
-		key_result: ap.Audio_Key_Result
-		source.key, key_result = ap.read_audio_key(cmd, reply, 0)
-		switch key_result {
-		case .Granted:
-			got_key = true
-		case .Refused:
-			fmt.eprintln("Spotify refused the audio key"); return
-		case .Invalid:
-			fmt.eprintln("invalid audio key reply"); return
-		}
-		break
-	}
-	if !got_key {fmt.eprintln("audio key reply not seen"); return}
-	if cancel != nil && sync.atomic_load(cancel) {return}
-	fmt.println("audio key granted.")
-
-	file_hex := hex.encode(metadata.file_id[:])
+	source, ok = resolve_ap_source(tokens.access, id, cancel)
+	if !ok {return}
+	ok = false
+	if cancelled(cancel) {return}
+	file_hex := hex.encode(source.file_id[:])
 	defer delete(file_hex)
 	endpoint := fmt.aprintf(
 		"https://spclient.wg.spotify.com/storage-resolve/files/audio/interactive/%s",
 		string(file_hex),
 	)
 	defer delete(endpoint)
-	storage, status_code, fetched := http.get(endpoint, {bearer = tokens.access})
-	if !fetched {fmt.eprintln("CDN resolver request failed"); return}
+	storage, status, fetched := http.get(endpoint, {bearer = tokens.access, cancel = cancel})
 	source.storage = storage
-	if status_code != 200 {fmt.eprintln("CDN resolver returned HTTP", status_code); return}
-	resolved: bool
-	source.url, resolved = audio.cdn_url(storage[:], metadata.file_id)
-	if !resolved {fmt.eprintln("CDN resolver did not return a usable URL"); return}
+	if !fetched {fmt.eprintln("CDN resolver request failed"); return}
+	if status != 200 {fmt.eprintln("CDN resolver returned HTTP", status); return}
+	source.url, ok = audio.cdn_url(storage[:], source.file_id)
+	if !ok {fmt.eprintln("CDN resolver did not return a usable URL"); return}
 	fmt.println("CDN URL resolved.")
 	return source, true
 }
 
-send_pong :: proc(socket: net.TCP_Socket, sender: ^ap.Packet_Cipher) {
-	pong := ap.seal_packet(sender, 0x49, []u8{0, 0, 0, 0})
-	if pong != nil {ap.send_full(socket, pong[:]); delete(pong)}
+resolve_ap_source :: proc(access: string, id: [16]u8, cancel: ^bool) -> (Source, bool) {
+	if !lock_connection(cancel) {return {}, false}
+	defer sync.unlock(&connection_mutex)
+	if !start_connection_worker() {return {}, false}
+	return resolve_ap_connection(&connection, access, id, cancel)
+}
+
+resolve_ap_connection :: proc(
+	c: ^AP_Connection,
+	access: string,
+	id: [16]u8,
+	cancel: ^bool,
+	connect: proc(_: ^AP_Connection, _: string, _: ^bool) -> bool = connect_connection,
+) -> (
+	Source,
+	bool,
+) {
+	for attempt in 0 ..< 2 {
+		if cancelled(cancel) {close_connection(c); return {}, false}
+		reused := c.connected
+		if !c.connected && !connect(c, access, cancel) {return {}, false}
+		source, ok := fetch_ap_source(c, id, cancel)
+		if ok {return source, true}
+		broken := c.broken
+		// Drop a canceled transaction, including any unread late replies.
+		close_connection(c)
+		if !reused || !broken || cancelled(cancel) || attempt == 1 {return {}, false}
+	}
+	return {}, false
+}
+
+fetch_ap_source :: proc(
+	c: ^AP_Connection,
+	id: [16]u8,
+	cancel: ^bool,
+) -> (
+	source: Source,
+	ok: bool,
+) {
+	defer if !ok {close_source(&source)}
+	if cancelled(cancel) || c.sequence == max(u32) {return}
+	sequence := c.sequence
+	c.sequence += 1
+	track_hex := track.hex_id(id)
+	defer delete(track_hex)
+	uri := fmt.aprintf("hm://metadata/4/track/%s", track_hex)
+	defer delete(uri)
+	request := ap.mercury_get(uri, u64(sequence))
+	defer delete(request)
+	if !send_connection_packet(c, 0xb2, request[:]) {return}
+	got_metadata := false
+	for _ in 0 ..< 64 {
+		command, reply, received := read_connection_reply(c, cancel)
+		if !received {return}
+		defer delete(reply)
+		if command != 0xb2 {continue}
+		payload, code, parsed := ap.mercury_body(reply, u64(sequence))
+		if !parsed ||
+		   code != 200 {fmt.eprintln("track metadata response invalid or refused:", code); return}
+		metadata, valid := track.parse_metadata(payload, id)
+		if !valid {fmt.eprintln("no supported playable Vorbis file in metadata"); return}
+		source.name = strings.clone(metadata.name)
+		source.format, source.file_id, source.duration_ms =
+			metadata.format, metadata.file_id, metadata.duration_ms
+		got_metadata = true
+		break
+	}
+	if !got_metadata || cancelled(cancel) {return}
+	key_request := ap.request_audio_key(source.file_id, id, sequence)
+	if !send_connection_packet(c, 0x0c, key_request[:]) {return}
+	for _ in 0 ..< 64 {
+		command, reply, received := read_connection_reply(c, cancel)
+		if !received {return}
+		defer {crypto.zero_explicit(raw_data(reply), len(reply)); delete(reply)}
+		if command != 0x0d && command != 0x0e {continue}
+		result: ap.Audio_Key_Result
+		source.key, result = ap.read_audio_key(command, reply, sequence)
+		if result != .Granted {fmt.eprintln("audio key refused or invalid"); return}
+		if cancelled(cancel) {return}
+		return source, true
+	}
+	return
 }
 
 // Optional first-range check, used by the non-playing diagnostic.
