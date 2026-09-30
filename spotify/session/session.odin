@@ -34,9 +34,9 @@ close_source :: proc(source: ^Source) {
 	delete(source.name)
 }
 
-// Make one authenticated session. Audio is never saved on disk; with explicit
-// opt-in, only a refresh grant is saved in the system keyring. Never print the
-// callback URL or any tokens.
+// Only encrypted audio ranges may be cached on disk. Audio keys and signed
+// URLs stay in memory; refresh grants require explicit keyring opt-in.
+// Never print the callback URL or any tokens.
 Keyring_Mode :: enum {
 	None,
 	Restore,
