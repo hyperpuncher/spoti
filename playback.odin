@@ -88,29 +88,53 @@ advance_play_item :: proc(
 	return true
 }
 
+// Accessed only by the decode worker; main clears it after joining that worker.
+Play_Source :: struct {
+	track:  string,
+	source: session.Source,
+}
+
+clear_play_source :: proc(cache: ^Play_Source) {
+	session.close_source(&cache.source)
+	delete(cache.track)
+	cache^ = {}
+}
+
+cached_play_source :: proc(cache: ^Play_Source, uri: string) -> ^session.Source {
+	if cache.track == uri && cache.source.url != "" {return &cache.source}
+	return nil
+}
+
 Login_Work :: struct {
 	queue:     chan.Chan(player.Packet),
 	cancel:    ^bool,
 	track_url: string, // owned by the worker
 	remember:  bool,
 	start_ms:  int,
+	source:    ^Play_Source,
 }
 
 login_and_decode :: proc(pointer: rawptr) {
 	work := (^Login_Work)(pointer)
 	defer delete(work.track_url)
-	source, authorized := session.open(
-		work.remember ? .Remember : .Restore,
-		work.cancel,
-		work.track_url,
-	)
-	if !authorized {
-		if !sync.atomic_load(work.cancel) {
-			_ = chan.send(work.queue, player.Packet{kind = .Failed})
+	source := cached_play_source(work.source, work.track_url)
+	if source == nil {
+		clear_play_source(work.source)
+		fresh, authorized := session.open(
+			work.remember ? .Remember : .Restore,
+			work.cancel,
+			work.track_url,
+		)
+		if !authorized {
+			if !sync.atomic_load(
+				work.cancel,
+			) {_ = chan.send(work.queue, player.Packet{kind = .Failed})}
+			return
 		}
-		return
+		work.source.track = strings.clone(work.track_url)
+		work.source.source = fresh
+		source = &work.source.source
 	}
-	defer session.close_source(&source)
 	if sync.atomic_load(work.cancel) {return}
 	name := strings.clone(source.name)
 	if !chan.send(
@@ -127,7 +151,10 @@ login_and_decode :: proc(pointer: rawptr) {
 		cancel   = work.cancel,
 		start_ms = work.start_ms,
 	}
-	player.decode(&decode)
+	if !player.decode(&decode) && !sync.atomic_load(work.cancel) {
+		// A failed/expired CDN source must be resolved afresh on the next attempt.
+		clear_play_source(work.source)
+	}
 }
 
 release_worker :: proc(

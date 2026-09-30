@@ -1,7 +1,29 @@
 package main
 
+import "core:strings"
 import "core:testing"
 import library "spotify/library"
+
+@(test)
+resolved_track_source_is_reused_only_for_the_same_track_and_cleared :: proc(t: ^testing.T) {
+	cache := Play_Source {
+		track = strings.clone("first"),
+	}
+	cache.source.name = strings.clone("title")
+	cache.source.storage = make([dynamic]u8)
+	append(&cache.source.storage, ..([]u8{1, 2, 3}))
+	cache.source.url = string(cache.source.storage[:])
+	cache.source.key[0] = 42
+	testing.expect(t, cached_play_source(&cache, "first") == &cache.source)
+	testing.expect(t, cached_play_source(&cache, "second") == nil)
+	clear_play_source(&cache)
+	testing.expect(t, cached_play_source(&cache, "first") == nil)
+	testing.expect(
+		t,
+		cache.track == "" && len(cache.source.storage) == 0 && cache.source.key[0] == 0,
+	)
+	clear_play_source(&cache)
+}
 
 @(test)
 seek_slider_maps_drag_positions_and_clamps_to_playable_time :: proc(t: ^testing.T) {

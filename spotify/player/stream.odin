@@ -33,7 +33,7 @@ Work :: struct {
 	start_ms: int,
 }
 
-decode :: proc(pointer: rawptr) {
+decode :: proc(pointer: rawptr) -> (ok: bool) {
 	work := (^Work)(pointer)
 	defer crypto.zero_explicit(&work.key, size_of(work.key))
 	media := audio.Seek_Stream {
@@ -62,7 +62,7 @@ decode :: proc(pointer: rawptr) {
 		if frames == 0 {
 			delete(pcm)
 			_ = chan.send(work.queue, Packet{kind = .End})
-			return
+			return true
 		}
 		if !chan.send(
 			work.queue,

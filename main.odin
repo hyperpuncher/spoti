@@ -212,6 +212,7 @@ main :: proc() {
 	queue: chan.Chan(player.Packet)
 	worker: ^thread.Thread
 	work: Login_Work
+	play_source: Play_Source
 	cancel, closed := false, false
 	stream: ^sdl.AudioStream
 	title: string
@@ -232,6 +233,7 @@ main :: proc() {
 	resizing := false
 	defer {
 		if worker != nil {release_worker(worker, queue, &cancel, closed)}
+		clear_play_source(&play_source)
 		if stream != nil {sdl.DestroyAudioStream(stream)}
 		library.stop(&library_client)
 		session.clear_authorization()
@@ -800,6 +802,7 @@ main :: proc() {
 							cancel    = &cancel,
 							track_url = strings.clone(selected),
 							start_ms  = seek_ms,
+							source    = &play_source,
 							remember  = os.get_env(
 								"SPOTI_REMEMBER_LOGIN",
 								context.temp_allocator,
