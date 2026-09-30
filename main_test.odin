@@ -7,6 +7,7 @@ import "core:testing"
 import "core:thread"
 import library "spotify/library"
 import clay "vendor/clay"
+import sdl "vendor:sdl3"
 
 layout_test_measure :: proc "c" (
 	text: clay.StringSlice,
@@ -43,6 +44,8 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		entry.name = "Album title"
 		entry.subtitle = "Artist name"
 	}
+	client.pages[.Albums].items[0].uri = "spotify:album:selected"
+	client.detail.id = "selected"
 	client.detail.ready = true
 	client.detail.name = "Album"
 	client.detail.label = "Album"
@@ -60,7 +63,12 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		release.name = "Release"
 		release.subtitle = "2026"
 	}
-	textures: Textures
+	textures := Textures {
+		by_key = make(map[u64]^sdl.Texture),
+	}
+	fake_icon: sdl.Texture
+	textures.by_key[icon_key("play-filled", .Dark)] = &fake_icon
+	textures.by_key[icon_key("pause-filled", .Dark)] = &fake_icon
 	defer {
 		delete(textures.by_key)
 		delete(textures.requested)
@@ -76,7 +84,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 				for _ in 0 ..< 2 {
 					clay.UpdateScrollContainers(false, {}, 0)
 					_, _ = layout(
-						{},
+						{button = "pause"},
 						&client,
 						.Albums,
 						&textures,
@@ -101,7 +109,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 							)
 					}
 					commands, visible := layout(
-						{},
+						{button = "pause"},
 						&client,
 						.Albums,
 						&textures,
@@ -113,6 +121,40 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						d,
 					)
 					testing.expect_value(t, errors, 0)
+					if source == .Album && fraction == 0 {
+						found_selected, hero_play, footer_pause := false, false, false
+						for command in commands.internalArray[:commands.length] {
+							if command.commandType == .Image {
+								key := u64(uintptr(command.renderData.image.imageData))
+								if key == icon_key("play-filled", .Dark) {hero_play = true}
+								if key == icon_key("pause-filled", .Dark) {footer_pause = true}
+							}
+							if command.id == clay.ID("card", 0).id &&
+							   command.commandType == .Rectangle {
+								found_selected =
+									command.renderData.rectangle.backgroundColor == SELECTED
+							}
+						}
+						testing.expect(
+							t,
+							hero_play && footer_pause,
+							"detail play must remain play while the footer shows pause",
+						)
+						testing.expect(
+							t,
+							found_selected,
+							"selected cards need a persistent subtle background",
+						)
+					}
+					testing.expect(t, !clay.GetElementData(clay.ID("toolbar_home")).found)
+					testing.expect(t, !clay.GetElementData(clay.ID("toolbar_search")).found)
+					testing.expect(t, clay.GetElementData(clay.ID("toolbar_library")).found)
+					input := clay.GetElementData(clay.ID("track_input"))
+					testing.expect(
+						t,
+						input.found && input.boundingBox.x < 120 * d,
+						"removed buttons must not leave empty toolbar space",
+					)
 					testing.expect(
 						t,
 						commands.length < 1000,
@@ -168,7 +210,7 @@ cover_requests_follow_visible_cards_and_player :: proc(t: ^testing.T) {
 	client.pages[.Albums].items[1].image = "visible"
 	client.pages[.Albums].items[2].image = "offscreen-after"
 	textures := Textures {
-		requested = make(map[u64]bool),
+		requested = make(map[u64]Cover_Request_State),
 	}
 	defer delete(textures.requested)
 	visible := Frame_Visible {
@@ -187,6 +229,73 @@ cover_requests_follow_visible_cards_and_player :: proc(t: ^testing.T) {
 	// Already-requested covers must not be queued every frame.
 	ensure_covers(&client, &textures, .Albums, "player", visible)
 	testing.expect_value(t, client.covers_pending, 2)
+	key := cover_key("visible")
+	// A failed completion permits exactly one retry, not a request every frame.
+	state := textures.requested[key]
+	state.pending = false
+	textures.requested[key] = state
+	ensure_covers(&client, &textures, .Albums, "player", visible)
+	request, received := chan.try_recv(requests)
+	testing.expect(t, received)
+	testing.expect_value(t, request.url, "visible")
+	delete(request.url)
+	testing.expect_value(t, textures.requested[key].attempts, u8(2))
+	state = textures.requested[key]
+	state.pending = false
+	textures.requested[key] = state
+	ensure_covers(&client, &textures, .Albums, "player", visible)
+	_, received = chan.try_recv(requests)
+	testing.expect(t, !received, "exhausted failures must not loop forever")
+	retry_failed_covers(&textures)
+	ensure_covers(&client, &textures, .Albums, "player", visible)
+	request, received = chan.try_recv(requests)
+	testing.expect(t, received)
+	testing.expect_value(t, request.url, "visible")
+	delete(request.url)
+	testing.expect(
+		t,
+		textures.requested[cover_key("player")].pending,
+		"reselecting must not duplicate pending downloads",
+	)
+}
+
+@(test)
+player_cover_remains_until_the_replacement_texture_is_ready :: proc(t: ^testing.T) {
+	textures := Textures {
+		by_key = make(map[u64]^sdl.Texture),
+	}
+	defer delete(textures.by_key)
+	fake: sdl.Texture
+	textures.by_key[cover_key("first")] = &fake
+	displayed: string
+	defer delete(displayed)
+	retain_player_cover(&displayed, "first", &textures)
+	testing.expect_value(t, displayed, "first")
+	retain_player_cover(&displayed, "next", &textures)
+	testing.expect_value(t, displayed, "first")
+	textures.by_key[cover_key("next")] = &fake
+	retain_player_cover(&displayed, "next", &textures)
+	testing.expect_value(t, displayed, "next")
+}
+
+@(test)
+selected_card_matches_both_source_and_id :: proc(t: ^testing.T) {
+	detail := library.Detail {
+		ready  = true,
+		source = .Playlist,
+		id     = "same-id",
+	}
+	entry := library.Entry {
+		uri = "spotify:playlist:same-id",
+	}
+	testing.expect(t, card_selected(&entry, &detail))
+	entry.uri = "spotify:album:same-id"
+	testing.expect(t, !card_selected(&entry, &detail))
+	detail.source = .Album
+	testing.expect(t, card_selected(&entry, &detail))
+	detail.ready = false
+	testing.expect(t, !card_selected(&entry, &detail))
+	testing.expect(t, SELECTED.r > SIDEBAR.r && SELECTED.r < HOVER.r)
 }
 
 @(test)

@@ -2,6 +2,7 @@ package main
 
 import "core:fmt"
 import "core:math"
+import "core:strings"
 import library "spotify/library"
 import clay "vendor/clay"
 
@@ -65,12 +66,29 @@ card_row_height :: proc(card_width, text_height, d: f32) -> f32 {
 	)
 }
 
+card_selected :: proc(entry: ^library.Entry, detail: ^library.Detail) -> bool {
+	if !detail.ready {return false}
+	prefix: string
+	switch detail.source {
+	case .Album:
+		prefix = "spotify:album:"
+	case .Playlist:
+		prefix = "spotify:playlist:"
+	case .Artist:
+		prefix = "spotify:artist:"
+	case .Liked:
+		return false
+	}
+	return strings.has_prefix(entry.uri, prefix) && entry.uri[len(prefix):] == detail.id
+}
+
 library_card :: proc(
 	textures: ^Textures,
 	entry: ^library.Entry,
 	index: u32,
 	card_width, d: f32,
 	id: string = "card",
+	selected: bool = false,
 ) {
 	hovered := clay.PointerOver(clay.ID(id, index))
 	padding := 8 * d
@@ -83,7 +101,7 @@ library_card :: proc(
 			padding = clay.PaddingAll(u16(padding)),
 			childGap = u16(7 * d),
 		},
-		backgroundColor = hovered ? HOVER : clay.Color{},
+		backgroundColor = hovered ? HOVER : selected ? SELECTED : clay.Color{},
 		cornerRadius = clay.CornerRadiusAll(10 * d),
 	},
 	) {
@@ -170,7 +188,14 @@ sidebar :: proc(
 					for column in 0 ..< columns {
 						next := index + column
 						if next >= len(page.items) {break}
-						library_card(textures, &page.items[next], u32(next), card_width, d)
+						library_card(
+							textures,
+							&page.items[next],
+							u32(next),
+							card_width,
+							d,
+							selected = card_selected(&page.items[next], &client.detail),
+						)
 					}
 				}
 			}
@@ -559,18 +584,14 @@ detail_page :: proc(
 					cornerRadius = clay.CornerRadiusAll(28 * d),
 				},
 				) {
-					icon_element(
-						textures,
-						play_enabled && view.button == "pause" ? "pause-filled" : "play-filled",
-						play_enabled ? .Dark : .Disabled,
-						22 * d,
-					)
+					icon_element(textures, "play-filled", play_enabled ? .Dark : .Disabled, 22 * d)
 				}
-				icon_element(
-					textures,
+				player_control(
+					"hero_shuffle",
 					"shuffle",
-					client.detail_loading ? .Disabled : .Muted,
-					22 * d,
+					!play_enabled ? .Disabled : view.shuffle ? .Green : .Muted,
+					textures,
+					d,
 				)
 			}
 			icon_element(textures, "heart", client.detail_loading ? .Disabled : .Muted, 22 * d)

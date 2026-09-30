@@ -8,6 +8,7 @@ SIDEBAR :: clay.Color{24, 24, 24, 255}
 PANEL :: clay.Color{32, 32, 32, 255}
 CARD :: clay.Color{45, 45, 45, 255}
 HOVER :: clay.Color{52, 52, 52, 255}
+SELECTED :: clay.Color{36, 36, 36, 255}
 PLAYER :: clay.Color{12, 12, 12, 255}
 WHITE :: clay.Color{245, 245, 245, 255}
 MUTED :: clay.Color{165, 165, 165, 255}
@@ -29,6 +30,8 @@ View :: struct {
 	input:        string,
 	cover:        string,
 	repeat:       bool,
+	shuffle:      bool,
+	volume:       f32,
 	input_active: bool,
 }
 
@@ -75,9 +78,7 @@ top_bar :: proc(view: View, textures: ^Textures, d: f32) {
 	},
 	) {
 		toolbar_button("toolbar_back", "chevron-left", textures, .Muted, d)
-		toolbar_button("toolbar_home", "house", textures, .White, d)
 		toolbar_button("toolbar_library", "library", textures, .Muted, d)
-		toolbar_button("toolbar_search", "search", textures, .Muted, d)
 		if clay.UI_WithId(clay.ID("track_input"))(
 		{
 			layout = {
@@ -170,7 +171,13 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 			if clay.UI()(
 			{layout = {childGap = u16(8 * d), childAlignment = {x = .Center, y = .Center}}},
 			) {
-				player_control("footer_shuffle", "shuffle", .Muted, textures, d)
+				player_control(
+					"footer_shuffle",
+					"shuffle",
+					view.shuffle ? .Green : .Muted,
+					textures,
+					d,
+				)
 				player_control("footer_previous", "skip-back", .White, textures, d)
 				if clay.UI_WithId(clay.ID("footer_play"))(
 				{
@@ -249,27 +256,39 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 		},
 		) {
 			icon_element(textures, "volume-2", .Muted, 18 * d)
-			if clay.UI()(
+			if clay.UI_WithId(clay.ID("volume_slider"))(
 			{
 				layout = {
-					sizing = {width = clay.SizingFixed(90 * d), height = clay.SizingFixed(4 * d)},
+					sizing = {width = clay.SizingFixed(90 * d), height = clay.SizingFixed(24 * d)},
+					childAlignment = {y = .Center},
 				},
-				backgroundColor = CARD,
-				cornerRadius = clay.CornerRadiusAll(2 * d),
 			},
 			) {
-				clay.UI()(
+				if clay.UI()(
 				{
 					layout = {
 						sizing = {
-							width = clay.SizingFixed(45 * d),
+							width = clay.SizingFixed(90 * d),
 							height = clay.SizingFixed(4 * d),
 						},
 					},
-					backgroundColor = WHITE,
+					backgroundColor = CARD,
 					cornerRadius = clay.CornerRadiusAll(2 * d),
 				},
-				)
+				) {
+					clay.UI()(
+					{
+						layout = {
+							sizing = {
+								width = clay.SizingFixed(90 * d * view.volume),
+								height = clay.SizingFixed(4 * d),
+							},
+						},
+						backgroundColor = WHITE,
+						cornerRadius = clay.CornerRadiusAll(2 * d),
+					},
+					)
+				}
 			}
 		}
 	}

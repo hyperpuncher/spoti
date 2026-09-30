@@ -52,8 +52,8 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Text)
 		return
 	}
-	for id in ([]string{"toolbar_back", "toolbar_home", "toolbar_library", "toolbar_search", "detail_more", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "spotify_link"}) {
-		if id == "hero_play" && !detail_play_enabled(client) {continue}
+	for id in ([]string{"toolbar_back", "toolbar_library", "detail_more", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link"}) {
+		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
 		if id == "spotify_link" && client.detail_loading {continue}
 		if pointer_over(id) {
 			ui.set_cursor(state, .Pointer)
@@ -165,9 +165,13 @@ ensure_covers :: proc(
 		if requested >= 4 {break}
 		if len(url) == 0 {continue}
 		key := cover_key(url)
-		if key in textures.by_key || key in textures.requested {continue}
+		previous := textures.requested[key]
+		if key in textures.by_key || previous.pending || previous.attempts >= 2 {continue}
 		if library.request_cover(client, url, key) {
-			textures.requested[key] = true
+			textures.requested[key] = {
+				pending  = true,
+				attempts = previous.attempts + 1,
+			}
 			requested += 1
 		}
 	}
@@ -204,14 +208,14 @@ main :: proc() {
 	stream: ^sdl.AudioStream
 	title: string
 	selected := strings.clone(session.TRACK_URL)
-	player_cover: string
+	player_cover, displayed_cover: string
 	play_queue: [dynamic]Play_Item
 	play_index := -1
 	input: string
 	input_active := false
 	textures := Textures {
 		by_key    = make(map[u64]^sdl.Texture),
-		requested = make(map[u64]bool),
+		requested = make(map[u64]Cover_Request_State),
 	}
 	load_icons(&state, &textures)
 	library_client: library.Client
@@ -229,12 +233,15 @@ main :: proc() {
 		delete(title)
 		delete(selected)
 		delete(player_cover)
+		delete(displayed_cover)
 		free_play_queue(&play_queue)
 		delete(input)
 	}
 	stage := Stage.Idle
 	finished := false
 	repeat, replay_pending, play_after_stop := false, false, false
+	shuffle, volume_dragging := false, false
+	volume: f32 = 0.5
 	sent_frames, sample_rate, duration_ms := 0, 0, 0
 	displayed_ms := 0
 	last := sdl.GetTicksNS()
@@ -303,6 +310,8 @@ main :: proc() {
 								selected = strings.clone(strings.trim_space(input))
 								delete(player_cover)
 								player_cover = {}
+								delete(displayed_cover)
+								displayed_cover = {}
 								free_play_queue(&play_queue)
 								play_index = -1
 								delete(input)
@@ -351,6 +360,9 @@ main :: proc() {
 		if library.poll(&library_client) {redraw = true}
 		for cover in library.take_cover(&library_client) {
 			redraw = true
+			request := textures.requested[cover.key]
+			request.pending = false
+			textures.requested[cover.key] = request
 			if len(cover.image.pixels) > 0 {
 				ui.round_image_pixels(cover.image.pixels, cover.image.width, cover.image.height)
 				texture := ui.create_texture(
@@ -426,7 +438,7 @@ main :: proc() {
 							nil,
 						)
 						if stream != nil {
-							_ = sdl.SetAudioStreamGain(stream, 0.5)
+							_ = sdl.SetAudioStreamGain(stream, volume)
 							_ = sdl.ResumeAudioStreamDevice(stream)
 						}
 						sample_rate = packet.sample_rate
@@ -462,9 +474,7 @@ main :: proc() {
 			stage = .Ended
 			if repeat {
 				replay_pending = true
-			} else if play_index + 1 < len(play_queue) {
-				play_index += 1
-				_ = select_play_item(play_queue[:], play_index, &selected, &player_cover)
+			} else if advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover) {
 				replay_pending = true
 			}
 			redraw = true
@@ -513,6 +523,7 @@ main :: proc() {
 		   0 {shown_input = "Paste a Spotify track link, or pick from your library"}
 		if input_active {shown_input = fmt.aprintf("%s|", shown_input, allocator = context.temp_allocator)}
 		times: [2][16]u8
+		retain_player_cover(&displayed_cover, player_cover, &textures)
 		view := View {
 			title        = shown_title,
 			status       = status,
@@ -521,8 +532,10 @@ main :: proc() {
 			elapsed      = duration_text(displayed_ms, times[0][:]),
 			total        = duration_text(duration_ms, times[1][:]),
 			input        = shown_input,
-			cover        = player_cover,
+			cover        = displayed_cover,
 			repeat       = repeat,
+			shuffle      = shuffle,
+			volume       = volume,
 			input_active = input_active,
 		}
 		width, height = ui.size(&state)
@@ -560,6 +573,7 @@ main :: proc() {
 		ui.frame_done(&state)
 		load_more_near_bottom(&library_client, filter, ui.scale(&state))
 		ensure_covers(&library_client, &textures, filter, player_cover, visible)
+		track_selected := false
 		if clicked {
 			if hit("sidebar_handle", mouse_click) {
 				resizing = true
@@ -568,11 +582,7 @@ main :: proc() {
 				if hit("toolbar_back", mouse_click) || hit("toolbar_library", mouse_click) {
 					library.clear_detail(&library_client)
 					handled = true
-				} else if hit("toolbar_home", mouse_click) {
-					filter = .Playlists
-					library.clear_detail(&library_client)
-					handled = true
-				} else if hit("toolbar_search", mouse_click) || hit("track_input", mouse_click) {
+				} else if hit("track_input", mouse_click) {
 					if !input_active {input_active = sdl.StartTextInput(state.window)}
 					handled = true
 				}
@@ -583,6 +593,7 @@ main :: proc() {
 							selected_filter := tabs[index]
 							if selected_filter != filter {library.clear_detail(&library_client)}
 							filter = selected_filter
+							retry_failed_covers(&textures)
 							handled = true
 							break
 						}
@@ -605,6 +616,7 @@ main :: proc() {
 							id = id[len("spotify:artist:"):]
 						} else {break}
 						handled = library.open_detail(&library_client, source, id, entry)
+						if handled {retry_failed_covers(&textures)}
 						break
 					}
 				}
@@ -628,17 +640,19 @@ main :: proc() {
 					} else {
 						for index in visible.tracks.first ..< visible.tracks.last {
 							if !hit_index("track_row", mouse_click, u32(index)) {continue}
-							build_play_queue(&play_queue, library_client.detail.rows[:])
-							play_index = index
-							_ = select_play_item(
+							build_play_queue(
+								&play_queue,
+								library_client.detail.rows[:],
+								library_client.detail.image_small,
+							)
+							play_index =
+								shuffle ? reorder_play_queue(play_queue[:], index, true) : index
+							track_selected = select_play_item(
 								play_queue[:],
 								play_index,
 								&selected,
 								&player_cover,
 							)
-							if len(player_cover) == 0 {
-								player_cover = strings.clone(library_client.detail.image_small)
-							}
 							delete(input)
 							input = {}
 							handled = true
@@ -660,30 +674,48 @@ main :: proc() {
 			}
 			redraw = true
 		}
+		if clicked && hit("volume_slider", mouse_click) {volume_dragging = true}
+		if volume_dragging {
+			box := clay.GetElementData(clay.ID("volume_slider")).boundingBox
+			if box.width > 0 {
+				volume = clamp((mouse.x - box.x) / box.width, 0, 1)
+				if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
+			}
+			if .LEFT not_in buttons {volume_dragging = false}
+			first_frame = true
+		}
+		if clicked &&
+		   (hit("footer_shuffle", mouse_click) ||
+				   detail_play_enabled(&library_client) && hit("hero_shuffle", mouse_click)) {
+			shuffle = !shuffle
+			play_index = reorder_play_queue(play_queue[:], play_index, shuffle)
+		}
 		if clicked && hit("footer_repeat", mouse_click) {
 			repeat = !repeat
 			replay_pending = repeat && stage == .Ended
 		}
 		hero_pressed := clicked && hit("hero_play", mouse_click)
-		restart_playback := hero_pressed && detail_play_enabled(&library_client)
-		if restart_playback {
-			build_play_queue(&play_queue, library_client.detail.rows[:])
-			play_index = 0
+		hero_start := hero_pressed && detail_play_enabled(&library_client)
+		restart_playback := track_selected || hero_start
+		if hero_start {
+			build_play_queue(
+				&play_queue,
+				library_client.detail.rows[:],
+				library_client.detail.image_small,
+			)
+			play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
 			_ = select_play_item(play_queue[:], play_index, &selected, &player_cover)
-			if len(player_cover) == 0 {
-				player_cover = strings.clone(library_client.detail.image_small)
-			}
 		}
 		track_delta := 0
 		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
 		if clicked && hit("footer_next", mouse_click) {track_delta = 1}
 		if track_delta != 0 &&
-		   select_play_item(play_queue[:], play_index + track_delta, &selected, &player_cover) {
-			play_index += track_delta
+		   advance_play_item(play_queue[:], &play_index, track_delta, &selected, &player_cover) {
 			restart_playback = true
 		}
 		if restart_playback {
-			if worker != nil && stage != .Idle && stage != .Ended && stage != .Failed {
+			replay_pending = false
+			if worker != nil {
 				sync.atomic_store(&cancel, true)
 				if !closed {chan.close(queue); closed = true}
 				if stream != nil {sdl.DestroyAudioStream(stream); stream = nil}

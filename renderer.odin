@@ -3,6 +3,7 @@ package main
 import "base:runtime"
 import c "core:c/libc"
 import "core:fmt"
+import "core:strings"
 import diagnostic "diagnostic"
 import library "spotify/library"
 import ui "ui"
@@ -10,9 +11,28 @@ import clay "vendor/clay"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
+Cover_Request_State :: struct {
+	pending:  bool,
+	attempts: u8,
+}
+
 Textures :: struct {
 	by_key:    map[u64]^sdl.Texture,
-	requested: map[u64]bool,
+	requested: map[u64]Cover_Request_State,
+}
+
+// Keep the previous artwork visible until the requested replacement is uploaded.
+retain_player_cover :: proc(displayed: ^string, desired: string, textures: ^Textures) {
+	if desired == displayed^ || textures.by_key[cover_key(desired)] == nil {return}
+	next := strings.clone(desired)
+	delete(displayed^)
+	displayed^ = next
+}
+
+retry_failed_covers :: proc(textures: ^Textures) {
+	for _, &request in textures.requested {
+		if !request.pending {request.attempts = 0}
+	}
 }
 
 clay_error :: proc "c" (data: clay.ErrorData) {

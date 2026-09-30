@@ -200,7 +200,10 @@ run_covers :: proc(pointer: rawptr) {
 		if artwork.valid_cover_url(request.url) {
 			bytes, status, fetched := cover_get(request.url)
 			if fetched {
-				if status == 200 {image, _ = artwork.decode(bytes[:])}
+				if status == 200 {
+					image, _ = artwork.decode(bytes[:])
+					if len(image.pixels) == 0 {cache_remove("cover", request.url)}
+				}
 				delete(bytes)
 			}
 		}
@@ -416,9 +419,7 @@ poll :: proc(client: ^Client) -> bool {
 	for result in chan.try_recv(client.cover_results) {
 		changed = true
 		client.covers_pending = max(0, client.covers_pending - 1)
-		if len(result.image.pixels) > 0 {
-			append(&client.cover_queue, result)
-		}
+		append(&client.cover_queue, result)
 	}
 	return changed
 }

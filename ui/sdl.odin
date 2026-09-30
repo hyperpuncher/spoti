@@ -337,8 +337,27 @@ frame_done :: proc(state: ^State) {
 	}
 	width, _ := size(state)
 	density := scale(state)
-	label := fmt.aprintf("fps: %d", state.fps, allocator = context.temp_allocator)
-	text(state, label, f32(width) - 84 * density, 8 * density, 14 * density, {190, 190, 190, 255})
+	label := fmt.aprintf("%d", state.fps, allocator = context.temp_allocator)
+	font := font_for_size(state, 14 * density, 1)
+	label_width, label_height: c.int
+	if font != nil &&
+	   ttf.GetStringSize(
+		   font,
+		   cstring(raw_data(label)),
+		   uint(len(label)),
+		   &label_width,
+		   &label_height,
+	   ) {
+		text(
+			state,
+			label,
+			f32(width) - f32(label_width) - 8 * density,
+			8 * density,
+			14 * density,
+			{190, 190, 190, 255},
+			font_id = 1,
+		)
+	}
 	_ = sdl.RenderPresent(state.renderer)
 	if !state.vsync {sdl.Delay(16)}
 }

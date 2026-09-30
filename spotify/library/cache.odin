@@ -60,6 +60,16 @@ cache_write :: proc(prefix: string, address: string, body: []u8) {
 	_ = os.write_entire_file_from_bytes(path, body)
 }
 
+// Invalid decoded covers must not remain in the immutable-image cache.
+cache_remove :: proc(prefix, address: string) {
+	dir, ok := cache_directory(prefix)
+	if !ok {return}
+	defer delete(dir)
+	path := fmt.aprintf("%s/%016x", dir, url_key(address))
+	defer delete(path)
+	_ = os.remove(path)
+}
+
 // One cached HTTPS GET. `prefix` keeps API entries and covers apart.
 cached_get :: proc(
 	prefix: string,

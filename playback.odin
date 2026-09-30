@@ -1,6 +1,8 @@
 package main
 
 import "core:fmt"
+import "core:math/rand"
+import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:sync/chan"
@@ -23,6 +25,7 @@ Stage :: enum {
 Play_Item :: struct {
 	uri:   string,
 	cover: string,
+	order: int,
 }
 
 free_play_queue :: proc(items: ^[dynamic]Play_Item) {
@@ -34,15 +37,35 @@ free_play_queue :: proc(items: ^[dynamic]Play_Item) {
 	items^ = nil
 }
 
-build_play_queue :: proc(items: ^[dynamic]Play_Item, rows: []library.Track_Row) {
+build_play_queue :: proc(
+	items: ^[dynamic]Play_Item,
+	rows: []library.Track_Row,
+	fallback_cover: string = "",
+) {
 	free_play_queue(items)
 	items^ = make([dynamic]Play_Item, 0, len(rows))
-	for row in rows {
+	for row, index in rows {
+		cover :=
+			row.image_small != "" ? row.image_small : row.image != "" ? row.image : fallback_cover
 		append(
 			items,
-			Play_Item{uri = strings.clone(row.uri), cover = strings.clone(row.image_small)},
+			Play_Item{uri = strings.clone(row.uri), cover = strings.clone(cover), order = index},
 		)
 	}
+}
+
+// Stable ordinals distinguish repeated tracks and restore the original order.
+reorder_play_queue :: proc(items: []Play_Item, index: int, shuffle: bool) -> int {
+	if index < 0 || index >= len(items) {return index}
+	current := items[index].order
+	if shuffle {
+		items[0], items[index] = items[index], items[0]
+		rand.shuffle(items[1:])
+		return 0
+	}
+	slice.sort_by(items, proc(a, b: Play_Item) -> bool {return a.order < b.order})
+	for item, i in items {if item.order == current {return i}}
+	return index
 }
 
 select_play_item :: proc(items: []Play_Item, index: int, selected, cover: ^string) -> bool {
@@ -51,6 +74,17 @@ select_play_item :: proc(items: []Play_Item, index: int, selected, cover: ^strin
 	selected^ = strings.clone(items[index].uri)
 	delete(cover^)
 	cover^ = strings.clone(items[index].cover)
+	return true
+}
+
+advance_play_item :: proc(
+	items: []Play_Item,
+	index: ^int,
+	delta: int,
+	selected, cover: ^string,
+) -> bool {
+	if !select_play_item(items, index^ + delta, selected, cover) {return false}
+	index^ += delta
 	return true
 }
 
