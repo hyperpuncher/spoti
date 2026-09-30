@@ -108,6 +108,40 @@ cached_play_source :: proc(cache: ^Play_Source, uri: string) -> ^session.Source 
 	return nil
 }
 
+Preload_Work :: struct {
+	track:    string,
+	source:   session.Source,
+	cancel:   bool,
+	remember: bool,
+}
+
+clear_preload :: proc(preload: ^Preload_Work) {
+	session.close_source(&preload.source)
+	delete(preload.track)
+	preload^ = {}
+}
+
+preload_track :: proc(pointer: rawptr) {
+	work := (^Preload_Work)(pointer)
+	source, ok := session.open(work.remember ? .Remember : .Restore, &work.cancel, work.track)
+	if !ok {return}
+	work.source = source
+	if sync.atomic_load(&work.cancel) {return}
+	media := audio.Seek_Stream {
+		url     = source.url,
+		key     = source.key,
+		file_id = source.file_id,
+		cancel  = &work.cancel,
+	}
+	defer audio.close_seek_stream(&media)
+	if !audio.open_seek_stream(&media) {return}
+	// Prime the headers, tail/granules and first playable PCM block. Ciphertext
+	// persists in the disk cache; no full PCM track is kept in memory.
+	pcm := make([]i16, player.BUFFER_FRAMES * 2)
+	defer delete(pcm)
+	_, _ = audio.read_seek_pcm(&media, pcm)
+}
+
 Login_Work :: struct {
 	queue:     chan.Chan(player.Packet),
 	cancel:    ^bool,
@@ -115,19 +149,29 @@ Login_Work :: struct {
 	remember:  bool,
 	start_ms:  int,
 	source:    ^Play_Source,
+	preloaded: session.Source, // owned, transferred only after joining the preload worker
 }
 
 login_and_decode :: proc(pointer: rawptr) {
 	work := (^Login_Work)(pointer)
 	defer delete(work.track_url)
+	defer session.close_source(&work.preloaded)
 	source := cached_play_source(work.source, work.track_url)
 	if source == nil {
 		clear_play_source(work.source)
-		fresh, authorized := session.open(
-			work.remember ? .Remember : .Restore,
-			work.cancel,
-			work.track_url,
-		)
+		fresh: session.Source
+		authorized := false
+		if work.preloaded.url != "" {
+			fresh = work.preloaded
+			work.preloaded = {}
+			authorized = true
+		} else {
+			fresh, authorized = session.open(
+				work.remember ? .Remember : .Restore,
+				work.cancel,
+				work.track_url,
+			)
+		}
 		if !authorized {
 			if !sync.atomic_load(
 				work.cancel,

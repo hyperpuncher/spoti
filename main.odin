@@ -213,6 +213,9 @@ main :: proc() {
 	worker: ^thread.Thread
 	work: Login_Work
 	play_source: Play_Source
+	preload_worker: ^thread.Thread
+	preload_work: Preload_Work
+	preload_attempted: string
 	cancel, closed := false, false
 	stream: ^sdl.AudioStream
 	title: string
@@ -233,6 +236,13 @@ main :: proc() {
 	resizing := false
 	defer {
 		if worker != nil {release_worker(worker, queue, &cancel, closed)}
+		if preload_worker != nil {
+			sync.atomic_store(&preload_work.cancel, true)
+			thread.join(preload_worker)
+			thread.destroy(preload_worker)
+		}
+		clear_preload(&preload_work)
+		delete(preload_attempted)
 		clear_play_source(&play_source)
 		if stream != nil {sdl.DestroyAudioStream(stream)}
 		library.stop(&library_client)
@@ -280,6 +290,7 @@ main :: proc() {
 		for pending in library_client.pending {
 			if pending {wait_ms = 40; break}
 		}
+		if preload_worker != nil && stage != .Playing {wait_ms = 40}
 		if first_frame {wait_ms = 0}
 		has_event := sdl.WaitEventTimeout(&event, wait_ms)
 		redraw := has_event || first_frame
@@ -365,6 +376,11 @@ main :: proc() {
 			}
 		}
 		if !running {break}
+		if preload_worker != nil && thread.is_done(preload_worker) {
+			thread.join(preload_worker)
+			thread.destroy(preload_worker)
+			preload_worker = nil
+		}
 		if library_client.worker == nil {
 			remember := os.get_env("SPOTI_REMEMBER_LOGIN", context.temp_allocator) == "1"
 			_ = library.start(&library_client, remember)
@@ -388,6 +404,7 @@ main :: proc() {
 			}
 		}
 		if stop_pressed {
+			if preload_worker != nil {sync.atomic_store(&preload_work.cancel, true)}
 			seek_dragging, start_paused = false, false
 			seek_ms = 0
 			play_after_stop, replay_pending = false, false
@@ -504,6 +521,22 @@ main :: proc() {
 			replay_pending = false
 			space_pressed = true
 			redraw = true
+		}
+		if stage == .Playing && play_index >= 0 && play_index + 1 < len(play_queue) {
+			next_uri := play_queue[play_index + 1].uri
+			if preload_worker != nil && preload_work.track != next_uri {
+				sync.atomic_store(&preload_work.cancel, true)
+			}
+			if preload_worker == nil && next_uri != preload_attempted && next_uri != selected {
+				clear_preload(&preload_work)
+				delete(preload_attempted)
+				preload_attempted = strings.clone(next_uri)
+				preload_work = {
+					track    = strings.clone(next_uri),
+					remember = work.remember,
+				}
+				preload_worker = thread.create_and_start_with_data(&preload_work, preload_track)
+			}
 		}
 		if !redraw && stage != .Playing {continue}
 
@@ -808,10 +841,19 @@ main :: proc() {
 								context.temp_allocator,
 							) == "1",
 						}
+						if preload_worker == nil &&
+						   preload_work.track == selected &&
+						   preload_work.source.url != "" {
+							work.preloaded = preload_work.source
+							preload_work.source = {}
+						} else if preload_worker != nil {
+							sync.atomic_store(&preload_work.cancel, true)
+						}
 						diagnostic.write("playback worker starting")
 						worker = thread.create_and_start_with_data(&work, login_and_decode)
 						if worker == nil {
 							delete(work.track_url)
+							session.close_source(&work.preloaded)
 							chan.destroy(queue)
 							stage = .Failed
 						} else {
