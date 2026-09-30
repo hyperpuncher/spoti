@@ -611,7 +611,9 @@ main :: proc() {
 		last = now
 		clay.SetLayoutDimensions({f32(width), f32(height)})
 		clay.SetPointerState({mouse.x, mouse.y}, .LEFT in buttons)
-		density := ui.scale(&state)
+		previous_density := ui.scale(&state)
+		density := ui.update_scale(&state)
+		if density != previous_density {clay.ResetMeasureTextCache()}
 		wheel_used := scroll_wheel("library_grid", wheel.y, density)
 		if !wheel_used {wheel_used = scroll_wheel("detail_rows", wheel.y, density)}
 		clay.UpdateScrollContainers(false, {}, dt)
@@ -635,7 +637,7 @@ main :: proc() {
 		_ = sdl.RenderClear(state.renderer)
 		render(&commands, &state, &textures)
 		ui.frame_done(&state)
-		load_more_near_bottom(&library_client, filter, ui.scale(&state))
+		load_more_near_bottom(&library_client, filter, density)
 		ensure_covers(&library_client, &textures, filter, player_cover, visible)
 		track_selected := false
 		if clicked {

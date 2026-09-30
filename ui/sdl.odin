@@ -26,6 +26,9 @@ State :: struct {
 	medium_font_index:  int,
 	fonts:              map[int]^ttf.Font,
 	text_engine:        ^ttf.TextEngine,
+	texts:              [dynamic]^ttf.Text,
+	text_count:         int,
+	density:            f32,
 	masks:              map[u64]^sdl.Texture,
 	cursors:            [Cursor_Kind]^sdl.Cursor,
 	cursor:             Cursor_Kind,
@@ -95,10 +98,13 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 		close(&state)
 		return
 	}
+	_ = update_scale(&state)
 	return state, true
 }
 
 close :: proc(state: ^State) {
+	for text in state.texts {ttf.DestroyText(text)}
+	delete(state.texts)
 	if state.text_engine != nil {ttf.DestroyRendererTextEngine(state.text_engine)}
 	for _, font in state.fonts {ttf.CloseFont(font)}
 	delete(state.fonts)
@@ -135,12 +141,17 @@ size :: proc(state: ^State) -> (width, height: c.int) {
 	return
 }
 
-scale :: proc(state: ^State) -> f32 {
+// Refresh once before layout; text measurement and drawing use the same scale.
+update_scale :: proc(state: ^State) -> f32 {
 	pixels, _ := size(state)
 	logical: c.int
 	_ = sdl.GetWindowSize(state.window, &logical, nil)
-	if logical == 0 {return 1}
-	return f32(pixels) / f32(logical)
+	state.density = logical > 0 ? f32(pixels) / f32(logical) : 1
+	return state.density
+}
+
+scale :: proc(state: ^State) -> f32 {
+	return state.density
 }
 
 // Large rounded panels use an indexed triangle fan around their centre.
@@ -358,6 +369,7 @@ frame_done :: proc(state: ^State) {
 			font_id = 1,
 		)
 	}
+	finish_text_frame(state)
 	_ = sdl.RenderPresent(state.renderer)
 	if !state.vsync {sdl.Delay(16)}
 }
@@ -372,9 +384,8 @@ text :: proc(
 	if len(value) == 0 {return}
 	font := font_for_size(state, font_size, font_id)
 	if font == nil {return}
-	content := ttf.CreateText(state.text_engine, font, cstring(raw_data(value)), len(value))
+	content := cached_text(state, font, value)
 	if content == nil {return}
-	defer ttf.DestroyText(content)
 	_ = ttf.SetTextColor(content, color.r, color.g, color.b, color.a)
 	// Whole-pixel positions keep glyph rasterization identical between frames.
 	_ = ttf.DrawRendererText(content, f32(int(x + 0.5)), f32(int(y + 0.5)))
