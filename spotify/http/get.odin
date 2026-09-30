@@ -50,12 +50,32 @@ post_form :: proc(address, form: string) -> (body: [dynamic]u8, status: int, ok:
 	return request(address, {limit = 64 * 1024}, form, 20)
 }
 
+// Binary protobuf bodies may contain NUL bytes; POSTFIELDSIZE bounds the upload.
+post_protobuf :: proc(
+	address: string,
+	body: []u8,
+	options: Options = {},
+) -> (
+	response: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	if len(body) == 0 {return nil, 0, false}
+	return request(
+		address,
+		options,
+		transmute(string)body,
+		content_type = "Content-Type: application/x-protobuf",
+	)
+}
+
 @(private)
 request :: proc(
 	address: string,
 	options: Options,
 	form: string = "",
 	timeout: c.long = 15,
+	content_type: cstring = nil,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -113,6 +133,10 @@ request :: proc(
 		}
 		slist_free_all(headers)
 	}
+	if content_type != nil {
+		headers = slist_append(nil, content_type)
+		if headers == nil {return nil, 0, false}
+	}
 	if options.bearer != "" {
 		line := fmt.aprintf("Authorization: Bearer %s", options.bearer)
 		defer {
@@ -124,10 +148,11 @@ request :: proc(
 			crypto.zero_explicit(rawptr(c_line), len(line))
 			delete(c_line)
 		}
-		headers = slist_append(nil, c_line)
-		if headers == nil {return nil, 0, false}
-		if easy_setopt(client, CURL_HTTPHEADER, headers) != 0 {return nil, 0, false}
+		extended := slist_append(headers, c_line)
+		if extended == nil {return nil, 0, false}
+		headers = extended
 	}
+	if headers != nil && easy_setopt(client, CURL_HTTPHEADER, headers) != 0 {return nil, 0, false}
 	if easy_perform(client) != 0 {return nil, 0, false}
 	code: c.long
 	if easy_getinfo(client, CURL_RESPONSE_CODE, &code) != 0 {return nil, 0, false}

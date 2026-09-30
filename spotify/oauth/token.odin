@@ -6,6 +6,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:net"
 import "core:strings"
+import "core:time"
 
 Token_Result :: enum {
 	Network_Error,
@@ -15,8 +16,9 @@ Token_Result :: enum {
 }
 
 Tokens :: struct {
-	access:  string,
-	refresh: string,
+	access:     string,
+	refresh:    string,
+	expires_at: time.Time,
 }
 
 wipe_tokens :: proc(tokens: ^Tokens) {
@@ -24,12 +26,18 @@ wipe_tokens :: proc(tokens: ^Tokens) {
 	crypto.zero_explicit(raw_data(tokens.refresh), len(tokens.refresh))
 	delete(tokens.access)
 	delete(tokens.refresh)
+	tokens^ = {}
+}
+
+expired :: proc(tokens: Tokens) -> bool {
+	return tokens.expires_at != time.Time{} && time.since(tokens.expires_at) >= 0
 }
 
 Token_Response :: struct {
 	access_token:  string,
 	refresh_token: string,
 	scope:         string,
+	expires_in:    int,
 }
 
 // Parsed into temporary memory. No response body or token is ever logged.
@@ -56,7 +64,12 @@ decode_token :: proc(
 		}
 		if !found {return {}, .Rejected}
 	}
+	expires_at: time.Time
+	if reply.expires_in > 0 {
+		expires_at = time.time_add(time.now(), time.Duration(reply.expires_in) * time.Second)
+	}
 	return {
+			expires_at = expires_at,
 			access = strings.clone(reply.access_token),
 			refresh = strings.clone(reply.refresh_token),
 		},

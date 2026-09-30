@@ -80,6 +80,7 @@ fetch_detail :: proc(
 	access: string,
 	source: Source,
 	id: string,
+	session_access: string = "",
 ) -> (
 	detail: Detail,
 	status: int,
@@ -158,6 +159,7 @@ fetch_detail :: proc(
 		id,
 		0,
 		allocator,
+		session_access,
 	)
 	if !rows_ok {
 		if source == .Playlist {
@@ -207,6 +209,7 @@ fetch_track_page :: proc(
 	id: string,
 	offset: int,
 	allocator: runtime.Allocator,
+	session_access: string = "",
 ) -> (
 	rows: [dynamic]Track_Row,
 	total: int,
@@ -219,6 +222,9 @@ fetch_track_page :: proc(
 	if source == .Artist {return}
 	body, body_status, fetched := fetch_track_body(access, source, id, offset)
 	defer delete(body)
+	if fetched && source == .Playlist && body_status == 403 && session_access != "" {
+		return fetch_playlist_rows(session_access, id, offset, allocator)
+	}
 	if !fetched || body_status != 200 {return nil, 0, 0, false, body_status, false}
 	switch source {
 	case .Album:

@@ -2,6 +2,7 @@ package oauth
 
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 @(test)
 pkce_rfc7636_vector :: proc(t: ^testing.T) {
@@ -58,6 +59,9 @@ token_requires_streaming_scope_and_successful_response :: proc(t: ^testing.T) {
 		tokens.access == "fake-test-token" &&
 		tokens.refresh == "fake-refresh",
 	)
+	testing.expect(t, tokens.expires_at != time.Time{} && !expired(tokens))
+	tokens.expires_at = time.time_add(time.now(), -time.Second)
+	testing.expect(t, expired(tokens))
 	_, result = decode_token(401, transmute([]u8)body)
 	testing.expect(t, result == .Rejected)
 	wrong_scope: string = `{"access_token":"fake-test-token","scope":"user-read-private"}`

@@ -4,7 +4,6 @@ package session
 
 import ap "../ap"
 import audio "../audio"
-import credential "../credential"
 import http "../http"
 import oauth "../oauth"
 import track "../track"
@@ -54,67 +53,9 @@ open :: proc(
 	defer if !ok {close_source(&source)}
 	id, valid_id := track.parse_id(track_url)
 	if !valid_id {fmt.eprintln("invalid Spotify track link or URI"); return}
-	tokens: oauth.Tokens
+	tokens, authorized := authorize(keyring_mode, cancel)
+	if !authorized {return}
 	defer oauth.wipe_tokens(&tokens)
-	have_token := false
-	if keyring_mode != .None {
-		if stored, found := credential.load(); found {
-			fresh, result := oauth.refresh(stored)
-			crypto.zero_explicit(raw_data(stored), len(stored))
-			delete(stored)
-			switch result {
-			case .Authorized:
-				tokens = fresh
-				have_token = true
-				if len(tokens.refresh) > 0 && !credential.save(tokens.refresh) {
-					fmt.eprintln(
-						"keyring did not save rotated sign-in; you may need browser approval next time",
-					)
-				}
-				fmt.println("Spotify sign-in restored from the system keyring")
-			case .Rejected:
-				credential.clear() // revoked grant; ask the user to sign in again
-			case .Network_Error, .Invalid_Response:
-				fmt.eprintln(
-					"could not refresh saved sign-in; try again when Spotify is reachable",
-				)
-				return
-			}
-		}
-	}
-	if !have_token {
-		listener, ready := oauth.listen()
-		if !ready {fmt.eprintln("cannot listen on 127.0.0.1:8898 (is another player using it?)"); return}
-		defer net.close(listener)
-		flow := oauth.begin()
-		defer {
-			crypto.zero_explicit(raw_data(flow.verifier), len(flow.verifier))
-			delete(flow.verifier)
-			delete(flow.state)
-			delete(flow.url)
-		}
-		fmt.println("Open this URL in your browser to approve Spotify streaming:")
-		fmt.println(flow.url)
-		fmt.println("Waiting up to ten minutes for the local redirect. Ctrl+C cancels.")
-		code, result := oauth.wait_for_code(listener, flow.state, cancel)
-		if result != .Authorized {
-			if result != .Cancelled {fmt.eprintln("browser approval did not complete:", result)}
-			return
-		}
-		defer {crypto.zero_explicit(raw_data(code), len(code)); delete(code)}
-		new_tokens, status := oauth.exchange_code(code, flow.verifier)
-		if status != .Authorized {fmt.eprintln("token exchange did not complete:", status); return}
-		tokens = new_tokens
-		if keyring_mode == .Remember {
-			if len(tokens.refresh) == 0 || !credential.save(tokens.refresh) {
-				fmt.eprintln(
-					"system keyring unavailable; browser approval will be needed next time",
-				)
-			} else {
-				fmt.println("sign-in saved in the system keyring; use 'just logout' to remove it")
-			}
-		}
-	}
 
 	if cancel != nil && sync.atomic_load(cancel) {return}
 	socket, err := net.dial_tcp("ap.spotify.com:443")
@@ -148,7 +89,7 @@ open :: proc(
 	_, failure, kind := ap.parse_login_reply(command, response)
 	switch kind {
 	case .Welcome:
-		fmt.println("AP login accepted. No audio playback yet.")
+		fmt.println("Playback connection authenticated.")
 	case .Failure:
 		fmt.eprintln("AP login refused; Spotify error code:", failure); return
 	case .Invalid:

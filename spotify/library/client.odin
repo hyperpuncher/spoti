@@ -100,11 +100,13 @@ run :: proc(pointer: rawptr) {
 		return
 	}
 	defer oauth.wipe_tokens(&tokens)
+	streaming: oauth.Tokens
+	defer oauth.wipe_tokens(&streaming)
 	for request in chan.recv(client.requests) {
 		defer free_all(context.temp_allocator)
 		defer free_request(request)
 		if sync.atomic_load(&client.cancel) {break}
-		handle(client, &tokens, request)
+		handle(client, &tokens, &streaming, request)
 	}
 }
 
@@ -113,7 +115,7 @@ free_request :: proc(request: Request) {
 	delete(request.id)
 }
 
-handle :: proc(client: ^Client, tokens: ^oauth.Tokens, request: Request) {
+handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Request) {
 	switch request.kind {
 	case .Index:
 		page, status, ok := fetch_index(
@@ -128,6 +130,22 @@ handle :: proc(client: ^Client, tokens: ^oauth.Tokens, request: Request) {
 		)
 	case .Detail:
 		detail, status, ok := fetch_detail(tokens.access, request.source, request.id)
+		if ok && request.source == .Playlist && detail.rows_error == 403 {
+			rows, total, next, more, rows_status, rows_ok := read_session_playlist(
+				client,
+				streaming,
+				request.id,
+				0,
+				virtual.arena_allocator(&detail.arena),
+			)
+			if rows_ok {
+				detail.rows, detail.total, detail.next_offset, detail.has_more =
+					rows, total, next, more
+				detail.rows_error = 0
+			} else {
+				detail.rows_error = rows_status != 0 ? rows_status : -1
+			}
+		}
 		send(
 			client,
 			Result {
@@ -163,6 +181,10 @@ handle :: proc(client: ^Client, tokens: ^oauth.Tokens, request: Request) {
 					request.offset,
 					allocator,
 				)
+		}
+		if request.source == .Playlist && !aresult.ok && aresult.status == 403 {
+			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
+				read_session_playlist(client, streaming, request.id, request.offset, allocator)
 		}
 		send(client, aresult)
 	}

@@ -222,6 +222,7 @@ main :: proc() {
 		if worker != nil {release_worker(worker, queue, &cancel, closed)}
 		if stream != nil {sdl.DestroyAudioStream(stream)}
 		library.stop(&library_client)
+		session.clear_authorization()
 		for _, texture in textures.by_key {sdl.DestroyTexture(texture)}
 		delete(textures.by_key)
 		delete(textures.requested)
@@ -489,7 +490,7 @@ main :: proc() {
 		status := "Ready to play"
 		switch stage {
 		case .Signing_In:
-			status = "Signing in. See the terminal for the browser link."
+			status = "Loading track..."
 		case .Buffering:
 			status = "Buffering audio..."
 		case .Playing:

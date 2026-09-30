@@ -23,6 +23,7 @@ test:
 	odin test spotify/ap
 	odin test spotify/shannon
 	odin test spotify/oauth
+	odin test spotify/session
 	odin test spotify/library
 	odin test spotify/track
 	odin test spotify/audio

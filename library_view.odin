@@ -617,13 +617,22 @@ detail_page :: proc(
 			},
 			) {
 				clay.Text(
-					"Tracks unavailable in the Web API",
+					"Couldn't load playlist tracks",
 					clay.TextElementConfig{fontId = 2, fontSize = 18, textColor = WHITE},
 				)
-				clay.Text(
-					"Spotify only exposes items for playlists you own or collaborate on.",
-					clay.TextElementConfig{fontSize = 14, textColor = MUTED},
-				)
+				message := "The request failed. Select the playlist again to retry."
+				if detail.rows_error == library.PLAYLIST_AUTH_REQUIRED {
+					message = "Streaming approval did not complete. Select the playlist again to retry."
+				} else if detail.rows_error == library.PLAYLIST_INVALID_RESPONSE {
+					message = "Spotify returned incomplete or invalid playlist data. Please try again."
+				} else if detail.rows_error > 0 {
+					message = fmt.aprintf(
+						"Spotify returned HTTP %d. Please try again.",
+						detail.rows_error,
+						allocator = context.temp_allocator,
+					)
+				}
+				clay.Text(message, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
 			}
 		} else {
 			visible.tracks = track_table(detail, textures, viewport_height, d)
