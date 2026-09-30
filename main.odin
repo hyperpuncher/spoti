@@ -188,6 +188,10 @@ ensure_covers :: proc(
 	}
 }
 
+clear_audio_stream :: proc(stream: ^^sdl.AudioStream) {
+	if stream^ != nil {sdl.DestroyAudioStream(stream^); stream^ = nil}
+}
+
 main :: proc() {
 	diagnostic.init()
 	diagnostic.write("application starting")
@@ -247,7 +251,7 @@ main :: proc() {
 		clear_preload(&preload_work)
 		delete(preload_attempted)
 		clear_play_source(&play_source)
-		if stream != nil {sdl.DestroyAudioStream(stream)}
+		clear_audio_stream(&stream)
 		library.stop(&library_client)
 		session.clear_authorization()
 		for _, texture in textures.by_key {sdl.DestroyTexture(texture)}
@@ -413,13 +417,8 @@ main :: proc() {
 			play_after_stop, replay_pending = false, false
 		}
 		if stop_pressed && worker != nil && stage != .Stopping {
-			sync.atomic_store(&cancel, true)
-			chan.close(queue)
-			closed = true
-			if stream != nil {
-				sdl.DestroyAudioStream(stream)
-				stream = nil
-			}
+			cancel_worker(queue, &cancel, &closed)
+			clear_audio_stream(&stream)
 			stage = .Stopping
 		}
 		if stage == .Stopping && thread.is_done(worker) {
@@ -437,11 +436,7 @@ main :: proc() {
 		}
 		if stage == .Failed && worker != nil {
 			start_paused = false
-			sync.atomic_store(&cancel, true)
-			if !closed {
-				chan.close(queue)
-				closed = true
-			}
+			cancel_worker(queue, &cancel, &closed)
 			if thread.is_done(worker) {
 				release_worker(worker, queue, &cancel, closed)
 				worker = nil
@@ -810,9 +805,8 @@ main :: proc() {
 		if restart_playback || seek_requested {
 			replay_pending = false
 			if worker != nil {
-				sync.atomic_store(&cancel, true)
-				if !closed {chan.close(queue); closed = true}
-				if stream != nil {sdl.DestroyAudioStream(stream); stream = nil}
+				cancel_worker(queue, &cancel, &closed)
+				clear_audio_stream(&stream)
 				stage = .Stopping
 				play_after_stop = true
 			} else {
@@ -860,10 +854,7 @@ main :: proc() {
 							chan.destroy(queue)
 							stage = .Failed
 						} else {
-							if stream != nil {
-								sdl.DestroyAudioStream(stream)
-								stream = nil
-							}
+							clear_audio_stream(&stream)
 							finished = false
 							sent_frames, sample_rate, duration_ms = 0, 0, 0
 							displayed_ms = seek_ms

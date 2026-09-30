@@ -206,14 +206,19 @@ login_and_decode :: proc(pointer: rawptr) {
 	}
 }
 
+cancel_worker :: proc(queue: chan.Chan(player.Packet), cancel, closed: ^bool) {
+	sync.atomic_store(cancel, true)
+	if !closed^ {chan.close(queue); closed^ = true}
+}
+
 release_worker :: proc(
 	worker: ^thread.Thread,
 	queue: chan.Chan(player.Packet),
 	cancel: ^bool,
 	closed: bool,
 ) {
-	sync.atomic_store(cancel, true)
-	if !closed {chan.close(queue)}
+	closed := closed
+	cancel_worker(queue, cancel, &closed)
 	thread.join(worker)
 	thread.destroy(worker)
 	for packet in chan.try_recv(queue) {

@@ -1,8 +1,28 @@
 package main
 
 import "core:strings"
+import "core:sync"
+import "core:sync/chan"
 import "core:testing"
 import library "spotify/library"
+import player "spotify/player"
+
+@(test)
+worker_cancellation_closes_once_and_preserves_queued_packets :: proc(t: ^testing.T) {
+	queue, err := chan.create_buffered(chan.Chan(player.Packet), 1, context.allocator)
+	if !testing.expect(t, err == nil) {return}
+	defer chan.destroy(queue)
+	_ = chan.send(queue, player.Packet{kind = .End})
+	cancel, closed := false, false
+	cancel_worker(queue, &cancel, &closed)
+	cancel_worker(queue, &cancel, &closed)
+	testing.expect(t, sync.atomic_load(&cancel) && closed)
+	testing.expect(t, !chan.send(queue, player.Packet{kind = .Failed}))
+	packet, received := chan.try_recv(queue)
+	testing.expect(t, received && packet.kind == .End)
+	_, received = chan.try_recv(queue)
+	testing.expect(t, !received)
+}
 
 @(test)
 resolved_track_source_is_reused_only_for_the_same_track_and_cleared :: proc(t: ^testing.T) {
