@@ -208,7 +208,15 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 					d,
 				)
 			}
-			if clay.UI()({layout = {childGap = u16(10 * d), childAlignment = {y = .Center}}}) {
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {width = clay.SizingGrow({})},
+					childGap = u16(10 * d),
+					childAlignment = {y = .Center},
+				},
+			},
+			) {
 				clay.Text(
 					view.elapsed,
 					clay.TextElementConfig{fontId = 1, fontSize = 12, textColor = MUTED},
@@ -216,7 +224,7 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 				if clay.UI_WithId(clay.ID("seek_slider"))(
 				{
 					layout = {
-						sizing = {width = clay.SizingFixed(300 * d), height = clay.SizingFixed(24 * d)},
+						sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(24 * d)},
 						childAlignment = {y = .Center},
 					},
 				},
@@ -225,7 +233,7 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 					{
 						layout = {
 							sizing = {
-								width = clay.SizingFixed(300 * d),
+								width = clay.SizingGrow({}),
 								height = clay.SizingFixed(4 * d),
 							},
 						},
@@ -238,7 +246,7 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 							{
 								layout = {
 									sizing = {
-										width = clay.SizingFixed(300 * d * view.progress),
+										width = clay.SizingPercent(view.progress),
 										height = clay.SizingFixed(4 * d),
 									},
 								},

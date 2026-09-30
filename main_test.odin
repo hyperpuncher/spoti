@@ -170,6 +170,12 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 							"selected cards need a persistent subtle background",
 						)
 					}
+					seek := clay.GetElementData(clay.ID("seek_slider"))
+					testing.expect(
+						t,
+						seek.found && seek.boundingBox.width > 500 * d,
+						"seek bar should use available footer width",
+					)
 					testing.expect(t, !clay.GetElementData(clay.ID("toolbar_home")).found)
 					testing.expect(t, !clay.GetElementData(clay.ID("toolbar_search")).found)
 					testing.expect(t, clay.GetElementData(clay.ID("toolbar_library")).found)
