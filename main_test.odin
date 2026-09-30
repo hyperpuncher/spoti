@@ -73,6 +73,12 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		delete(textures.by_key)
 		delete(textures.requested)
 	}
+	footer_overlap_found := false
+	defer testing.expect(
+		t,
+		footer_overlap_found,
+		"regression must exercise a clipped row overlapping next",
+	)
 	for d in ([]f32{1, 1.5}) {
 		density = d
 		clay.ResetMeasureTextCache()
@@ -121,6 +127,24 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						d,
 					)
 					testing.expect_value(t, errors, 0)
+					if source == .Album && fraction == 0 {
+						button := clay.GetElementData(clay.ID("footer_next")).boundingBox
+						point := sdl.FPoint {
+							button.x + button.width / 2,
+							button.y + button.height / 2,
+						}
+						testing.expect(t, hit("footer_next", point))
+						overlapped := false
+						for index in visible.tracks.first ..< visible.tracks.last {
+							if hit_index("track_row", point, u32(index)) {overlapped = true}
+							testing.expect(
+								t,
+								!hit_clipped("track_row", "detail_rows", point, u32(index)),
+								"footer clicks must not select clipped overscan rows",
+							)
+						}
+						footer_overlap_found = footer_overlap_found || overlapped
+					}
 					if source == .Album && fraction == 0 {
 						found_selected, hero_play, footer_pause := false, false, false
 						for command in commands.internalArray[:commands.length] {

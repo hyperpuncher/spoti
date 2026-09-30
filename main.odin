@@ -34,6 +34,12 @@ hit :: proc(id: string, point: sdl.FPoint) -> bool {
 	return hit_index(id, point, 0)
 }
 
+// Overscan items can have rectangles outside their scroll viewport. Drawing
+// is clipped by Clay, but explicit rectangle hit tests must check the clip too.
+hit_clipped :: proc(id, clip: string, point: sdl.FPoint, index: u32 = 0) -> bool {
+	return hit(clip, point) && hit_index(id, point, index)
+}
+
 pointer_over :: proc(id: string, index: u32 = 0) -> bool {
 	return clay.PointerOver(clay.ID(id, index))
 }
@@ -602,7 +608,7 @@ main :: proc() {
 				if !handled {
 					for index in visible.cards.first ..< visible.cards.last {
 						entry := library_client.pages[filter].items[index]
-						if !hit_index("card", mouse_click, u32(index)) {continue}
+						if !hit_clipped("card", "library_grid", mouse_click, u32(index)) {continue}
 						source: library.Source
 						id := entry.uri
 						if strings.has_prefix(id, "spotify:playlist:") {
@@ -624,12 +630,17 @@ main :: proc() {
 					if hit("spotify_link", mouse_click) && !library_client.detail_loading {
 						open_spotify_detail(&library_client.detail)
 						handled = true
-					} else if hit("detail_more", mouse_click) {
+					} else if hit_clipped("detail_more", "detail_rows", mouse_click) {
 						handled = library.more_rows(&library_client)
 					} else if library_client.detail.source == .Artist {
 						for index in visible.releases.first ..< visible.releases.last {
 							release := library_client.detail.releases[index]
-							if !hit_index("release_card", mouse_click, u32(index)) {continue}
+							if !hit_clipped(
+								"release_card",
+								"detail_rows",
+								mouse_click,
+								u32(index),
+							) {continue}
 							id := release.uri
 							if strings.has_prefix(id, "spotify:album:") {
 								id = id[len("spotify:album:"):]
@@ -639,7 +650,12 @@ main :: proc() {
 						}
 					} else {
 						for index in visible.tracks.first ..< visible.tracks.last {
-							if !hit_index("track_row", mouse_click, u32(index)) {continue}
+							if !hit_clipped(
+								"track_row",
+								"detail_rows",
+								mouse_click,
+								u32(index),
+							) {continue}
 							build_play_queue(
 								&play_queue,
 								library_client.detail.rows[:],
