@@ -60,6 +60,32 @@ corrupt_ciphertext_is_rejected_and_can_be_replaced :: proc(t: ^testing.T) {
 }
 
 @(test)
+cache_retains_closed_tracks_when_the_budget_has_room :: proc(t: ^testing.T) {
+	dir, err := os.make_directory_temp("/tmp", "spoti-audio-room-*", context.allocator)
+	if !testing.expect(t, err == nil) {return}
+	defer {_ = os.remove_all(dir); delete(dir)}
+	budget := i64(2 * (512 + cache_payload_offset(512)))
+	id: [20]u8
+	id[0] = 5
+	first := open_disk_cache(id, dir, budget)
+	bytes: [512]u8 = 7
+	write_disk_range(&first, 0, len(bytes), bytes[:])
+	close_disk_cache(&first)
+	id[0] = 6
+	second := open_disk_cache(id, dir, budget)
+	defer close_disk_cache(&second)
+	write_disk_range(&second, 0, len(bytes), bytes[:])
+	testing.expect(t, second.file != nil)
+	id[0] = 5
+	first = open_disk_cache(id, dir, budget)
+	defer close_disk_cache(&first)
+	cached, found := read_disk_range(&first, 0)
+	defer delete(cached)
+	testing.expect(t, found && len(cached) == len(bytes))
+	if found {for byte in cached {testing.expect_value(t, byte, u8(7))}}
+}
+
+@(test)
 cache_evicts_least_recently_used_closed_track :: proc(t: ^testing.T) {
 	dir, err := os.make_directory_temp("/tmp", "spoti-audio-lru-*", context.allocator)
 	testing.expect(t, err == nil)

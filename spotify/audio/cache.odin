@@ -119,17 +119,15 @@ cache_make_room :: proc(directory: string, limit, reserve: i64) -> bool {
 		for entry in entries {os.file_info_delete(entry, context.allocator)}
 		delete(entries)
 	}
-	slice.sort_by(
-		entries,
-		proc(a, b: os.File_Info) -> bool {return(
-				time.diff(a.modification_time, b.modification_time) >
-				0 \
-			)},
-	)
 	total: i64
 	for entry in entries {
 		if entry.type == .Regular && strings.has_suffix(entry.name, ".audio") {total += entry.size}
 	}
+	if total + reserve <= limit {return true}
+	// Only order entries when eviction is actually needed.
+	slice.sort_by(entries, proc(a, b: os.File_Info) -> bool {
+		return time.diff(a.modification_time, b.modification_time) > 0
+	})
 	for entry in entries {
 		if total + reserve <= limit {return true}
 		if entry.type != .Regular ||
