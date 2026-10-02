@@ -2,9 +2,7 @@ package main
 
 import "base:runtime"
 import "core:math"
-import "core:sync/chan"
 import "core:testing"
-import "core:thread"
 import library "spotify/library"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
@@ -221,91 +219,6 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 			}
 		}
 	}
-}
-
-@(test)
-cover_requests_follow_visible_cards_and_player :: proc(t: ^testing.T) {
-	requests, err := chan.create_buffered(chan.Chan(library.Cover_Request), 4, context.allocator)
-	if err != nil {testing.fail_now(t, "channel")}
-	defer chan.destroy(requests)
-	fake_worker: thread.Thread
-	client := library.Client {
-		state          = .Ready,
-		cover_worker   = &fake_worker,
-		cover_requests = requests,
-	}
-	client.pages[.Albums].items = make([dynamic]library.Entry, 3)
-	defer delete(client.pages[.Albums].items)
-	client.pages[.Albums].items[0].image = "offscreen-before"
-	client.pages[.Albums].items[1].image = "visible"
-	client.pages[.Albums].items[2].image = "offscreen-after"
-	textures := Textures {
-		requested = make(map[u64]Cover_Request_State),
-	}
-	defer delete(textures.requested)
-	visible := Frame_Visible {
-		cards = {first = 1, last = 2},
-	}
-	ensure_covers(&client, &textures, .Albums, "player", visible)
-	testing.expect_value(t, client.covers_pending, 2)
-	for expected in ([]string{"player", "visible"}) {
-		request, received := chan.try_recv(requests)
-		testing.expect(t, received)
-		testing.expect_value(t, request.url, expected)
-		delete(request.url)
-	}
-	testing.expect(t, cover_key("offscreen-before") not_in textures.requested)
-	testing.expect(t, cover_key("offscreen-after") not_in textures.requested)
-	// Already-requested covers must not be queued every frame.
-	ensure_covers(&client, &textures, .Albums, "player", visible)
-	testing.expect_value(t, client.covers_pending, 2)
-	key := cover_key("visible")
-	// A failed completion permits exactly one retry, not a request every frame.
-	state := textures.requested[key]
-	state.pending = false
-	textures.requested[key] = state
-	ensure_covers(&client, &textures, .Albums, "player", visible)
-	request, received := chan.try_recv(requests)
-	testing.expect(t, received)
-	testing.expect_value(t, request.url, "visible")
-	delete(request.url)
-	testing.expect_value(t, textures.requested[key].attempts, u8(2))
-	state = textures.requested[key]
-	state.pending = false
-	textures.requested[key] = state
-	ensure_covers(&client, &textures, .Albums, "player", visible)
-	_, received = chan.try_recv(requests)
-	testing.expect(t, !received, "exhausted failures must not loop forever")
-	retry_failed_covers(&textures)
-	ensure_covers(&client, &textures, .Albums, "player", visible)
-	request, received = chan.try_recv(requests)
-	testing.expect(t, received)
-	testing.expect_value(t, request.url, "visible")
-	delete(request.url)
-	testing.expect(
-		t,
-		textures.requested[cover_key("player")].pending,
-		"reselecting must not duplicate pending downloads",
-	)
-}
-
-@(test)
-player_cover_remains_until_the_replacement_texture_is_ready :: proc(t: ^testing.T) {
-	textures := Textures {
-		by_key = make(map[u64]^sdl.Texture),
-	}
-	defer delete(textures.by_key)
-	fake: sdl.Texture
-	textures.by_key[cover_key("first")] = &fake
-	displayed: string
-	defer delete(displayed)
-	retain_player_cover(&displayed, "first", &textures)
-	testing.expect_value(t, displayed, "first")
-	retain_player_cover(&displayed, "next", &textures)
-	testing.expect_value(t, displayed, "first")
-	textures.by_key[cover_key("next")] = &fake
-	retain_player_cover(&displayed, "next", &textures)
-	testing.expect_value(t, displayed, "next")
 }
 
 @(test)

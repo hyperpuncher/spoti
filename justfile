@@ -33,6 +33,7 @@ test:
 	odin test spotify/audio
 	odin test spotify/artwork
 	odin test spotify/http
+	odin test ui
 
 # Network diagnostic: connects to a Spotify AP without signing in.
 probe:
