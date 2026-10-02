@@ -47,9 +47,9 @@ decode :: proc(pointer: rawptr) -> (ok: bool) {
 		// Each iteration owns its buffer until a successful channel transfer.
 		defer delete(pcm)
 		position := audio.seek_frame_position(media)
-		frames, ok := audio.read_seek_pcm(media, pcm)
+		frames, read_ok := audio.read_seek_pcm(media, pcm)
 		if work.cancel != nil && sync.atomic_load(work.cancel) {return}
-		if !ok || (frames > 0 && media.sample_rate <= 0) {
+		if !read_ok || (frames > 0 && media.sample_rate <= 0) {
 			_ = chan.send(work.queue, Packet{kind = .Failed})
 			return
 		}

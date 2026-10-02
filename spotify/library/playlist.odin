@@ -64,8 +64,8 @@ fetch_playlist_rows :: proc(
 }
 
 parse_playlist_window :: proc(body: []u8, offset: int) -> (window: Playlist_Window, ok: bool) {
-	length, found, valid := ap.get_number(body, 2)
-	if !valid || !found || length > 1_000_000 || offset < 0 || offset > 1_000_000 {return}
+	length, found, length_valid := ap.get_number(body, 2)
+	if !length_valid || !found || length > 1_000_000 || offset < 0 || offset > 1_000_000 {return}
 	contents, present, readable := ap.get_bytes(body, 5)
 	if !readable || !present {return}
 	position, seen, parsed := ap.get_number(contents, 1)
@@ -75,12 +75,12 @@ parse_playlist_window :: proc(body: []u8, offset: int) -> (window: Playlist_Wind
 	uris := make([dynamic]string, 0, PLAYLIST_PAGE_SIZE, context.temp_allocator)
 	pos := 0
 	for pos < len(contents) {
-		field, wire, item, _, valid := ap.next_field(contents, &pos)
-		if !valid {return}
+		field, wire, item, _, field_valid := ap.next_field(contents, &pos)
+		if !field_valid {return}
 		if field != 3 {continue}
 		if wire != 2 || len(uris) >= PLAYLIST_PAGE_SIZE {return}
-		uri, found, item_valid := ap.get_bytes(item, 1)
-		if !item_valid || !found || len(uri) == 0 || len(uri) > 512 {return}
+		uri, uri_found, item_valid := ap.get_bytes(item, 1)
+		if !item_valid || !uri_found || len(uri) == 0 || len(uri) > 512 {return}
 		append(&uris, string(uri))
 	}
 	window.total = int(length)
@@ -139,28 +139,28 @@ parse_playlist_metadata :: proc(
 	}
 	pos := 0
 	for pos < len(body) {
-		field, wire, array, _, valid := ap.next_field(body, &pos)
-		if !valid {return}
-		if field != 2 {continue}
-		if wire != 2 {return}
-		kind, _, parsed := ap.get_number(array, 2)
-		if !parsed {return}
+		array_field, array_wire, array, _, array_valid := ap.next_field(body, &pos)
+		if !array_valid {return}
+		if array_field != 2 {continue}
+		if array_wire != 2 {return}
+		kind, _, kind_valid := ap.get_number(array, 2)
+		if !kind_valid {return}
 		if kind != 10 {continue}
-		provider, readable := playlist_proto_status(array)
-		if !readable || provider != 0 && provider != 200 {return}
+		provider, provider_valid := playlist_proto_status(array)
+		if !provider_valid || provider != 0 && provider != 200 {return}
 		cursor := 0
 		for cursor < len(array) {
-			field, wire, entity, _, valid := ap.next_field(array, &cursor)
-			if !valid {return}
-			if field != 3 {continue}
-			if wire != 2 {return}
-			uri_bytes, present, parsed := ap.get_bytes(entity, 2)
-			if !present || !parsed {return}
+			entity_field, entity_wire, entity, _, entity_valid := ap.next_field(array, &cursor)
+			if !entity_valid {return}
+			if entity_field != 3 {continue}
+			if entity_wire != 2 {return}
+			uri_bytes, present, uri_valid := ap.get_bytes(entity, 2)
+			if !present || !uri_valid {return}
 			uri := string(uri_bytes)
 			answer, requested := &answers[uri]
 			if !requested || answer.seen {return}
-			code, readable := playlist_proto_status(entity)
-			if !readable {return}
+			code, status_valid := playlist_proto_status(entity)
+			if !status_valid {return}
 			answer.seen = true
 			if code == 404 || code == 451 {continue} 	// unavailable tracks are not playable
 			if code != 0 && code != 200 {return}
@@ -194,10 +194,10 @@ playlist_track_row :: proc(
 	row: Track_Row,
 	ok: bool,
 ) {
-	id, valid := playlist_track_id(uri)
-	if !valid {return}
-	gid, found, parsed := ap.get_bytes(body, 1)
-	if !found || !parsed || len(gid) != 16 {return}
+	id, id_valid := playlist_track_id(uri)
+	if !id_valid {return}
+	gid, found, gid_valid := ap.get_bytes(body, 1)
+	if !found || !gid_valid || len(gid) != 16 {return}
 	for b, i in gid {if b != id[i] {return}}
 	name, present, readable := ap.get_bytes(body, 2)
 	if !present || !readable {return}
@@ -212,14 +212,14 @@ playlist_track_row :: proc(
 	images := make([dynamic]Image, context.temp_allocator)
 	pos := 0
 	for pos < len(body) {
-		field, wire, bytes, _, valid := ap.next_field(body, &pos)
-		if !valid {return}
+		field, wire, bytes, _, field_valid := ap.next_field(body, &pos)
+		if !field_valid {return}
 		switch field {
 		case 4:
 			if wire != 2 || len(artists) >= 128 {return}
-			name, _, valid := ap.get_bytes(bytes, 2)
-			if !valid {return}
-			if len(name) > 0 {append(&artists, Artist{name = string(name)})}
+			artist_name, _, artist_valid := ap.get_bytes(bytes, 2)
+			if !artist_valid {return}
+			if len(artist_name) > 0 {append(&artists, Artist{name = string(artist_name)})}
 		case 3:
 			if wire != 2 || !playlist_album_images(bytes, &images) {return}
 		}

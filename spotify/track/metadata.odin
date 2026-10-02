@@ -41,11 +41,11 @@ parse_metadata :: proc(message: []u8, expected_id: [16]u8) -> (track: Metadata, 
 			track.duration_ms, seen_duration = int(number >> 1), true
 		case 12:
 			if wire != 2 {return {}, false}
-			file_id, found, valid := ap.get_bytes(bytes, 1)
-			if !found || !valid || len(file_id) != 20 {continue}
+			file_id, found, file_valid := ap.get_bytes(bytes, 1)
+			if !found || !file_valid || len(file_id) != 20 {continue}
 			format: u64
-			format, found, valid = ap.get_number(bytes, 2)
-			if !found || !valid || format > 2 {continue}
+			format, found, file_valid = ap.get_number(bytes, 2)
+			if !found || !file_valid || format > 2 {continue}
 			preference := format == 2 ? 3 : format == 1 ? 2 : 1
 			if preference > best {
 				copy(track.file_id[:], file_id)

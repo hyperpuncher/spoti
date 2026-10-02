@@ -1,3 +1,6 @@
+vet_flags := "-vet -vet-cast -vet-style -vet-semicolon -vet-tabs"
+project_packages := "main,ap,artwork,audio,credential,diagnostic,http,library,oauth,player,session,shannon,track,ui"
+
 default: run
 
 _prepare:
@@ -16,10 +19,10 @@ fmt:
 	odinfmt . -w
 
 check: _prepare
-	odin check . -vet-unused-imports -vet-unused-variables
-	odin check cmd/ap_probe -vet-unused-imports -vet-unused-variables
-	odin check cmd/ap_login -vet-unused-imports -vet-unused-variables
-	odin check cmd/logout -vet-unused-imports -vet-unused-variables
+	odin check . {{vet_flags}} -vet-packages={{project_packages}}
+	odin check cmd/ap_probe {{vet_flags}}
+	odin check cmd/ap_login {{vet_flags}}
+	odin check cmd/logout {{vet_flags}}
 
 test:
 	./scripts/build-vorbis.sh

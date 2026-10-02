@@ -55,8 +55,8 @@ next_field :: proc(
 		pos^ += 8
 		ok = true
 	case 2:
-		length, valid := read_varint(data, pos)
-		if !valid || length > u64(len(data) - pos^) {return}
+		length, length_valid := read_varint(data, pos)
+		if !length_valid || length > u64(len(data) - pos^) {return}
 		bytes = data[pos^:pos^ + int(length)]
 		pos^ += int(length)
 		ok = true
