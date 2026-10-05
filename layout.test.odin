@@ -32,6 +32,9 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		{1280, 820},
 		{handler = layout_test_error, userData = &errors},
 	)
+	// Clay holds the context process-global; a deleted arena must never
+	// dangle into the next test's MinMemorySize.
+	defer clay.SetCurrentContext(nil)
 	density: f32 = 1
 	clay.SetMeasureTextFunction(layout_test_measure, &density)
 

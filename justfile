@@ -25,8 +25,10 @@ check: _prepare
 	odin check cmd/ap_login {{vet_flags}}
 	odin check cmd/logout {{vet_flags}}
 
+# Clay keeps its current context in a process-global, so layout tests
+# must not run concurrently with each other. One test thread for all.
 test: _prepare
-	odin test .
+	odin test . -define:ODIN_TEST_THREADS=1
 	odin test spotify/ap
 	odin test spotify/shannon
 	odin test spotify/oauth
