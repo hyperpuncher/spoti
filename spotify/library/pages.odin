@@ -204,6 +204,80 @@ joined_artists :: proc(artists: []Artist, allocator: runtime.Allocator) -> strin
 	return strings.to_string(builder)
 }
 
+// Shared entry builders for library pages and search results. Each skips
+// entries without a usable name, URI or cover.
+append_playlist_entry :: proc(
+	items: ^[dynamic]Entry,
+	row: Playlist_Ref,
+	allocator: runtime.Allocator,
+) {
+	total := row.items.total
+	image := cover_url(row.images)
+	if len(row.name) == 0 || len(row.uri) > 128 || image == "" {return}
+	append(
+		items,
+		Entry {
+			name = strings.clone(row.name, allocator),
+			uri = strings.clone(row.uri, allocator),
+			image = strings.clone(image, allocator),
+			subtitle = strings.clone(row.owner.display_name, allocator),
+			total = total,
+		},
+	)
+}
+
+append_album_entry :: proc(
+	items: ^[dynamic]Entry,
+	album: Album_Ref,
+	allocator: runtime.Allocator,
+) {
+	image := cover_url(album.images)
+	if len(album.name) == 0 || len(album.uri) > 128 || image == "" {return}
+	append(
+		items,
+		Entry {
+			name = strings.clone(album.name, allocator),
+			uri = strings.clone(album.uri, allocator),
+			image = strings.clone(image, allocator),
+			subtitle = joined_artists(album.artists, allocator),
+			total = album.total_tracks,
+		},
+	)
+}
+
+append_artist_entry :: proc(items: ^[dynamic]Entry, row: Artist, allocator: runtime.Allocator) {
+	if len(row.name) == 0 || len(row.id) == 0 {return}
+	uri := row.uri
+	if len(uri) ==
+	   0 {uri = fmt.aprintf("spotify:artist:%s", row.id, allocator = context.temp_allocator)}
+	append(
+		items,
+		Entry {
+			name = strings.clone(row.name, allocator),
+			uri = strings.clone(uri, allocator),
+			image = strings.clone(cover_url(row.images), allocator),
+			subtitle = strings.clone("Artist", allocator),
+		},
+	)
+}
+
+append_track_entry :: proc(
+	items: ^[dynamic]Entry,
+	track: Track_Ref,
+	allocator: runtime.Allocator,
+) {
+	if len(track.name) == 0 || len(track.uri) > 128 {return}
+	append(
+		items,
+		Entry {
+			name = strings.clone(track.name, allocator),
+			uri = strings.clone(track.uri, allocator),
+			image = strings.clone(cover_url(track.album.images), allocator),
+			subtitle = joined_artists(track.artists, allocator),
+		},
+	)
+}
+
 fetch_index :: proc(
 	access: string,
 	kind: Kind,
@@ -277,21 +351,7 @@ parse_playlists :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -
 	page.next_offset = decoded.offset + len(decoded.items)
 	if !sane_page(page.total, len(decoded.items), page.next_offset) {return false}
 	page.items = make([dynamic]Entry, 0, len(decoded.items), allocator)
-	for row in decoded.items {
-		total := row.items.total
-		image := cover_url(row.images)
-		if len(row.name) == 0 || len(row.uri) > 128 || image == "" {continue}
-		append(
-			&page.items,
-			Entry {
-				name = strings.clone(row.name, allocator),
-				uri = strings.clone(row.uri, allocator),
-				image = strings.clone(image, allocator),
-				subtitle = strings.clone(row.owner.display_name, allocator),
-				total = total,
-			},
-		)
-	}
+	for row in decoded.items {append_playlist_entry(&page.items, row, allocator)}
 	return true
 }
 
@@ -303,20 +363,7 @@ parse_albums :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> b
 	page.next_offset = decoded.offset + len(decoded.items)
 	if !sane_page(page.total, len(decoded.items), page.next_offset) {return false}
 	page.items = make([dynamic]Entry, 0, len(decoded.items), allocator)
-	for row in decoded.items {
-		image := cover_url(row.album.images)
-		if len(row.album.name) == 0 || len(row.album.uri) > 128 || image == "" {continue}
-		append(
-			&page.items,
-			Entry {
-				name = strings.clone(row.album.name, allocator),
-				uri = strings.clone(row.album.uri, allocator),
-				image = strings.clone(image, allocator),
-				subtitle = joined_artists(row.album.artists, allocator),
-				total = row.album.total_tracks,
-			},
-		)
-	}
+	for row in decoded.items {append_album_entry(&page.items, row.album, allocator)}
 	return true
 }
 
@@ -330,21 +377,7 @@ parse_artists :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> 
 	page.next_offset = len(window.items)
 	if !sane_page(page.total, len(window.items), page.next_offset) {return false}
 	page.items = make([dynamic]Entry, 0, len(window.items), allocator)
-	for row in window.items {
-		if len(row.name) == 0 || len(row.id) == 0 {continue}
-		uri := row.uri
-		if len(uri) ==
-		   0 {uri = fmt.aprintf("spotify:artist:%s", row.id, allocator = context.temp_allocator)}
-		append(
-			&page.items,
-			Entry {
-				name = strings.clone(row.name, allocator),
-				uri = strings.clone(uri, allocator),
-				image = strings.clone(cover_url(row.images), allocator),
-				subtitle = strings.clone("Artist", allocator),
-			},
-		)
-	}
+	for row in window.items {append_artist_entry(&page.items, row, allocator)}
 	return true
 }
 
@@ -357,19 +390,7 @@ parse_tracks :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> b
 	page.next_offset = decoded.offset + len(decoded.items)
 	if !sane_page(page.total, len(decoded.items), page.next_offset) {return false}
 	page.items = make([dynamic]Entry, 0, len(decoded.items), allocator)
-	for row in decoded.items {
-		track := row.track
-		if len(track.name) == 0 || len(track.uri) > 128 {continue}
-		append(
-			&page.items,
-			Entry {
-				name = strings.clone(track.name, allocator),
-				uri = strings.clone(track.uri, allocator),
-				image = strings.clone(cover_url(track.album.images), allocator),
-				subtitle = joined_artists(track.artists, allocator),
-			},
-		)
-	}
+	for row in decoded.items {append_track_entry(&page.items, row.track, allocator)}
 	return true
 }
 

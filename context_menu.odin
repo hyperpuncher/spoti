@@ -54,6 +54,18 @@ open_track_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, track: int, uri:
 	menu.count = 2
 }
 
+// Search tracks play with a left click; the menu only links out.
+open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
+	free_context_menu(menu)
+	menu.open = true
+	menu.point = point
+	menu.track = -1
+	menu.uri = strings.clone(uri)
+	menu.items[0] = .Open_In_Spotify
+	menu.labels[0] = "Open in Spotify"
+	menu.count = 1
+}
+
 context_menu :: proc(view: View, d: f32) {
 	if !view.menu_open {return}
 	if clay.UI_WithId(clay.ID("context_menu"))(
@@ -95,7 +107,8 @@ context_menu :: proc(view: View, d: f32) {
 open_menu_at :: proc(
 	menu: ^Context_Menu,
 	client: ^library.Client,
-	filter: library.Kind,
+	page: ^library.Page,
+	kind: library.Kind,
 	visible: Frame_Visible,
 	point: sdl.FPoint,
 	settings: ^Settings,
@@ -107,8 +120,12 @@ open_menu_at :: proc(
 	}
 	for index in visible.cards.first ..< visible.cards.last {
 		if !hit_clipped("card", "library_grid", point, u32(index)) {continue}
-		entry := client.pages[filter].items[index]
-		open_card_menu(menu, point, entry.uri, settings_is_pinned(settings, entry.uri))
+		entry := page.items[index]
+		if kind == .Tracks {
+			open_link_menu(menu, point, entry.uri)
+		} else {
+			open_card_menu(menu, point, entry.uri, settings_is_pinned(settings, entry.uri))
+		}
 		return
 	}
 	menu.open = false

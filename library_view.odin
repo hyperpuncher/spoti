@@ -155,7 +155,11 @@ library_card :: proc(
 sidebar :: proc(
 	client: ^library.Client,
 	settings: ^Settings,
-	filter: library.Kind,
+	page: ^library.Page,
+	tabs: []library.Kind,
+	labels: []string,
+	active: library.Kind,
+	searching: bool,
 	textures: ^Textures,
 	width, viewport_height, card_text_height, d: f32,
 ) -> (
@@ -173,10 +177,29 @@ sidebar :: proc(
 	},
 	) {
 		if clay.UI()({layout = {childGap = u16(8 * d), childAlignment = {y = .Center}}}) {
-			tabs := LIBRARY_TABS
-			labels := LIBRARY_TAB_LABELS
 			for kind, index in tabs {
-				chip(labels[index], u32(index), filter == kind, d)
+				chip(labels[index], u32(index), active == kind, d)
+			}
+		}
+		if searching {
+			status := ""
+			if client.search_loading {
+				status = "Searching..."
+			} else if client.search_error != 0 {
+				if client.search_error > 0 {
+					status = fmt.aprintf(
+						"Search failed (HTTP %d). Press Enter to retry.",
+						client.search_error,
+						allocator = context.temp_allocator,
+					)
+				} else {
+					status = "Search failed. Press Enter to retry."
+				}
+			} else if len(page.items) == 0 {
+				status = "No results."
+			}
+			if len(status) > 0 {
+				clay.Text(status, clay.TextElementConfig{fontSize = 13, textColor = MUTED})
 			}
 		}
 		if clay.UI_WithId(clay.ID("library_grid"))(
@@ -189,7 +212,6 @@ sidebar :: proc(
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 		},
 		) {
-			page := &client.pages[filter]
 			// Cards own their padding, so rows do not add a second outer gap.
 			usable := max(180 * d, width * d - 36 * d)
 			columns := clamp(int(usable / (140 * d)), 2, 4)

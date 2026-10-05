@@ -21,6 +21,8 @@ SEEK_MAX_WIDTH :: 620
 
 LIBRARY_TABS :: [3]library.Kind{.Playlists, .Albums, .Artists}
 LIBRARY_TAB_LABELS :: [3]string{"Playlists", "Albums", "Artists"}
+SEARCH_TABS :: [4]library.Kind{.Playlists, .Albums, .Artists, .Tracks}
+SEARCH_TAB_LABELS :: [4]string{"Playlists", "Albums", "Artists", "Tracks"}
 
 View :: struct {
 	title:        string,
@@ -36,6 +38,8 @@ View :: struct {
 	volume:       f32,
 	input_active: bool,
 	pinned:       bool,
+	search_mode:  bool,
+	search_kind:  library.Kind,
 	menu_open:    bool,
 	menu_x:       f32,
 	menu_y:       f32,
@@ -345,10 +349,28 @@ layout :: proc(
 		if clay.UI()(
 		{layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})}}},
 		) {
+			library_tabs := LIBRARY_TABS
+			library_labels := LIBRARY_TAB_LABELS
+			search_tabs := SEARCH_TABS
+			search_labels := SEARCH_TAB_LABELS
+			page := &client.pages[filter]
+			tabs := library_tabs[:]
+			labels := library_labels[:]
+			active := filter
+			if view.search_mode {
+				page = &client.search_pages[view.search_kind]
+				tabs = search_tabs[:]
+				labels = search_labels[:]
+				active = view.search_kind
+			}
 			visible.cards = sidebar(
 				client,
 				settings,
-				filter,
+				page,
+				tabs,
+				labels,
+				active,
+				view.search_mode,
 				textures,
 				sidebar_width,
 				viewport_height,

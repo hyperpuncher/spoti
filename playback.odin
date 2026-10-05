@@ -62,6 +62,24 @@ build_play_queue :: proc(
 	}
 }
 
+// Search tracks arrive as cards, not detail rows. The subtitle carries the
+// artists and the image carries the cover, so a queue builds directly.
+build_play_queue_from_entries :: proc(items: ^[dynamic]Play_Item, entries: []library.Entry) {
+	free_play_queue(items)
+	items^ = make([dynamic]Play_Item, 0, len(entries))
+	for entry, index in entries {
+		append(
+			items,
+			Play_Item {
+				uri = strings.clone(entry.uri),
+				artist = strings.clone(entry.subtitle),
+				cover = strings.clone(entry.image),
+				order = index,
+			},
+		)
+	}
+}
+
 // Stable ordinals distinguish repeated tracks and restore the original order.
 reorder_play_queue :: proc(items: []Play_Item, index: int, shuffle: bool) -> int {
 	if index < 0 || index >= len(items) {return index}

@@ -5,6 +5,7 @@ package library
 
 import diagnostic "../../diagnostic"
 import artwork "../artwork"
+import credential "../credential"
 import oauth "../oauth"
 import "base:runtime"
 import "core:fmt"
@@ -28,6 +29,7 @@ Request_Kind :: enum {
 	Index,
 	Detail,
 	More,
+	Search,
 }
 
 Request :: struct {
@@ -37,23 +39,28 @@ Request :: struct {
 	cursor: string, // Index; worker frees
 	source: Source,
 	id:     string, // Detail, More; worker frees
+	query:  string, // Search; worker frees
+	serial: u64, // Search; echoes back so stale results are dropped
 }
 
 Result :: struct {
-	kind:        Request_Kind,
-	list:        Kind,
-	page:        Page,
-	detail:      Detail,
-	rows:        [dynamic]Track_Row, // allocated in rows_arena
-	releases:    [dynamic]Entry, // allocated in rows_arena
-	rows_arena:  virtual.Arena,
-	total:       int,
-	next_offset: int,
-	has_more:    bool,
-	source:      Source,
-	id:          string, // Detail, More; receiver frees
-	status:      int,
-	ok:          bool,
+	kind:          Request_Kind,
+	list:          Kind,
+	page:          Page,
+	detail:        Detail,
+	rows:          [dynamic]Track_Row, // allocated in rows_arena
+	releases:      [dynamic]Entry, // allocated in rows_arena
+	rows_arena:    virtual.Arena,
+	search_pages:  [Kind]Page, // Search; receiver frees or adopts
+	search_query:  string, // Search; receiver frees or adopts
+	search_serial: u64, // Search; only the latest applies
+	total:         int,
+	next_offset:   int,
+	has_more:      bool,
+	source:        Source,
+	id:            string, // Detail, More; receiver frees
+	status:        int,
+	ok:            bool,
 }
 
 Cover_Request :: struct {
@@ -88,6 +95,11 @@ Client :: struct {
 	last_http_status:      int,
 	failed:                bool,
 	remember:              bool,
+	search_query:          string, // applied query; owned
+	search_serial:         u64, // latest request; stale results are dropped
+	search_loading:        bool,
+	search_error:          int,
+	search_pages:          [Kind]Page,
 }
 
 run :: proc(pointer: rawptr) {
@@ -113,9 +125,70 @@ run :: proc(pointer: rawptr) {
 free_request :: proc(request: Request) {
 	delete(request.cursor)
 	delete(request.id)
+	delete(request.query)
+}
+
+// The access token lives about an hour. Search and pagination fire long
+// after startup, so they renew it on demand instead of failing with 401.
+// A failed renewal fails the request; the UI keeps its old state.
+ensure_tokens :: proc(client: ^Client, tokens: ^oauth.Tokens) -> bool {
+	if !oauth.expired(tokens^) {return true}
+	if sync.atomic_load(&client.cancel) {return false}
+	client_id := os.get_env("WEB_CLIENT_ID", context.temp_allocator)
+	if !valid_client_id(client_id) {return false}
+	grant := oauth.web_grant(client_id)
+	fresh, status := oauth.refresh(tokens.refresh, grant)
+	if status != .Authorized {return false}
+	oauth.wipe_tokens(tokens)
+	tokens^ = fresh
+	if client.remember && len(fresh.refresh) > 0 {
+		_ = credential.save(fresh.refresh, .Library)
+	}
+	return true
+}
+
+fail_request :: proc(client: ^Client, request: Request) {
+	switch request.kind {
+	case .Index:
+		send(client, Result{kind = .Index, list = request.list, status = -1})
+	case .Detail:
+		send(
+			client,
+			Result {
+				kind = .Detail,
+				source = request.source,
+				id = strings.clone(request.id),
+				status = -1,
+			},
+		)
+	case .More:
+		send(
+			client,
+			Result {
+				kind = .More,
+				source = request.source,
+				id = strings.clone(request.id),
+				status = -1,
+			},
+		)
+	case .Search:
+		send(
+			client,
+			Result {
+				kind = .Search,
+				search_serial = request.serial,
+				search_query = strings.clone(request.query),
+				status = -1,
+			},
+		)
+	}
 }
 
 handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Request) {
+	if !ensure_tokens(client, tokens) {
+		fail_request(client, request)
+		return
+	}
 	switch request.kind {
 	case .Index:
 		page, status, ok := fetch_index(
@@ -187,6 +260,19 @@ handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Reque
 				read_session_playlist(client, streaming, request.id, request.offset, allocator)
 		}
 		send(client, aresult)
+	case .Search:
+		pages, status, ok := fetch_search(tokens.access, request.query)
+		send(
+			client,
+			Result {
+				kind = .Search,
+				search_serial = request.serial,
+				search_query = strings.clone(request.query),
+				search_pages = pages,
+				status = status,
+				ok = ok,
+			},
+		)
 	}
 }
 
@@ -227,6 +313,8 @@ free_result :: proc(result: Result) {
 	free_page(&local.page)
 	free_detail(&local.detail)
 	virtual.arena_destroy(&local.rows_arena)
+	free_search_pages(&local.search_pages)
+	delete(local.search_query)
 	delete(local.id)
 }
 
@@ -390,6 +478,38 @@ more_rows :: proc(client: ^Client) -> bool {
 	return true
 }
 
+// Queue a catalog search. Only the latest request applies; rapid typing
+// cannot repopulate the grid with an older query. Returns false when the
+// library is not ready or the query is empty.
+search :: proc(client: ^Client, query: string) -> bool {
+	if client.worker == nil || client.state != .Ready {return false}
+	trimmed := strings.trim_space(query)
+	if len(trimmed) == 0 || len(trimmed) > 256 {return false}
+	client.search_serial += 1
+	request := Request {
+		kind   = .Search,
+		query  = strings.clone(trimmed),
+		serial = client.search_serial,
+	}
+	if !chan.try_send(client.requests, request) {
+		delete(request.query)
+		return false
+	}
+	client.search_loading = true
+	client.search_error = 0
+	return true
+}
+
+// Drop results and invalidate any search still on the worker.
+clear_search :: proc(client: ^Client) {
+	client.search_serial += 1
+	free_search_pages(&client.search_pages)
+	delete(client.search_query)
+	client.search_query = ""
+	client.search_loading = false
+	client.search_error = 0
+}
+
 request_cover :: proc(client: ^Client, url: string, key: u64) -> bool {
 	if client.cover_worker == nil || client.state != .Ready || len(url) == 0 {return false}
 	request := Cover_Request {
@@ -504,6 +624,27 @@ apply :: proc(client: ^Client, result: Result) {
 				client.detail.has_more = local.has_more
 			}
 		}
+	case .Search:
+		if local.search_serial != client.search_serial {return}
+		client.search_loading = false
+		if !local.ok {
+			client.search_error = local.status
+			free_search_pages(&client.search_pages)
+			delete(client.search_query)
+			client.search_query = ""
+			return
+		}
+		free_search_pages(&client.search_pages)
+		for kind in Kind {
+			client.search_pages[kind] = local.search_pages[kind]
+			local.search_pages[kind] = {}
+			client.search_pages[kind].items.allocator = virtual.arena_allocator(
+				&client.search_pages[kind].arena,
+			)
+		}
+		delete(client.search_query)
+		client.search_query = local.search_query
+		local.search_query = ""
 	}
 }
 
@@ -531,6 +672,8 @@ stop :: proc(client: ^Client) {
 	for &page in client.pages {free_page(&page)}
 	free_detail(&client.detail)
 	delete(client.detail_request_id)
+	free_search_pages(&client.search_pages)
+	delete(client.search_query)
 	for i in 0 ..< len(client.cover_queue) {artwork.free_image(&client.cover_queue[i].image)}
 	delete(client.cover_queue)
 	client^ = {}

@@ -47,7 +47,7 @@ artwork_budget_preserves_player_card_and_detail_priority :: proc(t: ^testing.T) 
 		releases = {last = 1},
 	}
 	for batch in ([][4]string{{"player", "card", "hero", "preview"}, {"small", "row", "row-small", "release"}}) {
-		ensure_covers(&client, &textures, .Albums, "player", visible)
+		ensure_covers(&client, &textures, &client.pages[.Albums], "player", visible)
 		for expected in batch {
 			request, received := chan.try_recv(requests)
 			testing.expect(t, received)
@@ -57,7 +57,7 @@ artwork_budget_preserves_player_card_and_detail_priority :: proc(t: ^testing.T) 
 		_, extra := chan.try_recv(requests)
 		testing.expect(t, !extra, "each frame must queue at most four distinct covers")
 	}
-	ensure_covers(&client, &textures, .Albums, "player", visible)
+	ensure_covers(&client, &textures, &client.pages[.Albums], "player", visible)
 	_, received := chan.try_recv(requests)
 	testing.expect(t, !received, "pending requests must not be duplicated")
 }
@@ -85,7 +85,7 @@ cover_requests_follow_visible_cards_and_player :: proc(t: ^testing.T) {
 	visible := Frame_Visible {
 		cards = {first = 1, last = 2},
 	}
-	ensure_covers(&client, &textures, .Albums, "player", visible)
+	ensure_covers(&client, &textures, &client.pages[.Albums], "player", visible)
 	testing.expect_value(t, client.covers_pending, 2)
 	for expected in ([]string{"player", "visible"}) {
 		request, received := chan.try_recv(requests)
@@ -95,13 +95,13 @@ cover_requests_follow_visible_cards_and_player :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, cover_key("offscreen-before") not_in textures.requested)
 	testing.expect(t, cover_key("offscreen-after") not_in textures.requested)
-	ensure_covers(&client, &textures, .Albums, "player", visible)
+	ensure_covers(&client, &textures, &client.pages[.Albums], "player", visible)
 	testing.expect_value(t, client.covers_pending, 2)
 	key := cover_key("visible")
 	state := textures.requested[key]
 	state.pending = false
 	textures.requested[key] = state
-	ensure_covers(&client, &textures, .Albums, "player", visible)
+	ensure_covers(&client, &textures, &client.pages[.Albums], "player", visible)
 	request, received := chan.try_recv(requests)
 	testing.expect(t, received)
 	testing.expect_value(t, request.url, "visible")
@@ -110,11 +110,11 @@ cover_requests_follow_visible_cards_and_player :: proc(t: ^testing.T) {
 	state = textures.requested[key]
 	state.pending = false
 	textures.requested[key] = state
-	ensure_covers(&client, &textures, .Albums, "player", visible)
+	ensure_covers(&client, &textures, &client.pages[.Albums], "player", visible)
 	_, received = chan.try_recv(requests)
 	testing.expect(t, !received, "exhausted failures must not loop forever")
 	retry_failed_covers(&textures)
-	ensure_covers(&client, &textures, .Albums, "player", visible)
+	ensure_covers(&client, &textures, &client.pages[.Albums], "player", visible)
 	request, received = chan.try_recv(requests)
 	testing.expect(t, received)
 	testing.expect_value(t, request.url, "visible")

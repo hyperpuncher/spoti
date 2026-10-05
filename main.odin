@@ -8,6 +8,7 @@ import "core:strings"
 import "core:sync"
 import "core:sync/chan"
 import "core:thread"
+import "core:unicode/utf8"
 import diagnostic "diagnostic"
 import library "spotify/library"
 import mpris "spotify/mpris"
@@ -62,6 +63,7 @@ update_cursor :: proc(
 	resizing: bool,
 	visible: Frame_Visible,
 	seek_enabled: bool,
+	search_mode: bool,
 ) {
 	if seek_enabled && pointer_over("seek_slider") {ui.set_cursor(state, .Pointer); return}
 	if pointer_over("library_scrollbar") || pointer_over("detail_scrollbar") {
@@ -84,7 +86,8 @@ update_cursor :: proc(
 			return
 		}
 	}
-	for _, index in LIBRARY_TABS {
+	chip_count := search_mode ? len(SEARCH_TABS) : len(LIBRARY_TABS)
+	for index in 0 ..< chip_count {
 		if pointer_over("chip", u32(index)) {
 			ui.set_cursor(state, .Pointer)
 			return
@@ -131,12 +134,17 @@ open_spotify_detail :: proc(detail: ^library.Detail) {
 	_ = sdl.OpenURL(c_address)
 }
 
-ascii_track_input :: proc(value: string) -> bool {
+// Search accepts any text; only ASCII controls are rejected. Track links
+// are validated on submit, so pasted URLs and Unicode queries share a field.
+input_text_ok :: proc(value: string) -> bool {
 	for ch in transmute([]u8)value {
-		if ch < ' ' || ch > '~' {return false}
+		if ch < ' ' {return false}
 	}
 	return true
 }
+
+// Debounce catalog searches while typing; Enter searches immediately.
+SEARCH_DEBOUNCE_NS :: u64(300_000_000)
 
 // Route the wheel to the hovered scroll container and clamp its offset.
 scroll_wheel :: proc(id: string, amount, d: f32) -> bool {
@@ -181,13 +189,13 @@ ensure_cover :: proc(client: ^library.Client, textures: ^Textures, url: string, 
 ensure_covers :: proc(
 	client: ^library.Client,
 	textures: ^Textures,
-	filter: library.Kind,
+	page: ^library.Page,
 	player_cover: string,
 	visible: Frame_Visible,
 ) {
 	budget := 4
 	ensure_cover(client, textures, player_cover, &budget)
-	for entry in client.pages[filter].items[visible.cards.first:visible.cards.last] {
+	for entry in page.items[visible.cards.first:visible.cards.last] {
 		ensure_cover(client, textures, entry.image, &budget)
 	}
 	if client.detail.ready {
@@ -248,6 +256,10 @@ main :: proc() {
 	play_index := -1
 	input: string
 	input_active := false
+	search_mode := false
+	search_kind := library.Kind.Playlists
+	search_pending := false
+	search_deadline: u64
 	textures := Textures {
 		by_key    = make(map[u64]^sdl.Texture),
 		requested = make(map[u64]Cover_Request_State),
@@ -309,6 +321,7 @@ main :: proc() {
 		mouse_click := sdl.FPoint{}
 		mouse_right := sdl.FPoint{}
 		clicked, right_clicked, space_pressed, stop_pressed := false, false, false, false
+		input_changed := false
 		event: sdl.Event
 		wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
 		// Playback renders at the display rate so the progress bar stays smooth,
@@ -322,6 +335,7 @@ main :: proc() {
 		if library_client.state == .Authorizing ||
 		   library_client.state == .Loading ||
 		   library_client.detail_loading ||
+		   library_client.search_loading ||
 		   library_client.covers_pending > 0 {wait_ms = 40}
 		for pending in library_client.pending {
 			if pending {wait_ms = 40; break}
@@ -330,6 +344,14 @@ main :: proc() {
 		if first_frame {wait_ms = 0}
 		// If the wake event could not be registered, poll the bus instead.
 		if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
+		if search_pending {
+			tick := sdl.GetTicksNS()
+			remaining_ms := i32(0)
+			if search_deadline > tick {
+				remaining_ms = i32((search_deadline - tick) / 1_000_000)
+			}
+			wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
+		}
 		has_event := sdl.WaitEventTimeout(&event, wait_ms)
 		redraw := has_event || first_frame
 		first_frame = false
@@ -349,20 +371,31 @@ main :: proc() {
 						case .ESCAPE:
 							input_active = false
 							_ = sdl.StopTextInput(state.window)
+							if len(strings.trim_space(input)) == 0 && search_mode {
+								library.clear_search(&library_client)
+								search_mode = false
+								search_pending = false
+								delete(input)
+								input = {}
+							}
 						case .BACKSPACE:
 							if len(input) > 0 {
-								shorter := strings.clone(input[:len(input) - 1])
+								_, size := utf8.decode_last_rune(input)
+								if size == 0 {size = 1}
+								shorter := strings.clone(input[:len(input) - size])
 								delete(input)
 								input = shorter
+								input_changed = true
 							}
 						case .V:
 							if .LCTRL in event.key.mod || .RCTRL in event.key.mod {
 								clipboard := sdl.GetClipboardText()
 								if clipboard != nil {
 									value := strings.trim_space(string(cstring(clipboard)))
-									if len(value) <= 256 && ascii_track_input(value) {
+									if len(value) <= 512 && input_text_ok(value) {
 										delete(input)
 										input = strings.clone(value)
+										input_changed = true
 									}
 									sdl.free(rawptr(clipboard))
 								}
@@ -382,6 +415,14 @@ main :: proc() {
 								input = {}
 								input_active = false
 								_ = sdl.StopTextInput(state.window)
+								library.clear_search(&library_client)
+								search_mode = false
+								search_pending = false
+							} else if len(strings.trim_space(input)) > 0 {
+								search_pending = false
+								if library.search(&library_client, input) {
+									search_mode = true
+								}
 							}
 						}
 					} else if !event.key.repeat {
@@ -392,6 +433,13 @@ main :: proc() {
 							stop_pressed = true
 						case .SPACE:
 							space_pressed = true
+						case .K:
+							mod := event.key.mod
+							if .LCTRL in mod || .RCTRL in mod || .LGUI in mod || .RGUI in mod {
+								if !input_active {
+									input_active = sdl.StartTextInput(state.window)
+								}
+							}
 						}
 					}
 				case .TEXT_INPUT:
@@ -399,10 +447,11 @@ main :: proc() {
 					   .LCTRL not_in sdl.GetModState() &&
 					   .RCTRL not_in sdl.GetModState() {
 						added := string(event.text.text)
-						if len(input) + len(added) <= 256 && ascii_track_input(added) {
+						if len(input) + len(added) <= 512 && input_text_ok(added) {
 							updated := fmt.aprintf("%s%s", input, added)
 							delete(input)
 							input = updated
+							input_changed = true
 						}
 					}
 				case .MOUSE_WHEEL:
@@ -420,6 +469,31 @@ main :: proc() {
 			}
 		}
 		if !running {break}
+		if input_changed {
+			input_changed = false
+			trimmed := strings.trim_space(input)
+			if len(trimmed) == 0 {
+				library.clear_search(&library_client)
+				search_mode = false
+				search_pending = false
+				delete(input)
+				input = {}
+			} else if _, valid := track.parse_id(trimmed); valid {
+				// A pasted link waits for Enter; never catalog-search it.
+				library.clear_search(&library_client)
+				search_mode = false
+				search_pending = false
+			} else {
+				search_pending = true
+				search_deadline = sdl.GetTicksNS() + SEARCH_DEBOUNCE_NS
+			}
+		}
+		if search_pending && sdl.GetTicksNS() >= search_deadline {
+			search_pending = false
+			if library.search(&library_client, input) {
+				search_mode = true
+			}
+		}
 		if preload_worker != nil && thread.is_done(preload_worker) {
 			thread.join(preload_worker)
 			thread.destroy(preload_worker)
@@ -620,8 +694,9 @@ main :: proc() {
 		shown_title := title
 		if len(shown_title) == 0 {shown_title = "Nothing playing"}
 		shown_input := input
-		if len(shown_input) ==
-		   0 {shown_input = "Paste a Spotify track link, or pick from your library"}
+		if len(shown_input) == 0 {
+			shown_input = input_active ? "" : "Search Spotify or paste a track link"
+		}
 		if input_active {shown_input = fmt.aprintf("%s|", shown_input, allocator = context.temp_allocator)}
 		times: [2][16]u8
 		retain_player_cover(&displayed_cover, player_cover, &textures)
@@ -639,6 +714,8 @@ main :: proc() {
 			volume       = volume,
 			input_active = input_active,
 			pinned       = detail_pinned,
+			search_mode  = search_mode,
+			search_kind  = search_kind,
 			menu_open    = menu.open,
 			menu_x       = menu.point.x,
 			menu_y       = menu.point.y,
@@ -676,15 +753,29 @@ main :: proc() {
 			dt,
 			density,
 		)
-		update_cursor(&state, &library_client, resizing, visible, seek_enabled)
+		update_cursor(&state, &library_client, resizing, visible, seek_enabled, search_mode)
 		_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
 		_ = sdl.RenderClear(state.renderer)
 		render(&commands, &state, &textures)
 		ui.frame_done(&state)
-		load_more_near_bottom(&library_client, filter, density)
-		ensure_covers(&library_client, &textures, filter, player_cover, visible)
+		display_page := &library_client.pages[filter]
+		display_kind := filter
+		if search_mode {
+			display_page = &library_client.search_pages[search_kind]
+			display_kind = search_kind
+		}
+		if !search_mode {load_more_near_bottom(&library_client, filter, density)}
+		ensure_covers(&library_client, &textures, display_page, player_cover, visible)
 		if right_clicked {
-			open_menu_at(&menu, &library_client, filter, visible, mouse_right, &settings)
+			open_menu_at(
+				&menu,
+				&library_client,
+				display_page,
+				display_kind,
+				visible,
+				mouse_right,
+				&settings,
+			)
 		}
 		track_selected := false
 		if clicked && menu.open {
@@ -730,50 +821,87 @@ main :: proc() {
 			} else {
 				handled := false
 				if hit("toolbar_back", mouse_click) || hit("toolbar_library", mouse_click) {
-					library.clear_detail(&library_client)
-					detail_pinned = false
+					if search_mode {
+						library.clear_search(&library_client)
+						search_mode = false
+						search_pending = false
+						delete(input)
+						input = {}
+						if input_active {
+							input_active = false
+							_ = sdl.StopTextInput(state.window)
+						}
+					} else {
+						library.clear_detail(&library_client)
+						detail_pinned = false
+					}
 					handled = true
 				} else if hit("track_input", mouse_click) {
 					if !input_active {input_active = sdl.StartTextInput(state.window)}
 					handled = true
 				}
 				if !handled {
-					tabs := LIBRARY_TABS
-					for index in 0 ..< len(tabs) {
-						if hit_index("chip", mouse_click, u32(index)) {
-							selected_filter := tabs[index]
-							if selected_filter != filter {
-								library.clear_detail(&library_client)
-								detail_pinned = false
+					if search_mode {
+						search_tabs := SEARCH_TABS
+						for index in 0 ..< len(search_tabs) {
+							if hit_index("chip", mouse_click, u32(index)) {
+								search_kind = search_tabs[index]
+								handled = true
+								break
 							}
-							filter = selected_filter
-							settings_dirty = true
-							retry_failed_covers(&textures)
-							handled = true
-							break
+						}
+					} else {
+						library_tabs := LIBRARY_TABS
+						for index in 0 ..< len(library_tabs) {
+							if hit_index("chip", mouse_click, u32(index)) {
+								selected_filter := library_tabs[index]
+								if selected_filter != filter {
+									library.clear_detail(&library_client)
+									detail_pinned = false
+								}
+								filter = selected_filter
+								settings.tab = filter
+								settings_dirty = true
+								retry_failed_covers(&textures)
+								handled = true
+								break
+							}
 						}
 					}
 				}
 				if !handled {
 					for index in visible.cards.first ..< visible.cards.last {
-						entry := library_client.pages[filter].items[index]
+						entry := display_page.items[index]
 						if !hit_clipped("card", "library_grid", mouse_click, u32(index)) {continue}
-						source: library.Source
-						id := entry.uri
-						if strings.has_prefix(id, "spotify:playlist:") {
-							source = .Playlist
-							id = id[len("spotify:playlist:"):]
-						} else if strings.has_prefix(id, "spotify:album:") {
-							source = .Album
-							id = id[len("spotify:album:"):]
-						} else if strings.has_prefix(id, "spotify:artist:") {
-							source = .Artist
-							id = id[len("spotify:artist:"):]
-						} else {break}
-						handled = library.open_detail(&library_client, source, id, entry)
-						if handled {
-							retry_failed_covers(&textures)
-							detail_pinned = settings_is_pinned(&settings, entry.uri)
+						if search_mode && display_kind == .Tracks {
+							build_play_queue_from_entries(&play_queue, display_page.items[:])
+							play_index =
+								shuffle ? reorder_play_queue(play_queue[:], index, true) : index
+							track_selected = select_play_item(
+								play_queue[:],
+								play_index,
+								&selected,
+								&player_cover,
+							)
+							handled = track_selected
+						} else {
+							source: library.Source
+							id := entry.uri
+							if strings.has_prefix(id, "spotify:playlist:") {
+								source = .Playlist
+								id = id[len("spotify:playlist:"):]
+							} else if strings.has_prefix(id, "spotify:album:") {
+								source = .Album
+								id = id[len("spotify:album:"):]
+							} else if strings.has_prefix(id, "spotify:artist:") {
+								source = .Artist
+								id = id[len("spotify:artist:"):]
+							} else {break}
+							handled = library.open_detail(&library_client, source, id, entry)
+							if handled {
+								retry_failed_covers(&textures)
+								detail_pinned = settings_is_pinned(&settings, entry.uri)
+							}
 						}
 						break
 					}
