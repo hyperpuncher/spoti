@@ -510,7 +510,10 @@ main :: proc() {
 					running = false
 				case .MOUSE_BUTTON_UP:
 					if event.button.button == sdl.BUTTON_LEFT {
-						if resizing {settings_dirty = true}
+						if resizing {
+							settings.sidebar_width = sidebar_width
+							settings_dirty = true
+						}
 						resizing = false
 					}
 				case .KEY_DOWN:
