@@ -1,49 +1,53 @@
 #+build linux
-// MPRIS 2.0 over sd-bus. The vtable and property marshalling live in
-// mpris_sd_bus.c; this file owns the command queue and change detection.
+// MPRIS 2.0 over sd-bus. The vtable and marshalling live in mpris_sd_bus.c;
+// this file owns the worker thread, change detection and the command queue.
 package mpris
 
 import "core:strings"
+import "core:sync"
+import "core:thread"
 
 foreign import sd_bus {"../../build/mpris_sd_bus.a", "system:systemd"}
 
 foreign sd_bus {
-	spoti_mpris_start :: proc(handler: proc "c" (command: i32, value: i64, userdata: rawptr), userdata: rawptr) -> i32 ---
+	spoti_mpris_start :: proc() -> i32 ---
+	spoti_mpris_set_wake :: proc(wake: proc "c" (userdata: rawptr), userdata: rawptr) ---
 	spoti_mpris_stop :: proc() ---
-	spoti_mpris_poll :: proc() ---
+	spoti_mpris_service :: proc() ---
+	spoti_mpris_wait :: proc(timeout_us: i64) -> i32 ---
+	spoti_mpris_take_command :: proc(command: ^i32, value: ^i64) -> i32 ---
 	spoti_mpris_set_track :: proc(title, artist: cstring, duration_us: i64) ---
 	spoti_mpris_set_status :: proc(playing, shuffle, repeat, can_seek, can_next, can_previous: i32, volume: f64) ---
 	spoti_mpris_set_position :: proc(position_us: i64) ---
-	spoti_mpris_changed :: proc() ---
 	spoti_mpris_seeked :: proc(position_us: i64) ---
 }
 
-MAX_PENDING :: 16
+worker: ^thread.Thread
+quit: bool
 
-pending_commands: [MAX_PENDING]Command
-pending_values: [MAX_PENDING]int
-pending_head, pending_tail: int
-
+// sd-bus messages arrive on the bus fd, which SDL does not watch. This thread
+// services them and the C handler wakes the UI through the SDL event.
 @(private = "file")
-bridge :: proc "c" (command: i32, value: i64, _: rawptr) {
-	next := (pending_tail + 1) %% MAX_PENDING
-	if next == pending_head {return} 	// queue full; drop the newest command
-	pending_commands[pending_tail] = Command(command)
-	pending_values[pending_tail] = int(value / 1000) // microseconds to milliseconds
-	pending_tail = next
+service :: proc() {
+	for !sync.atomic_load(&quit) {
+		spoti_mpris_service()
+		spoti_mpris_wait(100_000)
+	}
 }
 
-start :: proc() -> bool {
-	return spoti_mpris_start(bridge, nil) >= 0
+start :: proc(wake: Wake) -> bool {
+	if spoti_mpris_start() < 0 {return false}
+	if wake != nil {spoti_mpris_set_wake(wake, nil)}
+	sync.atomic_store(&quit, false)
+	worker = thread.create_and_start(service)
+	return worker != nil
 }
 
 poll :: proc() -> (command: Command, position_ms: int, ok: bool) {
-	spoti_mpris_poll()
-	if pending_head == pending_tail {return}
-	command = pending_commands[pending_head]
-	position_ms = pending_values[pending_head]
-	pending_head = (pending_head + 1) %% MAX_PENDING
-	return command, position_ms, true
+	numeric_command: i32
+	numeric_value: i64
+	if spoti_mpris_take_command(&numeric_command, &numeric_value) == 0 {return}
+	return Command(numeric_command), int(numeric_value / 1000), true
 }
 
 @(private = "file")
@@ -103,7 +107,6 @@ update :: proc(now: Now_Playing) {
 		last_status = status
 	}
 	spoti_mpris_set_position(i64(now.position_ms) * 1000)
-	if track_changed || status_changed {spoti_mpris_changed()}
 	have_last = true
 }
 
@@ -112,6 +115,12 @@ seeked :: proc(position_ms: int) {
 }
 
 close :: proc() {
+	sync.atomic_store(&quit, true)
+	if worker != nil {
+		thread.join(worker)
+		thread.destroy(worker)
+		worker = nil
+	}
 	spoti_mpris_stop()
 	delete(last_title)
 	delete(last_artist)

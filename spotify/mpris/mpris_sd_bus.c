@@ -3,6 +3,10 @@
 // The MPRIS interface is a vtable of methods, properties and signals. sd-bus
 // builds that vtable with C bitfield macros that Odin cannot express, so the
 // vtable lives here and Odin owns all playback state and control.
+//
+// All sd-bus calls happen on one worker thread; the main thread only touches
+// the guarded state below. Remote commands are queued here and wake the UI.
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,8 +16,9 @@
 #define SPOTI_MPRIS_PATH "/org/mpris/MediaPlayer2"
 #define SPOTI_MPRIS_ROOT "org.mpris.MediaPlayer2"
 #define SPOTI_MPRIS_PLAYER "org.mpris.MediaPlayer2.Player"
+#define SPOTI_MPRIS_QUEUE 16
 
-typedef void (*spoti_mpris_handler)(int command, int64_t value, void *userdata);
+typedef void (*spoti_mpris_wake)(void *userdata);
 
 enum {
 	SPOTI_MPRIS_PLAY = 0,
@@ -28,8 +33,18 @@ enum {
 };
 
 static sd_bus *mpris_bus;
-static spoti_mpris_handler mpris_handler;
-static void *mpris_userdata;
+static spoti_mpris_wake mpris_wake;
+static void *mpris_wake_userdata;
+
+static atomic_flag mpris_lock = ATOMIC_FLAG_INIT;
+
+static void lock_state(void) {
+	while (atomic_flag_test_and_set_explicit(&mpris_lock, memory_order_acquire)) {}
+}
+
+static void unlock_state(void) {
+	atomic_flag_clear_explicit(&mpris_lock, memory_order_release);
+}
 
 static struct {
 	char title[512];
@@ -45,6 +60,13 @@ static struct {
 	double volume;
 } state;
 
+static int pending_commands[SPOTI_MPRIS_QUEUE];
+static int64_t pending_values[SPOTI_MPRIS_QUEUE];
+static int pending_head, pending_tail;
+static int changed_pending;
+static int seeked_pending;
+static int64_t seeked_us;
+
 #define GETTER(name)                                                                     \
 	static int name(                                                                     \
 		sd_bus *bus, const char *path, const char *interface, const char *property,      \
@@ -57,74 +79,106 @@ static struct {
 		(void)userdata;                                                                  \
 		(void)error;
 
+#define GETTER_END return r; }
+
 GETTER(get_identity)
-	return sd_bus_message_append(reply, "s", "spoti");
-}
+	int r = sd_bus_message_append(reply, "s", "spoti");
+	GETTER_END
 
 GETTER(get_desktop_entry)
-	return sd_bus_message_append(reply, "s", "spoti");
-}
+	int r = sd_bus_message_append(reply, "s", "spoti");
+	GETTER_END
 
 GETTER(get_true)
-	return sd_bus_message_append(reply, "b", 1);
-}
+	int r = sd_bus_message_append(reply, "b", 1);
+	GETTER_END
 
 GETTER(get_false)
-	return sd_bus_message_append(reply, "b", 0);
-}
+	int r = sd_bus_message_append(reply, "b", 0);
+	GETTER_END
 
 GETTER(get_empty_strv)
-	return sd_bus_message_append(reply, "as", 0);
-}
+	int r = sd_bus_message_append(reply, "as", 0);
+	GETTER_END
 
 GETTER(get_playback_status)
-	return sd_bus_message_append(reply, "s", state.playing ? "Playing" : "Paused");
-}
+	lock_state();
+	int r = sd_bus_message_append(reply, "s", state.playing ? "Playing" : "Paused");
+	unlock_state();
+	GETTER_END
 
 GETTER(get_loop_status)
-	return sd_bus_message_append(reply, "s", state.repeat ? "Track" : "None");
-}
+	lock_state();
+	int r = sd_bus_message_append(reply, "s", state.repeat ? "Track" : "None");
+	unlock_state();
+	GETTER_END
 
 GETTER(get_rate)
-	return sd_bus_message_append(reply, "d", 1.0);
-}
+	int r = sd_bus_message_append(reply, "d", 1.0);
+	GETTER_END
 
 GETTER(get_shuffle)
-	return sd_bus_message_append(reply, "b", state.shuffle ? 1 : 0);
-}
+	lock_state();
+	int r = sd_bus_message_append(reply, "b", state.shuffle ? 1 : 0);
+	unlock_state();
+	GETTER_END
 
 GETTER(get_volume)
-	return sd_bus_message_append(reply, "d", state.volume);
-}
+	lock_state();
+	int r = sd_bus_message_append(reply, "d", state.volume);
+	unlock_state();
+	GETTER_END
 
 GETTER(get_position)
-	return sd_bus_message_append(reply, "x", state.position_us);
-}
+	lock_state();
+	int r = sd_bus_message_append(reply, "x", state.position_us);
+	unlock_state();
+	GETTER_END
 
 GETTER(get_can_seek)
-	return sd_bus_message_append(reply, "b", state.can_seek ? 1 : 0);
-}
+	lock_state();
+	int r = sd_bus_message_append(reply, "b", state.can_seek ? 1 : 0);
+	unlock_state();
+	GETTER_END
 
 GETTER(get_can_next)
-	return sd_bus_message_append(reply, "b", state.can_next ? 1 : 0);
-}
+	lock_state();
+	int r = sd_bus_message_append(reply, "b", state.can_next ? 1 : 0);
+	unlock_state();
+	GETTER_END
 
 GETTER(get_can_previous)
-	return sd_bus_message_append(reply, "b", state.can_previous ? 1 : 0);
-}
+	lock_state();
+	int r = sd_bus_message_append(reply, "b", state.can_previous ? 1 : 0);
+	unlock_state();
+	GETTER_END
 
 GETTER(get_metadata)
-	return sd_bus_message_append(
+	lock_state();
+	int r = sd_bus_message_append(
 		reply, "a{sv}", 4,
 		"mpris:trackid", "o", "/org/spoti/track",
 		"mpris:length", "x", state.duration_us,
 		"xesam:title", "s", state.title,
 		"xesam:artist", "as", 1, state.artist
 	);
+	unlock_state();
+	GETTER_END
+
+static void enqueue_command(int command, int64_t value) {
+	lock_state();
+	int next = (pending_tail + 1) % SPOTI_MPRIS_QUEUE;
+	if (next != pending_head) {
+		pending_commands[pending_tail] = command;
+		pending_values[pending_tail] = value;
+		pending_tail = next;
+	}
+	unlock_state();
+	if (mpris_wake != NULL) {mpris_wake(mpris_wake_userdata);}
 }
 
 static int method_simple(sd_bus_message *message, int command) {
-	if (mpris_handler != NULL) {mpris_handler(command, 0, mpris_userdata);}
+	enqueue_command(command, 0);
 	return sd_bus_reply_method_return(message, NULL);
 }
 
@@ -155,7 +209,7 @@ static int method_seek(sd_bus_message *message, void *userdata, sd_bus_error *er
 	int64_t offset = 0;
 	int r = sd_bus_message_read(message, "x", &offset);
 	if (r < 0) {return r;}
-	if (mpris_handler != NULL) {mpris_handler(SPOTI_MPRIS_SEEK, offset, mpris_userdata);}
+	enqueue_command(SPOTI_MPRIS_SEEK, offset);
 	return sd_bus_reply_method_return(message, NULL);
 }
 
@@ -166,9 +220,7 @@ static int method_set_position(sd_bus_message *message, void *userdata, sd_bus_e
 	int64_t position = 0;
 	int r = sd_bus_message_read(message, "ox", &track, &position);
 	if (r < 0) {return r;}
-	if (mpris_handler != NULL) {
-		mpris_handler(SPOTI_MPRIS_SET_POSITION, position, mpris_userdata);
-	}
+	enqueue_command(SPOTI_MPRIS_SET_POSITION, position);
 	return sd_bus_reply_method_return(message, NULL);
 }
 
@@ -228,9 +280,7 @@ static const sd_bus_vtable player_vtable[] = {
 	SD_BUS_VTABLE_END
 };
 
-int spoti_mpris_start(spoti_mpris_handler handler, void *userdata) {
-	mpris_handler = handler;
-	mpris_userdata = userdata;
+int spoti_mpris_start(void) {
 	int r = sd_bus_default_user(&mpris_bus);
 	if (r < 0) {return r;}
 	r = sd_bus_add_object_vtable(
@@ -244,32 +294,77 @@ int spoti_mpris_start(spoti_mpris_handler handler, void *userdata) {
 	return sd_bus_request_name(mpris_bus, SPOTI_MPRIS_NAME, 0);
 }
 
-void spoti_mpris_stop(void) {
-	mpris_bus = sd_bus_flush_close_unref(mpris_bus);
-	mpris_handler = NULL;
-	mpris_userdata = NULL;
+void spoti_mpris_set_wake(spoti_mpris_wake wake, void *userdata) {
+	mpris_wake = wake;
+	mpris_wake_userdata = userdata;
 }
 
-void spoti_mpris_poll(void) {
+void spoti_mpris_stop(void) {
+	mpris_bus = sd_bus_flush_close_unref(mpris_bus);
+	mpris_wake = NULL;
+}
+
+// Runs on the worker thread: process inbound calls, then emit queued changes.
+void spoti_mpris_service(void) {
 	if (mpris_bus == NULL) {return;}
 	for (;;) {
 		int r = sd_bus_process(mpris_bus, NULL);
 		if (r < 0) {return;}
 		if (r == 0) {break;}
 	}
-	sd_bus_flush(mpris_bus);
+	lock_state();
+	int changed = changed_pending;
+	int seeked = seeked_pending;
+	int64_t position = seeked_us;
+	changed_pending = 0;
+	seeked_pending = 0;
+	unlock_state();
+	if (changed) {
+		sd_bus_emit_properties_changed(
+			mpris_bus, SPOTI_MPRIS_PATH, SPOTI_MPRIS_PLAYER,
+			"PlaybackStatus", "Metadata", "Shuffle", "LoopStatus", "Volume", "CanSeek",
+			"CanGoNext", "CanGoPrevious", NULL
+		);
+	}
+	if (seeked) {
+		sd_bus_emit_signal(
+			mpris_bus, SPOTI_MPRIS_PATH, SPOTI_MPRIS_PLAYER, "Seeked", "x", position
+		);
+	}
+}
+
+int spoti_mpris_wait(int64_t timeout_us) {
+	if (mpris_bus == NULL) {return -1;}
+	return sd_bus_wait(mpris_bus, (uint64_t)timeout_us);
+}
+
+int spoti_mpris_take_command(int *command, int64_t *value) {
+	lock_state();
+	if (pending_head == pending_tail) {
+		unlock_state();
+		return 0;
+	}
+	*command = pending_commands[pending_head];
+	*value = pending_values[pending_head];
+	pending_head = (pending_head + 1) % SPOTI_MPRIS_QUEUE;
+	unlock_state();
+	return 1;
 }
 
 void spoti_mpris_set_track(const char *title, const char *artist, int64_t duration_us) {
+	lock_state();
 	snprintf(state.title, sizeof state.title, "%s", title != NULL ? title : "");
 	snprintf(state.artist, sizeof state.artist, "%s", artist != NULL ? artist : "");
 	state.duration_us = duration_us;
+	changed_pending = 1;
+	unlock_state();
 }
 
 void spoti_mpris_set_status(
 	int playing, int shuffle, int repeat, int can_seek, int can_next, int can_previous,
 	double volume
 ) {
+	lock_state();
 	state.playing = playing;
 	state.shuffle = shuffle;
 	state.repeat = repeat;
@@ -277,24 +372,19 @@ void spoti_mpris_set_status(
 	state.can_next = can_next;
 	state.can_previous = can_previous;
 	state.volume = volume;
+	changed_pending = 1;
+	unlock_state();
 }
 
 void spoti_mpris_set_position(int64_t position_us) {
+	lock_state();
 	state.position_us = position_us;
-}
-
-void spoti_mpris_changed(void) {
-	if (mpris_bus == NULL) {return;}
-	sd_bus_emit_properties_changed(
-		mpris_bus, SPOTI_MPRIS_PATH, SPOTI_MPRIS_PLAYER,
-		"PlaybackStatus", "Metadata", "Shuffle", "LoopStatus", "Volume", "CanSeek",
-		"CanGoNext", "CanGoPrevious", NULL
-	);
+	unlock_state();
 }
 
 void spoti_mpris_seeked(int64_t position_us) {
-	if (mpris_bus == NULL) {return;}
-	sd_bus_emit_signal(
-		mpris_bus, SPOTI_MPRIS_PATH, SPOTI_MPRIS_PLAYER, "Seeked", "x", position_us
-	);
+	lock_state();
+	seeked_us = position_us;
+	seeked_pending = 1;
+	unlock_state();
 }

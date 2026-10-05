@@ -19,6 +19,17 @@ import clay "vendor/clay"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
+// The MPRIS worker pushes this event to wake the otherwise idle frame loop.
+WAKE_EVENT: u32
+
+@(private = "file")
+wake_mpris :: proc "c" (_: rawptr) {
+	event := sdl.Event {
+		type = sdl.EventType(WAKE_EVENT),
+	}
+	_ = sdl.PushEvent(&event)
+}
+
 hit_index :: proc(id: string, point: sdl.FPoint, index: u32) -> bool {
 	data := clay.GetElementData(clay.ID(id, index))
 	box := data.boundingBox
@@ -242,7 +253,8 @@ main :: proc() {
 		requested = make(map[u64]Cover_Request_State),
 	}
 	load_icons(&state, &textures)
-	mpris_active := mpris.start()
+	WAKE_EVENT = sdl.RegisterEvents(1)
+	mpris_active := mpris.start(WAKE_EVENT != 0 ? wake_mpris : nil)
 	library_client: library.Client
 	settings := load_settings()
 	filter := settings.tab
@@ -313,8 +325,8 @@ main :: proc() {
 		}
 		if preload_worker != nil && stage != .Playing {wait_ms = 40}
 		if first_frame {wait_ms = 0}
-		// MPRIS commands arrive on the bus, which SDL does not watch, so poll it.
-		if mpris_active && wait_ms < 0 {wait_ms = 100}
+		// If the wake event could not be registered, poll the bus instead.
+		if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
 		has_event := sdl.WaitEventTimeout(&event, wait_ms)
 		redraw := has_event || first_frame
 		first_frame = false

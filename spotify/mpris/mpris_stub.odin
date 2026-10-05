@@ -3,7 +3,7 @@
 // (MPNowPlayingInfoCenter on macOS, SMTC on Windows).
 package mpris
 
-start :: proc() -> bool {return false}
+start :: proc(wake: Wake) -> bool {return false}
 
 poll :: proc() -> (command: Command, position_ms: int, ok: bool) {return}
 
