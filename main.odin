@@ -52,6 +52,10 @@ update_cursor :: proc(
 	seek_enabled: bool,
 ) {
 	if seek_enabled && pointer_over("seek_slider") {ui.set_cursor(state, .Pointer); return}
+	if pointer_over("library_scrollbar") || pointer_over("detail_scrollbar") {
+		ui.set_cursor(state, .Pointer)
+		return
+	}
 	if resizing || pointer_over("sidebar_handle") {
 		ui.set_cursor(state, .Resize)
 		return
@@ -241,6 +245,7 @@ main :: proc() {
 	filter := library.Kind.Playlists
 	sidebar_width: f32 = 360
 	resizing := false
+	scrollbar_drag: Scrollbar_Drag
 	defer {
 		if worker != nil {release_worker(worker, queue, &cancel, closed)}
 		if preload_worker != nil {
@@ -641,7 +646,11 @@ main :: proc() {
 		ensure_covers(&library_client, &textures, filter, player_cover, visible)
 		track_selected := false
 		if clicked {
-			if hit("sidebar_handle", mouse_click) {
+			if hit("library_scrollbar", mouse_click) {
+				begin_scrollbar_drag(&scrollbar_drag, "library_grid", mouse_click.y)
+			} else if hit("detail_scrollbar", mouse_click) {
+				begin_scrollbar_drag(&scrollbar_drag, "detail_rows", mouse_click.y)
+			} else if hit("sidebar_handle", mouse_click) {
 				resizing = true
 			} else {
 				handled := false
@@ -749,6 +758,13 @@ main :: proc() {
 				sidebar_width = clamp(mouse.x / density, SIDEBAR_MIN, SIDEBAR_MAX)
 			}
 			redraw = true
+		}
+		if scrollbar_drag.container != "" {
+			if .LEFT not_in buttons {
+				scrollbar_drag = {}
+			} else if drag_scrollbar(&scrollbar_drag, mouse.y, density) {
+				redraw = true
+			}
 		}
 		if clicked && hit("volume_slider", mouse_click) {volume_dragging = true}
 		if volume_dragging {

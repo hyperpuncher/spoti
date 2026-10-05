@@ -259,3 +259,16 @@ visible_items_preserve_partial_rows_and_overscan :: proc(t: ^testing.T) {
 	testing.expect_value(t, short.last, 3)
 	testing.expect_value(t, visible_items(0, 4, 200, 0, 450), Visible_Items{})
 }
+
+@(test)
+scrollbar_thumb_hides_when_content_fits_and_clamps_at_both_ends :: proc(t: ^testing.T) {
+	_, _, fits := scrollbar_metrics(0, 400, 800, 24, 2)
+	testing.expect(t, !fits)
+	thumb, top, visible := scrollbar_metrics(0, 4000, 800, 24, 2)
+	testing.expect(t, visible && thumb >= 24)
+	testing.expect_value(t, top, f32(2))
+	_, bottom, _ := scrollbar_metrics(-3200, 4000, 800, 24, 2)
+	testing.expect(t, math.abs(bottom - (800 - thumb - 2)) < 0.01)
+	_, clamped, _ := scrollbar_metrics(-99999, 4000, 800, 24, 2)
+	testing.expect_value(t, clamped, bottom)
+}

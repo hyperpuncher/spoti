@@ -16,6 +16,8 @@ GREEN :: clay.Color{30, 215, 96, 255}
 
 SIDEBAR_MIN :: 284
 SIDEBAR_MAX :: 640
+// The player seek bar stays a comfortable length on very wide windows.
+SEEK_MAX_WIDTH :: 620
 
 LIBRARY_TABS :: [3]library.Kind{.Playlists, .Albums, .Artists}
 LIBRARY_TAB_LABELS :: [3]string{"Playlists", "Albums", "Artists"}
@@ -211,7 +213,7 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 			if clay.UI()(
 			{
 				layout = {
-					sizing = {width = clay.SizingGrow({})},
+					sizing = {width = clay.SizingGrow({max = SEEK_MAX_WIDTH * d})},
 					childGap = u16(10 * d),
 					childAlignment = {y = .Center},
 				},
@@ -365,6 +367,8 @@ layout :: proc(
 			)
 		}
 		player_bar(view, textures, d)
+		scrollbar("library_grid", "library_scrollbar", d)
+		scrollbar("detail_rows", "detail_scrollbar", d)
 	}
 	return clay.EndLayout(dt), visible
 }
