@@ -125,7 +125,7 @@ library_card :: proc(
 				cornerRadius = clay.CornerRadiusAll(11 * d),
 			},
 			) {
-				icon_element(textures, "pin", .White, 12 * d)
+				icon_element(textures, "pin-filled", .White, 13 * d)
 			}
 		}
 		if clay.UI()(
@@ -619,7 +619,7 @@ detail_page :: proc(
 			icon_element(textures, "heart", client.detail_loading ? .Disabled : .Muted, 22 * d)
 			player_control(
 				"hero_pin",
-				view.pinned ? "pin" : "pin-off",
+				view.pinned ? "pin-filled" : "pin-off",
 				client.detail_loading ? .Disabled : view.pinned ? .Green : .Muted,
 				textures,
 				d,
