@@ -23,7 +23,14 @@ Raw_Search :: struct {
 	playlists: Offset_Page(Playlist_Ref),
 }
 
-fetch_search :: proc(access, query: string) -> (pages: [Kind]Page, status: int, ok: bool) {
+fetch_search :: proc(
+	access, query: string,
+	reuse: rawptr = nil,
+) -> (
+	pages: [Kind]Page,
+	status: int,
+	ok: bool,
+) {
 	trimmed := strings.trim_space(query)
 	if len(trimmed) == 0 || len(trimmed) > 256 {return}
 	encoded := net.percent_encode(trimmed)
@@ -34,7 +41,7 @@ fetch_search :: proc(access, query: string) -> (pages: [Kind]Page, status: int, 
 		SEARCH_LIMIT,
 	)
 	defer delete(address)
-	bytes, code, fetched := api_get(access, address, 2 * 1024 * 1024)
+	bytes, code, fetched := api_get(access, address, 2 * 1024 * 1024, reuse)
 	if !fetched {return {}, code, false}
 	defer delete(bytes)
 	if code != 200 {return {}, code, false}

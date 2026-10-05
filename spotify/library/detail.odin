@@ -81,6 +81,7 @@ fetch_detail :: proc(
 	source: Source,
 	id: string,
 	session_access: string = "",
+	reuse: rawptr = nil,
 ) -> (
 	detail: Detail,
 	status: int,
@@ -96,7 +97,13 @@ fetch_detail :: proc(
 		detail.name = strings.clone("Liked Songs", allocator)
 		detail.subtitle = strings.clone("Your saved songs", allocator)
 	case .Playlist:
-		header, header_status, header_ok := fetch_header(Playlist_Ref, access, id, "playlists")
+		header, header_status, header_ok := fetch_header(
+			Playlist_Ref,
+			access,
+			id,
+			"playlists",
+			reuse = reuse,
+		)
 		if !header_ok {
 			free_detail(&detail)
 			return {}, header_status, false
@@ -108,7 +115,13 @@ fetch_detail :: proc(
 		detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
 		detail.total = header.items.total
 	case .Album:
-		header, header_status, header_ok := fetch_header(Album_Ref, access, id, "albums")
+		header, header_status, header_ok := fetch_header(
+			Album_Ref,
+			access,
+			id,
+			"albums",
+			reuse = reuse,
+		)
 		if !header_ok {
 			free_detail(&detail)
 			return {}, header_status, false
@@ -128,7 +141,13 @@ fetch_detail :: proc(
 			)
 		}
 	case .Artist:
-		header, header_status, header_ok := fetch_header(Raw_Artist, access, id, "artists")
+		header, header_status, header_ok := fetch_header(
+			Raw_Artist,
+			access,
+			id,
+			"artists",
+			reuse = reuse,
+		)
 		if !header_ok {
 			free_detail(&detail)
 			return {}, header_status, false
@@ -160,6 +179,7 @@ fetch_detail :: proc(
 		0,
 		allocator,
 		session_access,
+		reuse,
 	)
 	if !rows_ok {
 		if source == .Playlist {
@@ -183,6 +203,7 @@ fetch_detail :: proc(
 fetch_header :: proc(
 	$T: typeid,
 	access, id, resource: string,
+	reuse: rawptr = nil,
 ) -> (
 	header: T,
 	status: int,
@@ -193,7 +214,7 @@ fetch_header :: proc(
 	defer delete(address)
 	bytes: [dynamic]u8
 	fetched: bool
-	bytes, status, fetched = api_get(access, address, 256 * 1024)
+	bytes, status, fetched = api_get(access, address, 256 * 1024, reuse)
 	if !fetched {return {}, status, false}
 	defer delete(bytes)
 	if status != 200 {return {}, status, false}
@@ -210,6 +231,7 @@ fetch_track_page :: proc(
 	offset: int,
 	allocator: runtime.Allocator,
 	session_access: string = "",
+	reuse: rawptr = nil,
 ) -> (
 	rows: [dynamic]Track_Row,
 	total: int,
@@ -353,6 +375,7 @@ fetch_artist_albums :: proc(
 	access, id: string,
 	offset: int,
 	allocator: runtime.Allocator,
+	reuse: rawptr = nil,
 ) -> (
 	releases: [dynamic]Entry,
 	total: int,
@@ -368,7 +391,7 @@ fetch_artist_albums :: proc(
 		offset,
 	)
 	defer delete(address)
-	body, body_status, fetched := api_get(access, address, 512 * 1024)
+	body, body_status, fetched := api_get(access, address, 512 * 1024, reuse)
 	if !fetched || body_status != 200 {delete(body); return {}, 0, 0, false, body_status, false}
 	defer delete(body)
 	return parse_artist_albums(body[:], allocator)

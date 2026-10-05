@@ -31,6 +31,7 @@ read_session_playlist :: proc(
 	id: string,
 	offset: int,
 	allocator: runtime.Allocator,
+	reuse: rawptr = nil,
 ) -> (
 	rows: [dynamic]Track_Row,
 	total, next_offset: int,

@@ -13,6 +13,7 @@ foreign import libcurl "system:curl"
 foreign libcurl {
 	global_init :: proc(flags: c.long) -> c.int ---
 	easy_init :: proc() -> rawptr ---
+	easy_reset :: proc(handle: rawptr) ---
 	easy_cleanup :: proc(handle: rawptr) ---
 	easy_setopt :: proc(handle: rawptr, option: c.int, #c_vararg args: ..any) -> c.int ---
 	easy_perform :: proc(handle: rawptr) -> c.int ---

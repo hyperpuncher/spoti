@@ -93,14 +93,29 @@ write_response :: proc "c" (input: [^]u8, size, count: int, user: rawptr) -> int
 // One bounded HTTPS GET. Responses are returned even for non-2xx status so
 // callers can diagnose a rejected grant without ever printing response bodies.
 // Caller must delete the returned bytes; URLs can contain signed CDN secrets.
-get :: proc(address: string, options: Options = {}) -> (body: [dynamic]u8, status: int, ok: bool) {
-	return request(address, options)
+get :: proc(
+	address: string,
+	options: Options = {},
+	reuse: rawptr = nil,
+) -> (
+	body: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	return request(address, options, reuse = reuse)
 }
 
 // OAuth uses the same curl lifetime and bounded response handling as GETs.
-post_form :: proc(address, form: string) -> (body: [dynamic]u8, status: int, ok: bool) {
+post_form :: proc(
+	address, form: string,
+	reuse: rawptr = nil,
+) -> (
+	body: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
 	if len(form) == 0 {return nil, 0, false}
-	return request(address, {limit = 64 * 1024}, form, 20)
+	return request(address, {limit = 64 * 1024}, form, 20, reuse = reuse)
 }
 
 // Binary protobuf bodies may contain NUL bytes; POSTFIELDSIZE bounds the upload.
@@ -108,6 +123,7 @@ post_protobuf :: proc(
 	address: string,
 	body: []u8,
 	options: Options = {},
+	reuse: rawptr = nil,
 ) -> (
 	response: [dynamic]u8,
 	status: int,
@@ -119,9 +135,13 @@ post_protobuf :: proc(
 		options,
 		transmute(string)body,
 		content_type = "Content-Type: application/x-protobuf",
+		reuse = reuse,
 	)
 }
 
+// A reused easy handle keeps its TCP/TLS session alive across sequential
+// requests on one worker thread. Handles must never cross threads; callers
+// pass nil for one-off requests outside the workers.
 @(private)
 request :: proc(
 	address: string,
@@ -129,6 +149,7 @@ request :: proc(
 	form: string = "",
 	timeout: c.long = 15,
 	content_type: cstring = nil,
+	reuse: rawptr = nil,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -150,9 +171,15 @@ request :: proc(
 	}
 	sync.once_do(&curl_once, init_curl)
 	if !curl_ready {return nil, 0, false}
-	client := easy_init()
-	if client == nil {return nil, 0, false}
-	defer easy_cleanup(client)
+	client := reuse
+	if client == nil {
+		client = easy_init()
+		if client == nil {return nil, 0, false}
+	} else {easy_reset(client)}
+	// Owned handles are cleaned up here; reused worker handles outlive the call.
+	defer if reuse == nil {
+		easy_cleanup(client)
+	}
 	received := Response_Buffer {
 		bytes = make([dynamic]u8),
 		limit = limit,
@@ -221,4 +248,15 @@ request :: proc(
 	code: c.long
 	if easy_getinfo(client, CURL_RESPONSE_CODE, &code) != 0 {return nil, 0, false}
 	return received.bytes, int(code), true
+}
+// A worker-owned easy handle for connection reuse. Thread-confined: create
+// and use on one thread, close it there too.
+open_handle :: proc() -> rawptr {
+	sync.once_do(&curl_once, init_curl)
+	if !curl_ready {return nil}
+	return easy_init()
+}
+
+close_handle :: proc(handle: rawptr) {
+	if handle != nil {easy_cleanup(handle)}
 }

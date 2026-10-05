@@ -25,6 +25,7 @@ fetch_playlist_rows :: proc(
 	access, id: string,
 	offset: int,
 	allocator: runtime.Allocator,
+	reuse: rawptr = nil,
 ) -> (
 	rows: [dynamic]Track_Row,
 	total, next_offset: int,
@@ -41,7 +42,7 @@ fetch_playlist_rows :: proc(
 		PLAYLIST_PAGE_SIZE,
 	)
 	defer delete(address)
-	body, code, fetched := http.get(address, {bearer = access, limit = 512 * 1024})
+	body, code, fetched := http.get(address, {bearer = access, limit = 512 * 1024}, reuse)
 	defer delete(body)
 	if !fetched || code != 200 {return nil, 0, 0, false, code, false}
 	window, valid := parse_playlist_window(body[:], offset)
@@ -55,6 +56,7 @@ fetch_playlist_rows :: proc(
 		"https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata",
 		request[:],
 		{bearer = access, limit = 2 * 1024 * 1024},
+		reuse,
 	)
 	defer delete(metadata)
 	if !received || metadata_code != 200 {return nil, 0, 0, false, metadata_code, false}

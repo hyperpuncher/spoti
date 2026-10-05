@@ -4,6 +4,8 @@ package diagnostic
 
 import "core:fmt"
 import "core:os"
+import "core:strconv"
+import "core:strings"
 import "core:sync"
 import "core:time"
 
@@ -57,6 +59,78 @@ cover_cache_result :: proc(hit: bool) {
 cover_decode_result :: proc(ok: bool) {
 	sync.mutex_guard(&state.mutex)
 	if ok {state.cover_decoded += 1} else {state.cover_failed += 1}
+}
+
+// Failed HTTPS requests always log; successes are verbose-only. Lines
+// carry a sanitized endpoint shape, a status code, a byte count and a
+// duration. Privacy: no tokens, URLs, IDs, bodies, or query besides
+// numeric paging offsets.
+http :: proc(address: string, status, bytes: int, ms: f64) {
+	endpoint, paging := sanitize_endpoint(address, context.temp_allocator)
+	line := fmt.aprintf(
+		"http %s%s status=%d bytes=%d ms=%.0f",
+		endpoint,
+		paging,
+		status,
+		bytes,
+		ms,
+		allocator = context.temp_allocator,
+	)
+	write(line)
+}
+
+// Host plus alphabetic path segments; IDs, hashes and query dropped, except
+// numeric paging offsets, which show how far pagination has reached.
+sanitize_endpoint :: proc(
+	address: string,
+	allocator := context.allocator,
+) -> (
+	endpoint, paging: string,
+) {
+	rest := address
+	if index := strings.index(rest, "://"); index >= 0 {rest = rest[index + 3:]}
+	host, path := rest, ""
+	if slash := strings.index_byte(rest, '/'); slash >= 0 {
+		host = rest[:slash]
+		path = rest[slash:]
+	}
+	if dot := strings.index_byte(host, '.'); dot >= 0 {host = host[:dot]}
+	parts: [8]string
+	count := 0
+	if index := strings.index_byte(path, '?'); index >= 0 {
+		paging = paging_offset(path[index:], allocator)
+		path = path[:index]
+	}
+	for segment in strings.split(path, "/", context.temp_allocator) {
+		if count >= len(parts) {break}
+		if keep_segment(segment) {parts[count] = segment; count += 1}
+	}
+	joined := strings.join(parts[:count], "-", allocator)
+	return fmt.aprintf("%s %s", host, joined, allocator = allocator), paging
+}
+
+keep_segment :: proc(segment: string) -> bool {
+	if len(segment) == 0 || len(segment) > 16 {return false}
+	for ch in transmute([]u8)segment {
+		if ch >= 'a' && ch <= 'z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '.' {continue}
+		return false
+	}
+	return true
+}
+
+paging_offset :: proc(query: string, allocator := context.allocator) -> string {
+	for key in ([]string{"offset", "from"}) {
+		prefix := fmt.aprintf("%s=", key, allocator = context.temp_allocator)
+		start := strings.index(query, prefix)
+		if start < 0 {continue}
+		digits := query[start + len(prefix):]
+		end := 0
+		for end < len(digits) && digits[end] >= '0' && digits[end] <= '9' {end += 1}
+		if value, ok := strconv.parse_int(digits[:end]); ok {
+			return fmt.aprintf(" offset=%d", value, allocator = allocator)
+		}
+	}
+	return ""
 }
 
 close :: proc() {

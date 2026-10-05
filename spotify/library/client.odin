@@ -6,6 +6,7 @@ package library
 import diagnostic "../../diagnostic"
 import artwork "../artwork"
 import credential "../credential"
+import http "../http"
 import oauth "../oauth"
 import "base:runtime"
 import "core:fmt"
@@ -104,6 +105,11 @@ Client :: struct {
 
 run :: proc(pointer: rawptr) {
 	client := (^Client)(pointer)
+	// One easy handle for the worker's lifetime keeps TCP/TLS sessions
+	// alive across sequential API requests. Never shared with the cover
+	// worker; easy handles are thread-confined.
+	reuse := http.open_handle()
+	defer http.close_handle(reuse)
 	tokens, auth := authorize(client.remember, &client.cancel)
 	if auth != .Ready {
 		if auth != .Cancelled {
@@ -118,7 +124,7 @@ run :: proc(pointer: rawptr) {
 		defer free_all(context.temp_allocator)
 		defer free_request(request)
 		if sync.atomic_load(&client.cancel) {break}
-		handle(client, &tokens, &streaming, request)
+		handle(client, &tokens, &streaming, request, reuse)
 	}
 }
 
@@ -184,7 +190,12 @@ fail_request :: proc(client: ^Client, request: Request) {
 	}
 }
 
-handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Request) {
+handle :: proc(
+	client: ^Client,
+	tokens, streaming: ^oauth.Tokens,
+	request: Request,
+	reuse: rawptr = nil,
+) {
 	if !ensure_tokens(client, tokens) {
 		fail_request(client, request)
 		return
@@ -196,13 +207,19 @@ handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Reque
 			request.list,
 			request.offset,
 			request.cursor,
+			reuse,
 		)
 		send(
 			client,
 			Result{kind = .Index, list = request.list, page = page, status = status, ok = ok},
 		)
 	case .Detail:
-		detail, status, ok := fetch_detail(tokens.access, request.source, request.id)
+		detail, status, ok := fetch_detail(
+			tokens.access,
+			request.source,
+			request.id,
+			reuse = reuse,
+		)
 		if ok && request.source == .Playlist && detail.rows_error == 403 {
 			rows, total, next, more, rows_status, rows_ok := read_session_playlist(
 				client,
@@ -210,6 +227,7 @@ handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Reque
 				request.id,
 				0,
 				virtual.arena_allocator(&detail.arena),
+				reuse,
 			)
 			if rows_ok {
 				detail.rows, detail.total, detail.next_offset, detail.has_more =
@@ -244,7 +262,7 @@ handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Reque
 		allocator := virtual.arena_allocator(&aresult.rows_arena)
 		if request.source == .Artist {
 			aresult.releases, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
-				fetch_artist_albums(tokens.access, request.id, request.offset, allocator)
+				fetch_artist_albums(tokens.access, request.id, request.offset, allocator, reuse)
 		} else {
 			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
 				fetch_track_page(
@@ -253,15 +271,24 @@ handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Reque
 					request.id,
 					request.offset,
 					allocator,
+					"",
+					reuse,
 				)
 		}
 		if request.source == .Playlist && !aresult.ok && aresult.status == 403 {
 			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
-				read_session_playlist(client, streaming, request.id, request.offset, allocator)
+				read_session_playlist(
+					client,
+					streaming,
+					request.id,
+					request.offset,
+					allocator,
+					reuse,
+				)
 		}
 		send(client, aresult)
 	case .Search:
-		pages, status, ok := fetch_search(tokens.access, request.query)
+		pages, status, ok := fetch_search(tokens.access, request.query, reuse)
 		send(
 			client,
 			Result {
@@ -278,13 +305,15 @@ handle :: proc(client: ^Client, tokens, streaming: ^oauth.Tokens, request: Reque
 
 run_covers :: proc(pointer: rawptr) {
 	client := (^Client)(pointer)
+	reuse := http.open_handle()
+	defer http.close_handle(reuse)
 	for request in chan.recv(client.cover_requests) {
 		defer free_all(context.temp_allocator)
 		defer delete(request.url)
 		if sync.atomic_load(&client.cancel) {break}
 		image: artwork.Image
 		if artwork.valid_cover_url(request.url) {
-			bytes, status, fetched := cover_get(request.url)
+			bytes, status, fetched := cover_get(request.url, reuse)
 			if fetched {
 				if status == 200 {
 					image, _ = artwork.decode(bytes[:])

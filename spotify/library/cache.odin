@@ -76,6 +76,7 @@ cached_get :: proc(
 	address: string,
 	options: http.Options = {},
 	ttl: time.Duration = API_TTL,
+	reuse: rawptr = nil,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -86,7 +87,7 @@ cached_get :: proc(
 		return cached, 200, true
 	}
 	if prefix == "cover" {diagnostic.cover_cache_result(false)}
-	fresh, code, fetched := http.get(address, options)
+	fresh, code, fetched := http.get(address, options, reuse)
 	if !fetched {return nil, code, false}
 	if code == 200 {cache_write(prefix, address, fresh[:])}
 	return fresh, code, true
@@ -95,14 +96,22 @@ cached_get :: proc(
 api_get :: proc(
 	access, address: string,
 	limit: int,
+	reuse: rawptr = nil,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
 	ok: bool,
 ) {
-	return cached_get("api", address, {bearer = access, limit = limit}, API_TTL)
+	return cached_get("api", address, {bearer = access, limit = limit}, API_TTL, reuse)
 }
 
-cover_get :: proc(address: string) -> (body: [dynamic]u8, status: int, ok: bool) {
-	return cached_get("cover", address, {limit = 4 * 1024 * 1024}, COVER_TTL)
+cover_get :: proc(
+	address: string,
+	reuse: rawptr = nil,
+) -> (
+	body: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	return cached_get("cover", address, {limit = 4 * 1024 * 1024}, COVER_TTL, reuse)
 }
