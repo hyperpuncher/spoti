@@ -35,11 +35,38 @@ retry_failed_covers :: proc(textures: ^Textures) {
 	}
 }
 
+foreign import backtrace_libc "system:c"
+
+@(default_calling_convention = "c")
+foreign backtrace_libc {
+	backtrace :: proc(buffer: [^]rawptr, size: c.int) -> c.int ---
+	backtrace_symbols :: proc(buffer: [^]rawptr, size: c.int) -> [^]cstring ---
+	@(link_name = "free")
+	libc_free :: proc(ptr: rawptr) ---
+}
+
+// A backtrace on InternalError is the only way to identify which Clay
+// array overflowed, so it stays even in non-verbose runs. Errors are rare.
 clay_error :: proc "c" (data: clay.ErrorData) {
 	context = runtime.default_context()
 	message := string(data.errorText.chars[:data.errorText.length])
-	fmt.eprintln("clay:", message)
+	fmt.eprintln("clay:", data.errorType, message)
 	diagnostic.write(message)
+	if data.errorType == .InternalError {
+		frames: [32]rawptr
+		depth := backtrace(raw_data(frames[:]), len(frames))
+		if depth > 0 {
+			symbols := backtrace_symbols(raw_data(frames[:]), depth)
+			if symbols != nil {
+				defer libc_free(symbols)
+				for i in 0 ..< depth {
+					line := fmt.aprintf("clay trace: %s", symbols[i])
+					diagnostic.write(line)
+					delete(line)
+				}
+			}
+		}
+	}
 }
 
 measure_text :: proc "c" (

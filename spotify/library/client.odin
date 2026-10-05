@@ -111,6 +111,7 @@ run :: proc(pointer: rawptr) {
 	reuse := http.open_handle()
 	defer http.close_handle(reuse)
 	tokens, auth := authorize(client.remember, &client.cancel)
+	diagnostic.writef("library auth=%v", auth)
 	if auth != .Ready {
 		if auth != .Cancelled {
 			_ = chan.send(client.results, Result{status = auth == .Missing_Client_ID ? -1 : 0})
@@ -196,6 +197,7 @@ handle :: proc(
 	request: Request,
 	reuse: rawptr = nil,
 ) {
+	diagnostic.writef("library request=%v offset=%d", request.kind, request.offset)
 	if !ensure_tokens(client, tokens) {
 		fail_request(client, request)
 		return
@@ -583,6 +585,14 @@ apply :: proc(client: ^Client, result: Result) {
 			client.failed = true
 			client.last_http_status = local.status
 			client.state = local.status <= 0 ? .Missing_Client_ID : .Failed
+			diagnostic.result(
+				fmt.aprintf("index-%v", local.list, allocator = context.temp_allocator),
+				false,
+				local.status,
+				0,
+				0,
+				false,
+			)
 			return
 		}
 		i := local.list
@@ -617,7 +627,14 @@ apply :: proc(client: ^Client, result: Result) {
 			destination.next_offset = local.page.next_offset
 			destination.total = local.page.total
 		}
-		diagnostic.write("library page merge completed")
+		diagnostic.result(
+			fmt.aprintf("index-%v", local.list, allocator = context.temp_allocator),
+			local.ok,
+			local.status,
+			len(destination.items),
+			destination.total,
+			destination.has_more,
+		)
 		client.state = client.failed ? .Failed : client.remaining_initial > 0 ? .Loading : .Ready
 	case .Detail:
 		if local.source != client.detail_request_source ||
@@ -627,9 +644,17 @@ apply :: proc(client: ^Client, result: Result) {
 			client.last_http_status = local.status
 			client.detail_error = local.status
 			client.state = local.status == 401 || local.status == 403 ? .Failed : client.state
+			diagnostic.result("detail", false, local.status, 0, 0, false)
 			return
 		}
-		diagnostic.write("library detail applied")
+		diagnostic.result(
+			"detail",
+			local.ok,
+			local.ok ? 200 : local.status,
+			len(local.detail.rows),
+			local.detail.total,
+			local.detail.has_more,
+		)
 		// The metadata response can arrive before its larger cover. Keep the
 		// selected card's cover alive in the incoming arena until texture upload.
 		local.detail.image_preview = strings.clone(
@@ -658,6 +683,14 @@ apply :: proc(client: ^Client, result: Result) {
 				client.detail.next_offset = local.next_offset
 				client.detail.has_more = local.has_more
 			}
+			diagnostic.result(
+				"more",
+				local.ok,
+				local.status,
+				len(client.detail.rows),
+				client.detail.total,
+				client.detail.has_more,
+			)
 		}
 	case .Search:
 		if local.search_serial != client.search_serial {return}
@@ -667,6 +700,7 @@ apply :: proc(client: ^Client, result: Result) {
 			free_search_pages(&client.search_pages)
 			delete(client.search_query)
 			client.search_query = ""
+			diagnostic.result("search", false, local.status, 0, 0, false)
 			return
 		}
 		free_search_pages(&client.search_pages)
@@ -680,6 +714,7 @@ apply :: proc(client: ^Client, result: Result) {
 		delete(client.search_query)
 		client.search_query = local.search_query
 		local.search_query = ""
+		diagnostic.result("search", local.ok, local.status, 0, 0, false)
 	}
 }
 

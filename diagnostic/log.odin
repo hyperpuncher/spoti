@@ -1,5 +1,8 @@
-// Minimal crash breadcrumbs. Callers must never include credentials, URLs,
-// Spotify IDs, audio keys, or response bodies.
+// Minimal crash breadcrumbs plus structured dev logging. Callers must never
+// include credentials, URLs, Spotify IDs, audio keys, or response bodies.
+// HTTP lines carry a sanitized endpoint shape (host plus alphabetic path
+// segments, IDs and query dropped except paging offsets), a status code,
+// byte count and duration. Pass -v for per-request cover lines.
 package diagnostic
 
 import "core:fmt"
@@ -8,6 +11,8 @@ import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:time"
+
+verbose: bool
 
 state: struct {
 	mutex:         sync.Mutex,
@@ -18,8 +23,9 @@ state: struct {
 	cover_failed:  int,
 }
 
-init :: proc() {
+init :: proc(enabled_verbose: bool = false) {
 	sync.mutex_guard(&state.mutex)
+	sync.atomic_store(&verbose, enabled_verbose)
 	if state.file != nil {return}
 	base, err := os.user_log_dir(context.allocator)
 	if err != nil {return}
@@ -66,6 +72,8 @@ cover_decode_result :: proc(ok: bool) {
 // duration. Privacy: no tokens, URLs, IDs, bodies, or query besides
 // numeric paging offsets.
 http :: proc(address: string, status, bytes: int, ms: f64) {
+	failed := status < 200 || status >= 300
+	if !failed && !sync.atomic_load(&verbose) {return}
 	endpoint, paging := sanitize_endpoint(address, context.temp_allocator)
 	line := fmt.aprintf(
 		"http %s%s status=%d bytes=%d ms=%.0f",
@@ -74,6 +82,41 @@ http :: proc(address: string, status, bytes: int, ms: f64) {
 		status,
 		bytes,
 		ms,
+		allocator = context.temp_allocator,
+	)
+	write(line)
+}
+
+// Formatted dev line without a scoping block per call site.
+writef :: proc(format: string, args: ..any) {
+	write(fmt.aprintf(format, ..args, allocator = context.temp_allocator))
+}
+
+result :: proc(kind: string, ok: bool, status, rows, total: int, more: bool) {
+	if !sync.atomic_load(&verbose) {return}
+	line := fmt.aprintf(
+		"library result=%s ok=%v status=%d rows=%d total=%d more=%v",
+		kind,
+		ok,
+		status,
+		rows,
+		total,
+		more,
+		allocator = context.temp_allocator,
+	)
+	write(line)
+}
+
+// Frame-stage averages and maxima over the last window, for scroll hitches.
+frame :: proc(events, layout, render: f64, max_events, max_layout, max_render: f64) {
+	line := fmt.aprintf(
+		"frame ms avg/max events+poll=%.1f/%.1f layout=%.1f/%.1f render+present=%.1f/%.1f",
+		events,
+		max_events,
+		layout,
+		max_layout,
+		render,
+		max_render,
 		allocator = context.temp_allocator,
 	)
 	write(line)

@@ -326,7 +326,11 @@ parse_card_uri :: proc(uri: string) -> (source: library.Source, id: string, ok: 
 }
 
 main :: proc() {
-	diagnostic.init()
+	verbose := false
+	for arg in os.args[1:] {
+		if arg == "-v" || arg == "--verbose" {verbose = true}
+	}
+	diagnostic.init(verbose)
 	diagnostic.write("application starting")
 	defer {
 		diagnostic.write("clean shutdown")
@@ -394,6 +398,9 @@ main :: proc() {
 	autoscroll_anchor := sdl.FPoint{}
 	autoscroll_moving := false
 	grid_smooth, detail_smooth: Smooth
+	stage_sum: [3]f64
+	stage_max: [3]f64
+	stage_n := 0
 	// Resume the last played track and reopen its collection. The footer
 	// shows it without starting playback; pressing play resumes it.
 	if len(settings.last_track) > 0 {
@@ -629,6 +636,7 @@ main :: proc() {
 			}
 		}
 		if !running {break}
+		t0 := sdl.GetTicksNS()
 		if input_changed {
 			input_changed = false
 			trimmed := strings.trim_space(input)
@@ -972,6 +980,7 @@ main :: proc() {
 		card_text_height :=
 			f32(ttf.GetFontHeight(ui.font_for_size(&state, 14 * density))) +
 			f32(ttf.GetFontHeight(ui.font_for_size(&state, 12 * density)))
+		t1 := sdl.GetTicksNS()
 		commands, visible := layout(
 			view,
 			&library_client,
@@ -1017,11 +1026,31 @@ main :: proc() {
 				if autoscroll_moving {redraw = true}
 			}
 		} else {autoscroll_moving = false}
+		t2 := sdl.GetTicksNS()
 		update_cursor(&state, &library_client, resizing, visible, seek_enabled, search_mode)
 		_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
 		_ = sdl.RenderClear(state.renderer)
 		render(&commands, &state, &textures)
 		ui.frame_done(&state)
+		t3 := sdl.GetTicksNS()
+		stage_sum[0] += f64(t1 - t0) / 1e6
+		stage_sum[1] += f64(t2 - t1) / 1e6
+		stage_sum[2] += f64(t3 - t2) / 1e6
+		stage_max[0] = max(stage_max[0], f64(t1 - t0) / 1e6)
+		stage_max[1] = max(stage_max[1], f64(t2 - t1) / 1e6)
+		stage_max[2] = max(stage_max[2], f64(t3 - t2) / 1e6)
+		stage_n += 1
+		if stage_n >= 240 {
+			diagnostic.frame(
+				stage_sum[0] / f64(stage_n),
+				stage_sum[1] / f64(stage_n),
+				stage_sum[2] / f64(stage_n),
+				stage_max[0],
+				stage_max[1],
+				stage_max[2],
+			)
+			stage_sum, stage_max, stage_n = {}, {}, 0
+		}
 		display_page := &library_client.pages[filter]
 		display_kind := filter
 		if search_mode {

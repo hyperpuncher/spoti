@@ -1,11 +1,13 @@
 package http
 
+import diagnostic "../../diagnostic"
 import "base:runtime"
 import c "core:c/libc"
 import "core:crypto"
 import "core:fmt"
 import "core:strings"
 import "core:sync"
+import "core:time"
 
 Options :: struct {
 	bearer:     string, // empty for signed CDN URLs; never forward account tokens
@@ -244,11 +246,21 @@ request :: proc(
 		headers = extended
 	}
 	if headers != nil && easy_setopt(client, CURL_HTTPHEADER, headers) != 0 {return nil, 0, false}
-	if easy_perform(client) != 0 {return nil, 0, false}
+	started := time.now()
+	if easy_perform(client) != 0 {
+		diagnostic.http(address, -1, 0, elapsed_ms(started))
+		return nil, 0, false
+	}
 	code: c.long
 	if easy_getinfo(client, CURL_RESPONSE_CODE, &code) != 0 {return nil, 0, false}
+	diagnostic.http(address, int(code), len(received.bytes), elapsed_ms(started))
 	return received.bytes, int(code), true
 }
+
+elapsed_ms :: proc(start: time.Time) -> f64 {
+	return f64(time.since(start)) / f64(time.Millisecond)
+}
+
 // A worker-owned easy handle for connection reuse. Thread-confined: create
 // and use on one thread, close it there too.
 open_handle :: proc() -> rawptr {

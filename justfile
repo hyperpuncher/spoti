@@ -12,8 +12,8 @@ _prepare:
 build: _prepare
 	odin build . -out:build/spoti -o:speed
 
-run: _prepare
-	odin run .
+run *args: _prepare
+	odin run . -- {{args}}
 
 # Format every Odin file in the project, including vendored bindings.
 fmt:

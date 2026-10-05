@@ -1,6 +1,7 @@
 // Separate, read-only Web API approval for account library data.
 package library
 
+import diagnostic "../../diagnostic"
 import credential "../credential"
 import oauth "../oauth"
 import "core:crypto"
@@ -39,10 +40,13 @@ authorize :: proc(
 	defer delete(client_id)
 	if !valid_client_id(client_id) {return {}, .Missing_Client_ID}
 	grant := oauth.web_grant(client_id)
-	if saved, found := credential.load(.Library); found {
+	saved, found := credential.load(.Library)
+	diagnostic.writef("library authorize saved=%v", found)
+	if found {
 		fresh, status := oauth.refresh(saved, grant)
 		crypto.zero_explicit(raw_data(saved), len(saved))
 		delete(saved)
+		diagnostic.writef("library refresh=%v", status)
 		switch status {
 		case .Authorized:
 			if len(fresh.refresh) > 0 && !credential.save(fresh.refresh, .Library) {
@@ -57,7 +61,11 @@ authorize :: proc(
 	}
 	if cancel != nil && sync.atomic_load(cancel) {return {}, .Cancelled}
 	listener, listening := oauth.listen(int(grant.port))
-	if !listening {fmt.eprintln("cannot listen for library browser approval"); return {}, .Unavailable}
+	if !listening {
+		fmt.eprintln("cannot listen for library browser approval")
+		diagnostic.write("library authorize listen-failed")
+		return {}, .Unavailable
+	}
 	defer net.close(listener)
 	flow := oauth.begin(grant)
 	defer {
@@ -69,6 +77,7 @@ authorize :: proc(
 	fmt.println("Open this URL in your browser to allow read-only Spotify library access:")
 	fmt.println(flow.url)
 	code, response := oauth.wait_for_code(listener, flow.state, cancel)
+	diagnostic.writef("library browser=%v", response)
 	if response == .Cancelled {return {}, .Cancelled}
 	if response != .Authorized {return {}, .Unavailable}
 	defer {crypto.zero_explicit(raw_data(code), len(code)); delete(code)}
