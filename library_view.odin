@@ -48,6 +48,80 @@ scroll_items :: proc(
 	return visible_items(count, columns, stride, offset, height)
 }
 
+// While pages stream in, the list already spans the full total so the
+// scrollbar thumb has its final size. Unknown tail rows render as
+// placeholders and collapse away if the server over-reported its total.
+detail_item_count :: proc(loaded, total: int, loading: bool) -> int {
+	if !loading || total <= loaded {return loaded}
+	return total
+}
+
+// Same stride as a track row: number plus a bar where the title will land.
+track_skeleton :: proc(index: int, d: f32) {
+	if clay.UI()(
+	{
+		layout = {
+			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(44 * d)},
+			padding = {left = u16(12 * d), right = u16(92 * d)},
+			childAlignment = {y = .Center},
+			childGap = u16(18 * d),
+		},
+	},
+	) {
+		if clay.UI()(
+		{layout = {sizing = {width = clay.SizingFixed(24 * d)}, childAlignment = {x = .Right}}},
+		) {
+			clay.Text(
+				fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
+				clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
+			)
+		}
+		if clay.UI()(
+		{
+			layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(14 * d)}},
+			backgroundColor = CARD,
+			cornerRadius = clay.CornerRadiusAll(7 * d),
+		},
+		) {}
+	}
+}
+
+// Fixed to the card row height so the grid stride never shifts as covers land.
+release_skeleton :: proc(card_width, row_height, d: f32) {
+	padding := 8 * d
+	cover_size := card_width - padding * 2
+	if clay.UI()(
+	{
+		layout = {
+			layoutDirection = .TopToBottom,
+			sizing = {width = clay.SizingFixed(card_width), height = clay.SizingFixed(row_height)},
+			padding = clay.PaddingAll(u16(padding)),
+			childGap = u16(7 * d),
+		},
+	},
+	) {
+		if clay.UI()(
+		{
+			layout = {
+				sizing = {
+					width = clay.SizingFixed(cover_size),
+					height = clay.SizingFixed(cover_size),
+				},
+			},
+			backgroundColor = CARD,
+			cornerRadius = clay.CornerRadiusAll(8 * d),
+		},
+		) {}
+		if clay.UI()(
+		{
+			layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(13 * d)}},
+			backgroundColor = CARD,
+			cornerRadius = clay.CornerRadiusAll(6 * d),
+		},
+		) {}
+	}
+}
+
 list_spacer :: proc(height: f32) {
 	if height <= 0 {return}
 	clay.UI()(
@@ -309,7 +383,7 @@ track_table :: proc(
 		gap := f32(u16(2 * d))
 		visible = scroll_items(
 			"detail_rows",
-			len(detail.rows),
+			detail_item_count(len(detail.rows), detail.total, detail.has_more),
 			1,
 			44 * d + gap,
 			viewport_height,
@@ -317,6 +391,10 @@ track_table :: proc(
 		)
 		list_spacer(visible.before - gap)
 		for index in visible.first ..< visible.last {
+			if index >= len(detail.rows) {
+				track_skeleton(index, d)
+				continue
+			}
 			row := &detail.rows[index]
 			hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
 			if clay.UI_WithId(clay.ID("track_row", u32(index)))(
@@ -394,23 +472,6 @@ track_table :: proc(
 			}
 		}
 		list_spacer(visible.after - gap)
-		if detail.has_more {
-			if clay.UI_WithId(clay.ID("detail_more"))(
-			{
-				layout = {
-					sizing = {
-						width = clay.SizingFixed(150 * d),
-						height = clay.SizingFixed(38 * d),
-					},
-					childAlignment = {x = .Center, y = .Center},
-				},
-				backgroundColor = CARD,
-				cornerRadius = clay.CornerRadiusAll(19 * d),
-			},
-			) {
-				clay.Text("Load more", clay.TextElementConfig{fontSize = 14, textColor = WHITE})
-			}
-		}
 	}
 	return
 }
@@ -443,9 +504,10 @@ artist_discography :: proc(
 		row_height := card_row_height(card_width, card_text_height, d)
 		row_gap := f32(u16(8 * d))
 		heading := clay.GetElementData(clay.ID("discography_title"))
+		release_count := detail_item_count(len(detail.releases), detail.total, detail.has_more)
 		visible = scroll_items(
 			"detail_rows",
-			len(detail.releases),
+			release_count,
 			columns,
 			row_height + row_gap,
 			viewport_height,
@@ -458,36 +520,23 @@ artist_discography :: proc(
 			) {
 				for column in 0 ..< columns {
 					next := index + column
-					if next >= len(detail.releases) {break}
-					library_card(
-						textures,
-						&detail.releases[next],
-						u32(next),
-						card_width,
-						d,
-						"release_card",
-					)
+					if next >= release_count {break}
+					if next < len(detail.releases) {
+						library_card(
+							textures,
+							&detail.releases[next],
+							u32(next),
+							card_width,
+							d,
+							"release_card",
+						)
+					} else {
+						release_skeleton(card_width, row_height, d)
+					}
 				}
 			}
 		}
 		list_spacer(visible.after - row_gap)
-		if detail.has_more {
-			if clay.UI_WithId(clay.ID("detail_more"))(
-			{
-				layout = {
-					sizing = {
-						width = clay.SizingFixed(150 * d),
-						height = clay.SizingFixed(38 * d),
-					},
-					childAlignment = {x = .Center, y = .Center},
-				},
-				backgroundColor = CARD,
-				cornerRadius = clay.CornerRadiusAll(19 * d),
-			},
-			) {
-				clay.Text("Load more", clay.TextElementConfig{fontSize = 14, textColor = WHITE})
-			}
-		}
 	}
 	return
 }

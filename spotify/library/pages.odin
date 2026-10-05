@@ -100,7 +100,7 @@ Playlist_Ref :: struct {
 	images:      []Image,
 	owner:       Owner,
 	description: string,
-	items:       Count,
+	items:       Count `json:"tracks"`,
 }
 
 Saved_Track :: struct {

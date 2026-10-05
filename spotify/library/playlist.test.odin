@@ -1,6 +1,7 @@
 package library
 
 import ap "../ap"
+import "core:encoding/json"
 import "core:mem/virtual"
 import "core:testing"
 
@@ -77,4 +78,37 @@ internal_playlist_metadata_deduplicates_requests_but_preserves_rows :: proc(t: ^
 	testing.expect_value(t, rows[0].duration_ms, 1000)
 	_, ok = parse_playlist_metadata(nil, uris, allocator)
 	testing.expect(t, !ok, "a missing metadata answer must not silently remove tracks")
+}
+
+@(test)
+web_playlist_items_parse_track_objects :: proc(t: ^testing.T) {
+	body := `{"total":2,"offset":0,"limit":50,"next":null,"items":[{"added_at":"2024-01-01","item":{"uri":"spotify:track:aaa","name":"Song A","duration_ms":200000,"artists":[{"name":"Art A"}],"album":{"images":[{"url":"http://x","height":64,"width":64}]}}},{"added_at":"2024-01-02","item":{"uri":"spotify:track:bbb","name":"Song B","duration_ms":180000,"artists":[{"name":"Art B"}],"album":{"images":[]}}}]}`
+	arena: virtual.Arena
+	if virtual.arena_init_growing(&arena) != nil {testing.fail_now(t, "arena")}
+	defer virtual.arena_destroy(&arena)
+	rows, total, next_offset, has_more, status, ok := parse_playlist_items(
+		transmute([]u8)body,
+		virtual.arena_allocator(&arena),
+	)
+	if !testing.expect(
+		t,
+		ok && status == 200 && total == 2 && next_offset == 2 && !has_more,
+	) {return}
+	if !testing.expect(t, len(rows) == 2) {return}
+	testing.expect_value(t, rows[0].uri, "spotify:track:aaa")
+	testing.expect_value(t, rows[0].name, "Song A")
+	testing.expect_value(t, rows[0].artists, "Art A")
+	testing.expect_value(t, rows[1].uri, "spotify:track:bbb")
+}
+
+@(test)
+web_playlist_header_reads_track_total :: proc(t: ^testing.T) {
+	body := `{"id":"x","name":"Noice","uri":"spotify:playlist:x","images":[],"owner":{"id":"hyper_puncher","display_name":"hyper_puncher"},"tracks":{"total":1512}}`
+	header: Playlist_Ref
+	if !testing.expect(
+		t,
+		json.unmarshal(transmute([]u8)body, &header, allocator = context.temp_allocator) == nil,
+	) {return}
+	testing.expect_value(t, header.items.total, 1512)
+	testing.expect_value(t, header.owner.display_name, "hyper_puncher")
 }

@@ -40,6 +40,24 @@ free_play_queue :: proc(items: ^[dynamic]Play_Item) {
 	items^ = nil
 }
 
+append_play_item :: proc(
+	items: ^[dynamic]Play_Item,
+	row: library.Track_Row,
+	order: int,
+	fallback_cover: string = "",
+) {
+	cover := row.image_small != "" ? row.image_small : row.image != "" ? row.image : fallback_cover
+	append(
+		items,
+		Play_Item {
+			uri = strings.clone(row.uri),
+			artist = strings.clone(row.artists),
+			cover = strings.clone(cover),
+			order = order,
+		},
+	)
+}
+
 build_play_queue :: proc(
 	items: ^[dynamic]Play_Item,
 	rows: []library.Track_Row,
@@ -47,19 +65,24 @@ build_play_queue :: proc(
 ) {
 	free_play_queue(items)
 	items^ = make([dynamic]Play_Item, 0, len(rows))
-	for row, index in rows {
-		cover :=
-			row.image_small != "" ? row.image_small : row.image != "" ? row.image : fallback_cover
-		append(
-			items,
-			Play_Item {
-				uri = strings.clone(row.uri),
-				artist = strings.clone(row.artists),
-				cover = strings.clone(cover),
-				order = index,
-			},
-		)
-	}
+	for row, index in rows {append_play_item(items, row, index, fallback_cover)}
+}
+
+// The live queue mirrors a detail page; later pages extend it in place.
+stamp_play_queue :: proc(queue_uri: ^string, generation: ^uint, detail: library.Detail) {
+	delete(queue_uri^)
+	queue_uri^ = strings.clone(detail_card_uri(detail))
+	generation^ = detail.generation
+}
+
+// A playing detail keeps paging in after playback starts. Rows only ever
+// append, so the live queue grows in place and the current index holds.
+append_play_queue_tail :: proc(
+	items: ^[dynamic]Play_Item,
+	rows: []library.Track_Row,
+	fallback_cover: string = "",
+) {
+	for row in rows {append_play_item(items, row, len(items), fallback_cover)}
 }
 
 // Search tracks arrive as cards, not detail rows. The subtitle carries the

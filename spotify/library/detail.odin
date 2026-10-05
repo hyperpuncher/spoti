@@ -41,6 +41,8 @@ Detail :: struct {
 	next_offset:   int,
 	has_more:      bool,
 	rows_error:    int,
+	more_failures: int, // consecutive failed page fetches; the auto-chain stops at 3
+	generation:    uint, // a reopened page keeps its URI but never its generation
 }
 
 free_detail :: proc(detail: ^Detail) {
@@ -242,10 +244,10 @@ fetch_track_page :: proc(
 ) {
 	if offset < 0 || offset > 1_000_000 || !safe_id(id) {return}
 	if source == .Artist {return}
-	body, body_status, fetched := fetch_track_body(access, source, id, offset)
+	body, body_status, fetched := fetch_track_body(access, source, id, offset, reuse)
 	defer delete(body)
 	if fetched && source == .Playlist && body_status == 403 && session_access != "" {
-		return fetch_playlist_rows(session_access, id, offset, allocator)
+		return fetch_playlist_rows(session_access, id, offset, allocator, reuse)
 	}
 	if !fetched || body_status != 200 {return nil, 0, 0, false, body_status, false}
 	switch source {
@@ -260,37 +262,61 @@ fetch_track_page :: proc(
 	return
 }
 
-fetch_track_body :: proc(
-	access: string,
+// Rows only need identity, artists and covers; the shape is unchanged,
+// but a full track object per item costs most of every page's bytes.
+// Playlist items carry the object under `item`; `track` is deprecated and
+// comes back unusable, so select `item` here, not `track`.
+TRACK_FIELDS :: "uri,name,duration_ms,artists(name),album(images)"
+
+track_page_address :: proc(
 	source: Source,
 	id: string,
 	offset: int,
 ) -> (
-	body: [dynamic]u8,
-	status: int,
+	address: string,
 	ok: bool,
 ) {
-	address: string
 	switch source {
 	case .Liked:
-		address = fmt.aprintf("https://api.spotify.com/v1/me/tracks?limit=50&offset=%d", offset)
+		address = fmt.aprintf(
+			"https://api.spotify.com/v1/me/tracks?limit=50&offset=%d&fields=total,offset,next,items(added_at,track(%s))",
+			offset,
+			TRACK_FIELDS,
+		)
 	case .Playlist:
 		address = fmt.aprintf(
-			"https://api.spotify.com/v1/playlists/%s/items?limit=50&offset=%d",
+			"https://api.spotify.com/v1/playlists/%s/items?limit=50&offset=%d&fields=total,offset,next,items(added_at,item(%s))",
 			id,
 			offset,
+			TRACK_FIELDS,
 		)
 	case .Album:
 		address = fmt.aprintf(
-			"https://api.spotify.com/v1/albums/%s/tracks?limit=50&offset=%d",
+			"https://api.spotify.com/v1/albums/%s/tracks?limit=50&offset=%d&fields=total,offset,next,items(uri,name,duration_ms,artists(name))",
 			id,
 			offset,
 		)
 	case .Artist:
 		return
 	}
+	return address, true
+}
+
+fetch_track_body :: proc(
+	access: string,
+	source: Source,
+	id: string,
+	offset: int,
+	reuse: rawptr = nil,
+) -> (
+	body: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	address, addressed := track_page_address(source, id, offset)
+	if !addressed {return}
 	defer delete(address)
-	return api_get(access, address, 2 * 1024 * 1024)
+	return api_get(access, address, 2 * 1024 * 1024, reuse)
 }
 
 parse_saved_tracks :: proc(

@@ -273,19 +273,30 @@ ensure_covers :: proc(
 ) {
 	budget := 4
 	ensure_cover(client, textures, player_cover, &budget)
-	for entry in page.items[visible.cards.first:visible.cards.last] {
-		ensure_cover(client, textures, entry.image, &budget)
+	if client.covers_pending < 8 {
+		for entry in page.items[visible.cards.first:visible.cards.last] {
+			ensure_cover(client, textures, entry.image, &budget)
+		}
 	}
 	if client.detail.ready {
 		ensure_cover(client, textures, client.detail.image, &budget)
 		ensure_cover(client, textures, client.detail.image_preview, &budget)
 		ensure_cover(client, textures, client.detail.image_small, &budget)
-		for row in client.detail.rows[visible.tracks.first:visible.tracks.last] {
-			ensure_cover(client, textures, row.image, &budget)
-			ensure_cover(client, textures, row.image_small, &budget)
-		}
-		for release in client.detail.releases[visible.releases.first:visible.releases.last] {
-			ensure_cover(client, textures, release.image, &budget)
+		// Rows stream in behind the visible window; never slice placeholders,
+		// and stop prefetching while a backlog is still draining so fast
+		// scrolling cannot queue the whole collection as textures.
+		if client.covers_pending < 8 {
+			track_first := min(visible.tracks.first, len(client.detail.rows))
+			track_last := min(visible.tracks.last, len(client.detail.rows))
+			for row in client.detail.rows[track_first:track_last] {
+				ensure_cover(client, textures, row.image, &budget)
+				ensure_cover(client, textures, row.image_small, &budget)
+			}
+			release_first := min(visible.releases.first, len(client.detail.releases))
+			release_last := min(visible.releases.last, len(client.detail.releases))
+			for release in client.detail.releases[release_first:release_last] {
+				ensure_cover(client, textures, release.image, &budget)
+			}
 		}
 	}
 }
@@ -353,6 +364,8 @@ main :: proc() {
 	player_cover, displayed_cover: string
 	play_queue: [dynamic]Play_Item
 	play_index := -1
+	queue_detail := ""
+	queue_gen: uint
 	input: string
 	input_active := false
 	search_mode := false
@@ -422,6 +435,7 @@ main :: proc() {
 		delete(player_cover)
 		delete(displayed_cover)
 		free_play_queue(&play_queue)
+		delete(queue_detail)
 		delete(input)
 		free_settings(&settings)
 		free_context_menu(&menu)
@@ -539,6 +553,8 @@ main :: proc() {
 								delete(artist)
 								artist = {}
 								free_play_queue(&play_queue)
+								delete(queue_detail)
+								queue_detail = ""
 								play_index = -1
 								delete(input)
 								input = {}
@@ -648,7 +664,34 @@ main :: proc() {
 			_ = library.start(&library_client, remember)
 		}
 		if library.poll(&library_client) {redraw = true}
-		for cover in library.take_cover(&library_client) {
+		// A detail page keeps paging until the server runs dry. Rows stream
+		// into the list while the scrollbar already spans the full total.
+		if library_client.detail.ready &&
+		   library_client.detail.has_more &&
+		   !library_client.detail_loading {
+			if library.more_rows(&library_client) {redraw = true}
+		}
+		// Playback can start before the last page lands; newly arrived rows
+		// extend the live queue in place when it still mirrors this page.
+		if len(queue_detail) > 0 &&
+		   library_client.detail.ready &&
+		   queue_detail == detail_card_uri(library_client.detail) &&
+		   queue_gen == library_client.detail.generation &&
+		   len(play_queue) < len(library_client.detail.rows) {
+			append_play_queue_tail(
+				&play_queue,
+				library_client.detail.rows[len(play_queue):],
+				library_client.detail.image_small,
+			)
+			redraw = true
+		}
+		// Spread texture uploads across frames; draining a backlog at once
+		// stalls a frame for every rounded corner and GPU upload in it.
+		uploads := 6
+		for uploads > 0 {
+			cover, received := library.take_cover(&library_client)
+			if !received {break}
+			uploads -= 1
 			redraw = true
 			request := textures.requested[cover.key]
 			request.pending = false
@@ -1019,6 +1062,7 @@ main :: proc() {
 							library_client.detail.rows[:],
 							library_client.detail.image_small,
 						)
+						stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
 						play_index =
 							shuffle ? reorder_play_queue(play_queue[:], menu.track, true) : menu.track
 						track_selected = select_play_item(
@@ -1092,6 +1136,8 @@ main :: proc() {
 						if !hit_clipped("card", "library_grid", mouse_click, u32(index)) {continue}
 						if search_mode && display_kind == .Tracks {
 							build_play_queue_from_entries(&play_queue, display_page.items[:])
+							delete(queue_detail)
+							queue_detail = ""
 							play_index =
 								shuffle ? reorder_play_queue(play_queue[:], index, true) : index
 							track_selected = select_play_item(
@@ -1126,8 +1172,6 @@ main :: proc() {
 					} else if hit("spotify_link", mouse_click) && !library_client.detail_loading {
 						open_spotify_detail(&library_client.detail)
 						handled = true
-					} else if hit_clipped("detail_more", "detail_rows", mouse_click) {
-						handled = library.more_rows(&library_client)
 					} else if library_client.detail.source == .Artist {
 						for index in visible.releases.first ..< visible.releases.last {
 							release := library_client.detail.releases[index]
@@ -1157,6 +1201,7 @@ main :: proc() {
 								library_client.detail.rows[:],
 								library_client.detail.image_small,
 							)
+							stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
 							play_index =
 								shuffle ? reorder_play_queue(play_queue[:], index, true) : index
 							track_selected = select_play_item(
@@ -1284,6 +1329,7 @@ main :: proc() {
 				library_client.detail.rows[:],
 				library_client.detail.image_small,
 			)
+			stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
 			play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
 			_ = select_play_item(play_queue[:], play_index, &selected, &player_cover, &artist)
 			settings_note_recent(&settings, detail_card_uri(library_client.detail))

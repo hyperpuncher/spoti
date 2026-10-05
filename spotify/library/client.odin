@@ -463,6 +463,7 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 		next.image_preview = strings.clone(preview.image, allocator)
 		next.image_small = strings.clone(preview.image, allocator)
 		next.total = preview.total
+		next.generation = client.detail.generation + 1
 		switch source {
 		case .Playlist, .Liked:
 			next.label = strings.clone("Playlist", allocator)
@@ -639,7 +640,12 @@ apply :: proc(client: ^Client, result: Result) {
 	case .More:
 		if local.source == client.detail.source && local.id == client.detail.id {
 			client.detail_loading = false
+			if !local.ok {
+				client.detail.more_failures += 1
+				if client.detail.more_failures >= 3 {client.detail.has_more = false}
+			}
 			if local.ok && client.detail.ready {
+				client.detail.more_failures = 0
 				allocator := virtual.arena_allocator(&client.detail.arena)
 				if local.source == .Artist {
 					for release in local.releases {

@@ -207,12 +207,11 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					)
 					if source == .Album {
 						rows := clay.GetScrollContainerData(clay.ID("detail_rows"))
-						expected_rows :=
-							36 * d + 3000 * (44 * d + f32(u16(2 * d))) + 38 * d + f32(u16(2 * d))
+						expected_rows := 36 * d + 3000 * (44 * d + f32(u16(2 * d)))
 						testing.expect(
 							t,
 							math.abs(rows.contentDimensions.height - expected_rows) < 0.5,
-							"track spacers must preserve row gaps and the load-more button",
+							"track spacers must preserve row gaps with no load-more button",
 						)
 						if fraction == 1 {testing.expect_value(t, visible.tracks.last, 3000)}
 					} else if fraction == 1 {
@@ -274,6 +273,15 @@ scrollbar_thumb_hides_when_content_fits_and_clamps_at_both_ends :: proc(t: ^test
 	testing.expect(t, math.abs(bottom - (800 - thumb - 2)) < 0.01)
 	_, clamped, _ := scrollbar_metrics(-99999, 4000, 800, 24, 2)
 	testing.expect_value(t, clamped, bottom)
+}
+
+@(test)
+detail_count_spans_total_while_loading :: proc(t: ^testing.T) {
+	testing.expect_value(t, detail_item_count(50, 500, true), 500)
+	testing.expect_value(t, detail_item_count(500, 500, true), 500)
+	testing.expect_value(t, detail_item_count(480, 500, false), 480)
+	testing.expect_value(t, detail_item_count(0, 0, true), 0)
+	testing.expect_value(t, detail_item_count(60, 50, true), 60)
 }
 
 @(test)
