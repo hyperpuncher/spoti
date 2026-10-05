@@ -77,6 +77,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		footer_overlap_found,
 		"regression must exercise a clipped row overlapping next",
 	)
+	settings: Settings
 	for d in ([]f32{1, 1.5}) {
 		density = d
 		clay.ResetMeasureTextCache()
@@ -90,6 +91,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					_, _ = layout(
 						{button = "pause"},
 						&client,
+						&settings,
 						.Albums,
 						&textures,
 						width,
@@ -115,6 +117,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					commands, visible := layout(
 						{button = "pause"},
 						&client,
+						&settings,
 						.Albums,
 						&textures,
 						width,

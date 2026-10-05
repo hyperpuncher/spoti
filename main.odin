@@ -638,6 +638,7 @@ main :: proc() {
 		commands, visible := layout(
 			view,
 			&library_client,
+			&settings,
 			filter,
 			&textures,
 			sidebar_width,

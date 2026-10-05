@@ -89,6 +89,7 @@ library_card :: proc(
 	card_width, d: f32,
 	id: string = "card",
 	selected: bool = false,
+	pinned: bool = false,
 ) {
 	hovered := clay.PointerOver(clay.ID(id, index))
 	padding := 8 * d
@@ -106,6 +107,27 @@ library_card :: proc(
 	},
 	) {
 		cover_element(textures, entry.image, cover_size, 8 * d)
+		if pinned {
+			if clay.UI_WithId(clay.ID("card_pin", index))(
+			{
+				layout = {
+					sizing = {width = clay.SizingFixed(22 * d), height = clay.SizingFixed(22 * d)},
+					childAlignment = {x = .Center, y = .Center},
+				},
+				floating = {
+					offset = {padding, padding},
+					zIndex = 2,
+					attachTo = .Parent,
+					attachment = {element = .LeftTop, parent = .LeftTop},
+					pointerCaptureMode = .Passthrough,
+				},
+				backgroundColor = clay.Color{12, 12, 12, 200},
+				cornerRadius = clay.CornerRadiusAll(11 * d),
+			},
+			) {
+				icon_element(textures, "pin", .White, 12 * d)
+			}
+		}
 		if clay.UI()(
 		{
 			layout = {
@@ -132,6 +154,7 @@ library_card :: proc(
 
 sidebar :: proc(
 	client: ^library.Client,
+	settings: ^Settings,
 	filter: library.Kind,
 	textures: ^Textures,
 	width, viewport_height, card_text_height, d: f32,
@@ -192,6 +215,7 @@ sidebar :: proc(
 							card_width,
 							d,
 							selected = card_selected(&page.items[next], &client.detail),
+							pinned = settings_is_pinned(settings, page.items[next].uri),
 						)
 					}
 				}
@@ -468,6 +492,7 @@ detail_page :: proc(
 		layout = {
 			layoutDirection = .TopToBottom,
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+			padding = {right = u16(SCROLLBAR_OUTSET * d)},
 		},
 		backgroundColor = BG,
 	},

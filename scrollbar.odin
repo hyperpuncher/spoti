@@ -8,6 +8,8 @@ SCROLLBAR :: clay.Color{120, 120, 126, 170}
 SCROLLBAR_HOVER :: clay.Color{170, 170, 176, 210}
 SCROLLBAR_WIDTH :: 6
 SCROLLBAR_MARGIN :: 2
+// Space a scrolling container's parent must leave so the outside thumb fits.
+SCROLLBAR_OUTSET :: SCROLLBAR_WIDTH + 2 * SCROLLBAR_MARGIN
 
 Scrollbar_Drag :: struct {
 	container: string, // empty when no drag is active

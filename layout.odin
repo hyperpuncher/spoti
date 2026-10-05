@@ -317,6 +317,7 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 layout :: proc(
 	view: View,
 	client: ^library.Client,
+	settings: ^Settings,
 	filter: library.Kind,
 	textures: ^Textures,
 	sidebar_width, viewport_width, viewport_height, card_text_height, dt, d: f32,
@@ -341,6 +342,7 @@ layout :: proc(
 		) {
 			visible.cards = sidebar(
 				client,
+				settings,
 				filter,
 				textures,
 				sidebar_width,
