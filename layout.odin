@@ -25,26 +25,29 @@ SEARCH_TABS :: [4]library.Kind{.Playlists, .Albums, .Artists, .Tracks}
 SEARCH_TAB_LABELS :: [4]string{"Playlists", "Albums", "Artists", "Tracks"}
 
 View :: struct {
-	title:        string,
-	status:       string,
-	button:       string,
-	progress:     f32,
-	elapsed:      string,
-	total:        string,
-	input:        string,
-	cover:        string,
-	repeat:       bool,
-	shuffle:      bool,
-	volume:       f32,
-	input_active: bool,
-	pinned:       bool,
-	search_mode:  bool,
-	search_kind:  library.Kind,
-	menu_open:    bool,
-	menu_x:       f32,
-	menu_y:       f32,
-	menu_count:   int,
-	menu_labels:  [2]string,
+	title:         string,
+	status:        string,
+	button:        string,
+	progress:      f32,
+	elapsed:       string,
+	total:         string,
+	input:         string,
+	cover:         string,
+	repeat:        bool,
+	shuffle:       bool,
+	volume:        f32,
+	input_active:  bool,
+	pinned:        bool,
+	search_mode:   bool,
+	search_kind:   library.Kind,
+	menu_open:     bool,
+	menu_x:        f32,
+	menu_y:        f32,
+	menu_count:    int,
+	menu_labels:   [2]string,
+	scroll_active: bool, // middle-click autoscroll anchor indicator
+	scroll_x:      f32,
+	scroll_y:      f32,
 }
 
 chip :: proc(label: string, id: u32, active: bool, d: f32) {
@@ -337,6 +340,30 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 	}
 }
 
+// Middle-click autoscroll parks a small anchor where the button went down;
+// steering the mouse away scrolls that container until another click lands.
+autoscroll_indicator :: proc(view: View, textures: ^Textures, d: f32) {
+	if !view.scroll_active {return}
+	size := 40 * d
+	if clay.UI_WithId(clay.ID("autoscroll"))(
+	{
+		layout = {
+			sizing = {width = clay.SizingFixed(size), height = clay.SizingFixed(size)},
+			childAlignment = {x = .Center, y = .Center},
+		},
+		floating = {
+			offset = {view.scroll_x - size / 2, view.scroll_y - size / 2},
+			zIndex = 11,
+			attachTo = .Root,
+		},
+		backgroundColor = clay.Color{12, 12, 12, 220},
+		cornerRadius = clay.CornerRadiusAll(size / 2),
+	},
+	) {
+		icon_element(textures, "chevrons-up-down", .White, 20 * d)
+	}
+}
+
 layout :: proc(
 	view: View,
 	client: ^library.Client,
@@ -414,6 +441,7 @@ layout :: proc(
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
 		context_menu(view, d)
+		autoscroll_indicator(view, textures, d)
 	}
 	return clay.EndLayout(dt), visible
 }

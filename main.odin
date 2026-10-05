@@ -78,7 +78,7 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Text)
 		return
 	}
-	for id in ([]string{"toolbar_back", "toolbar_library", "detail_more", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link"}) {
+	for id in ([]string{"toolbar_back", "toolbar_library", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "autoscroll"}) {
 		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
 		if id == "spotify_link" && client.detail_loading {continue}
 		if pointer_over(id) {
@@ -146,16 +146,94 @@ input_text_ok :: proc(value: string) -> bool {
 // Debounce catalog searches while typing; Enter searches immediately.
 SEARCH_DEBOUNCE_NS :: u64(300_000_000)
 
-// Route the wheel to the hovered scroll container and clamp its offset.
-scroll_wheel :: proc(id: string, amount, d: f32) -> bool {
+// One glide target per scroll container. Wheel ticks are sparse (a mouse
+// detent is roughly one event) while frames are cheap, so the wheel only
+// moves the target and each frame eases the real offset toward it.
+Smooth :: struct {
+	target: f32,
+	active: bool,
+}
+
+smooth_for :: proc(container: string, grid, detail: ^Smooth) -> ^Smooth {
+	return container == "library_grid" ? grid : detail
+}
+
+scroll_wheel :: proc(id: string, amount, d: f32, smooth: ^Smooth) -> bool {
 	if amount == 0 || !pointer_over(id) {return false}
 	scroll := clay.GetScrollContainerData(clay.ID(id))
 	if !scroll.found || scroll.scrollPosition == nil {return false}
+	if !smooth.active {
+		smooth.target = scroll.scrollPosition.y
+		smooth.active = true
+	}
 	minimum := min(
 		f32(0),
 		scroll.scrollContainerDimensions.height - scroll.contentDimensions.height,
 	)
-	scroll.scrollPosition.y = clamp(scroll.scrollPosition.y + amount * 40 * d, minimum, 0)
+	smooth.target = clamp(smooth.target + amount * 40 * d, minimum, 0)
+	return true
+}
+
+// One easing step toward the wheel target. Clamps every frame so content
+// loads and view switches self-heal instead of whooshing to stale offsets.
+SMOOTH_SNAP :: 0.5
+SMOOTH_RATE :: 14.0
+
+smooth_step :: proc(container: string, smooth: ^Smooth, dt: f32) -> bool {
+	if !smooth.active {return false}
+	data := clay.GetScrollContainerData(clay.ID(container))
+	if !data.found || data.scrollPosition == nil {
+		smooth.active = false
+		return false
+	}
+	viewport := data.scrollContainerDimensions.height
+	content := data.contentDimensions.height
+	if viewport <= 0 || content <= viewport {
+		smooth.active = false
+		return false
+	}
+	minimum := viewport - content
+	smooth.target = clamp(smooth.target, minimum, 0)
+	next :=
+		data.scrollPosition.y + (smooth.target - data.scrollPosition.y) * min(1, dt * SMOOTH_RATE)
+	if abs(smooth.target - next) <= SMOOTH_SNAP {
+		next = smooth.target
+		smooth.active = false
+	}
+	data.scrollPosition.y = next
+	return true
+}
+
+// Direct offset writes (drag, autoscroll) cancel the glide so they never
+// fight it; the target re-arms from the new position on the next tick.
+smooth_cancel :: proc(container: string, smooth: ^Smooth) {
+	data := clay.GetScrollContainerData(clay.ID(container))
+	if data.found && data.scrollPosition != nil {smooth.target = data.scrollPosition.y}
+	smooth.active = false
+}
+
+// Middle-click autoscroll: the button parks an anchor, steering away scrolls
+// with a velocity proportional to the distance, another click exits.
+AUTOSCROLL_DEADZONE :: 10.0
+AUTOSCROLL_SPEED :: 30.0
+
+// Signed scroll px for this frame; zero inside the dead zone. Pure for tests.
+autoscroll_delta :: proc(dy, dt, d: f32) -> f32 {
+	remaining := abs(dy) - AUTOSCROLL_DEADZONE * d
+	if remaining <= 0 || dt <= 0 {return 0}
+	step := remaining * AUTOSCROLL_SPEED * min(dt, 0.1)
+	return dy > 0 ? -step : step
+}
+
+autoscroll_step :: proc(container: string, dy, dt, d: f32) -> bool {
+	data := clay.GetScrollContainerData(clay.ID(container))
+	if !data.found || data.scrollPosition == nil {return false}
+	viewport := data.scrollContainerDimensions.height
+	content := data.contentDimensions.height
+	if viewport <= 0 || content <= viewport {return false}
+	delta := autoscroll_delta(dy, dt, d)
+	if delta == 0 {return false}
+	data.scrollPosition.y = clamp(data.scrollPosition.y + delta, viewport - content, 0)
 	return true
 }
 
@@ -299,6 +377,10 @@ main :: proc() {
 	menu: Context_Menu
 	resizing := false
 	scrollbar_drag: Scrollbar_Drag
+	autoscroll_container := ""
+	autoscroll_anchor := sdl.FPoint{}
+	autoscroll_moving := false
+	grid_smooth, detail_smooth: Smooth
 	// Resume the last played track and reopen its collection. The footer
 	// shows it without starting playback; pressing play resumes it.
 	if len(settings.last_track) > 0 {
@@ -362,12 +444,16 @@ main :: proc() {
 		mouse_click := sdl.FPoint{}
 		mouse_right := sdl.FPoint{}
 		clicked, right_clicked, space_pressed, stop_pressed := false, false, false, false
+		middle_clicked := false
+		middle_click := sdl.FPoint{}
 		input_changed := false
 		event: sdl.Event
 		wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
 		// Playback renders at the display rate so the progress bar stays smooth,
 		// while the idle window sleeps until an event arrives.
 		if stage == .Playing {wait_ms = 0}
+		if autoscroll_moving {wait_ms = 0}
+		if grid_smooth.active || detail_smooth.active {wait_ms = 0}
 		if stage == .Signing_In ||
 		   stage == .Buffering ||
 		   stage == .Stopping ||
@@ -498,9 +584,24 @@ main :: proc() {
 						}
 					}
 				case .MOUSE_WHEEL:
+					autoscroll_container = ""
 					wheel.x += event.wheel.x; wheel.y += event.wheel.y
 				case .MOUSE_BUTTON_DOWN:
-					if event.button.button == sdl.BUTTON_LEFT {
+					if event.button.button == sdl.BUTTON_MIDDLE {
+						// Steering lasts while the button is held; releasing it
+						// lands the anchor. Pressing again while held re-parks.
+						if autoscroll_container == "" {
+							middle_click = ui.mouse_position(
+								&state,
+								event.button.x,
+								event.button.y,
+							)
+							middle_clicked = true
+						}
+					} else if autoscroll_container != "" {
+						// Any other button lands the anchor; the click is swallowed.
+						autoscroll_container = ""
+					} else if event.button.button == sdl.BUTTON_LEFT {
 						mouse_click = ui.mouse_position(&state, event.button.x, event.button.y)
 						clicked = true
 					} else if event.button.button == sdl.BUTTON_RIGHT {
@@ -715,6 +816,15 @@ main :: proc() {
 				preload_worker = thread.create_and_start_with_data(&preload_work, preload_track)
 			}
 		}
+		// Glide wheel targets toward their offsets before the idle check so
+		// a settling glide keeps frames (and redraws) coming by itself.
+		smooth_dt := f32(sdl.GetTicksNS() - last) / 1e9
+		if smooth_step("library_grid", &grid_smooth, smooth_dt) {redraw = true}
+		if smooth_step("detail_rows", &detail_smooth, smooth_dt) {redraw = true}
+		// The autoscroll step runs after layout, so a gliding frame must
+		// not take the idle continue. Last frame's flag keeps held-still
+		// autoscroll advancing until it parks in the dead zone.
+		if autoscroll_moving {redraw = true}
 		if !redraw && stage != .Playing {continue}
 
 		progress := f32(0)
@@ -775,26 +885,29 @@ main :: proc() {
 		times: [2][16]u8
 		retain_player_cover(&displayed_cover, player_cover, &textures)
 		view := View {
-			title        = shown_title,
-			status       = shown_status,
-			button       = button,
-			progress     = progress,
-			elapsed      = duration_text(shown_ms, times[0][:]),
-			total        = duration_text(duration_ms, times[1][:]),
-			input        = shown_input,
-			cover        = displayed_cover,
-			repeat       = repeat,
-			shuffle      = shuffle,
-			volume       = volume,
-			input_active = input_active,
-			pinned       = detail_pinned,
-			search_mode  = search_mode,
-			search_kind  = search_kind,
-			menu_open    = menu.open,
-			menu_x       = menu.point.x,
-			menu_y       = menu.point.y,
-			menu_count   = menu.count,
-			menu_labels  = menu.labels,
+			title         = shown_title,
+			status        = shown_status,
+			button        = button,
+			progress      = progress,
+			elapsed       = duration_text(shown_ms, times[0][:]),
+			total         = duration_text(duration_ms, times[1][:]),
+			input         = shown_input,
+			cover         = displayed_cover,
+			repeat        = repeat,
+			shuffle       = shuffle,
+			volume        = volume,
+			input_active  = input_active,
+			pinned        = detail_pinned,
+			search_mode   = search_mode,
+			search_kind   = search_kind,
+			menu_open     = menu.open,
+			menu_x        = menu.point.x,
+			menu_y        = menu.point.y,
+			menu_count    = menu.count,
+			menu_labels   = menu.labels,
+			scroll_active = autoscroll_container != "",
+			scroll_x      = autoscroll_anchor.x,
+			scroll_y      = autoscroll_anchor.y,
 		}
 		width, height = ui.size(&state)
 		mouse_x, mouse_y: f32
@@ -808,8 +921,10 @@ main :: proc() {
 		previous_density := ui.scale(&state)
 		density := ui.update_scale(&state)
 		if density != previous_density {clay.ResetMeasureTextCache()}
-		wheel_used := scroll_wheel("library_grid", wheel.y, density)
-		if !wheel_used {wheel_used = scroll_wheel("detail_rows", wheel.y, density)}
+		wheel_used := scroll_wheel("library_grid", wheel.y, density, &grid_smooth)
+		if !wheel_used {
+			wheel_used = scroll_wheel("detail_rows", wheel.y, density, &detail_smooth)
+		}
 		clay.UpdateScrollContainers(false, {}, dt)
 		card_text_height :=
 			f32(ttf.GetFontHeight(ui.font_for_size(&state, 14 * density))) +
@@ -827,6 +942,38 @@ main :: proc() {
 			dt,
 			density,
 		)
+		if middle_clicked {
+			middle_clicked = false
+			for id in ([]string{"library_grid", "detail_rows"}) {
+				if !hit(id, middle_click) {continue}
+				data := clay.GetScrollContainerData(clay.ID(id))
+				if data.found &&
+				   data.contentDimensions.height > data.scrollContainerDimensions.height {
+					autoscroll_container = id
+					autoscroll_anchor = middle_click
+					break
+				}
+			}
+		}
+		if autoscroll_container != "" {
+			smooth_cancel(
+				autoscroll_container,
+				smooth_for(autoscroll_container, &grid_smooth, &detail_smooth),
+			)
+			data := clay.GetScrollContainerData(clay.ID(autoscroll_container))
+			if !data.found || .MIDDLE not_in buttons {
+				autoscroll_container = ""
+				autoscroll_moving = false
+			} else {
+				autoscroll_moving = autoscroll_step(
+					autoscroll_container,
+					mouse.y - autoscroll_anchor.y,
+					dt,
+					density,
+				)
+				if autoscroll_moving {redraw = true}
+			}
+		} else {autoscroll_moving = false}
 		update_cursor(&state, &library_client, resizing, visible, seek_enabled, search_mode)
 		_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
 		_ = sdl.RenderClear(state.renderer)
@@ -1053,6 +1200,10 @@ main :: proc() {
 			if .LEFT not_in buttons {
 				scrollbar_drag = {}
 			} else if drag_scrollbar(&scrollbar_drag, mouse.y, density) {
+				smooth_cancel(
+					scrollbar_drag.container,
+					smooth_for(scrollbar_drag.container, &grid_smooth, &detail_smooth),
+				)
 				redraw = true
 			}
 		}

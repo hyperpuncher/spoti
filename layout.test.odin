@@ -275,3 +275,89 @@ scrollbar_thumb_hides_when_content_fits_and_clamps_at_both_ends :: proc(t: ^test
 	_, clamped, _ := scrollbar_metrics(-99999, 4000, 800, 24, 2)
 	testing.expect_value(t, clamped, bottom)
 }
+
+@(test)
+autoscroll_delta_deadzone_and_direction :: proc(t: ^testing.T) {
+	d: f32 = 2
+	testing.expect_value(t, autoscroll_delta(5 * d, 0.016, d), 0)
+	testing.expect_value(t, autoscroll_delta(-5 * d, 0.016, d), 0)
+	down := autoscroll_delta(60 * d, 0.016, d)
+	testing.expect(t, down < 0, "steering down must scroll down")
+	up := autoscroll_delta(-60 * d, 0.016, d)
+	testing.expect(t, up > 0, "steering up must scroll up")
+	testing.expect_value(t, down, -up)
+	testing.expect_value(t, autoscroll_delta(60 * d, 0, d), 0)
+}
+
+@(test)
+wheel_target_glides_to_rest :: proc(t: ^testing.T) {
+	memory := make([]u8, int(clay.MinMemorySize()))
+	defer delete(memory)
+	errors := 0
+	clay.Initialize(
+		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
+		{1280, 820},
+		{handler = layout_test_error, userData = &errors},
+	)
+	defer clay.SetCurrentContext(nil)
+	density: f32 = 1
+	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	client: library.Client
+	client.detail.ready = true
+	client.detail.source = .Playlist
+	client.detail.name = "Playlist"
+	client.detail.label = "Playlist"
+	client.detail.rows = make([dynamic]library.Track_Row, 100)
+	defer delete(client.detail.rows)
+	for &row in client.detail.rows {
+		row.name = "Track title"
+		row.artists = "Artist"
+		row.duration_ms = 180_000
+	}
+	textures := Textures {
+		by_key = make(map[u64]^sdl.Texture),
+	}
+	defer {
+		delete(textures.by_key)
+		delete(textures.requested)
+	}
+	settings: Settings
+	d: f32 = 1
+	clay.SetLayoutDimensions({1280, 820})
+	clay.UpdateScrollContainers(false, {}, 0)
+	_, _ = layout(
+		{button = "pause"},
+		&client,
+		&settings,
+		.Playlists,
+		&textures,
+		360,
+		1280,
+		820,
+		26,
+		0,
+		d,
+	)
+	rows := clay.GetElementData(clay.ID("detail_rows"))
+	testing.expect(t, rows.found, "detail rows must exist for the glide test")
+	clay.SetPointerState({rows.boundingBox.x + 10, rows.boundingBox.y + 10}, false)
+	smooth: Smooth
+	testing.expect(
+		t,
+		scroll_wheel("detail_rows", -1, d, &smooth),
+		"wheel over the rows must arm a glide",
+	)
+	testing.expect(t, smooth.active)
+	testing.expect_value(t, smooth.target, -40 * d)
+	steps := 0
+	for smooth.active && steps < 600 {
+		testing.expect(t, smooth_step("detail_rows", &smooth, 1.0 / 60))
+		steps += 1
+	}
+	testing.expect(t, !smooth.active, "glide must settle on its target")
+	data := clay.GetScrollContainerData(clay.ID("detail_rows"))
+	testing.expect_value(t, data.scrollPosition.y, smooth.target)
+	smooth_cancel("detail_rows", &smooth)
+	testing.expect(t, !smooth.active)
+	testing.expect_value(t, errors, 0)
+}
