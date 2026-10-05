@@ -55,6 +55,8 @@ font_for_size :: proc(state: ^State, size: f32, font_id: u16 = 0) -> ^ttf.Font {
 		fmt.eprintln("could not load system font:", path)
 		return nil
 	}
+	// Unhinted outlines stay sharp and consistent across fractional scales.
+	ttf.SetFontHinting(font, .NONE)
 	state.fonts[key] = font
 	return font
 }
