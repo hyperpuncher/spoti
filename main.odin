@@ -263,6 +263,7 @@ main :: proc() {
 	order_dirty := false
 	detail_pinned := false
 	page_counts: [library.Kind]int
+	menu: Context_Menu
 	resizing := false
 	scrollbar_drag: Scrollbar_Drag
 	defer {
@@ -288,6 +289,7 @@ main :: proc() {
 		free_play_queue(&play_queue)
 		delete(input)
 		free_settings(&settings)
+		free_context_menu(&menu)
 		if mpris_active {mpris.close()}
 	}
 	stage := Stage.Idle
@@ -305,7 +307,8 @@ main :: proc() {
 		defer free_all(context.temp_allocator)
 		wheel := sdl.FPoint{}
 		mouse_click := sdl.FPoint{}
-		clicked, space_pressed, stop_pressed := false, false, false
+		mouse_right := sdl.FPoint{}
+		clicked, right_clicked, space_pressed, stop_pressed := false, false, false, false
 		event: sdl.Event
 		wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
 		// Playback renders at the display rate so the progress bar stays smooth,
@@ -408,6 +411,9 @@ main :: proc() {
 					if event.button.button == sdl.BUTTON_LEFT {
 						mouse_click = ui.mouse_position(&state, event.button.x, event.button.y)
 						clicked = true
+					} else if event.button.button == sdl.BUTTON_RIGHT {
+						mouse_right = ui.mouse_position(&state, event.button.x, event.button.y)
+						right_clicked = true
 					}
 				}
 				if !sdl.PollEvent(&event) {break}
@@ -633,6 +639,11 @@ main :: proc() {
 			volume       = volume,
 			input_active = input_active,
 			pinned       = detail_pinned,
+			menu_open    = menu.open,
+			menu_x       = menu.point.x,
+			menu_y       = menu.point.y,
+			menu_count   = menu.count,
+			menu_labels  = menu.labels,
 		}
 		width, height = ui.size(&state)
 		mouse_x, mouse_y: f32
@@ -672,8 +683,44 @@ main :: proc() {
 		ui.frame_done(&state)
 		load_more_near_bottom(&library_client, filter, density)
 		ensure_covers(&library_client, &textures, filter, player_cover, visible)
+		if right_clicked {
+			open_menu_at(&menu, &library_client, filter, visible, mouse_right, &settings)
+		}
 		track_selected := false
-		if clicked {
+		if clicked && menu.open {
+			for index in 0 ..< menu.count {
+				if !hit_index("menu_item", mouse_click, u32(index)) {continue}
+				switch menu.items[index] {
+				case .Pin:
+					_ = settings_toggle_pin(&settings, menu.uri)
+					if menu.uri == detail_card_uri(library_client.detail) {
+						detail_pinned = settings_is_pinned(&settings, menu.uri)
+					}
+					order_dirty = true
+					settings_dirty = true
+				case .Open_In_Spotify:
+					open_spotify_uri(menu.uri)
+				case .Play:
+					if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
+						build_play_queue(
+							&play_queue,
+							library_client.detail.rows[:],
+							library_client.detail.image_small,
+						)
+						play_index =
+							shuffle ? reorder_play_queue(play_queue[:], menu.track, true) : menu.track
+						track_selected = select_play_item(
+							play_queue[:],
+							play_index,
+							&selected,
+							&player_cover,
+						)
+					}
+				}
+				break
+			}
+			menu.open = false
+		} else if clicked {
 			if hit("library_scrollbar", mouse_click) {
 				begin_scrollbar_drag(&scrollbar_drag, "library_grid", mouse_click.y)
 			} else if hit("detail_scrollbar", mouse_click) {

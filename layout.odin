@@ -36,6 +36,11 @@ View :: struct {
 	volume:       f32,
 	input_active: bool,
 	pinned:       bool,
+	menu_open:    bool,
+	menu_x:       f32,
+	menu_y:       f32,
+	menu_count:   int,
+	menu_labels:  [2]string,
 }
 
 chip :: proc(label: string, id: u32, active: bool, d: f32) {
@@ -372,6 +377,7 @@ layout :: proc(
 		player_bar(view, textures, d)
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
+		context_menu(view, d)
 	}
 	return clay.EndLayout(dt), visible
 }
