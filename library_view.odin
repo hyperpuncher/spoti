@@ -592,6 +592,13 @@ detail_page :: proc(
 				)
 			}
 			icon_element(textures, "heart", client.detail_loading ? .Disabled : .Muted, 22 * d)
+			player_control(
+				"hero_pin",
+				view.pinned ? "pin" : "pin-off",
+				client.detail_loading ? .Disabled : view.pinned ? .Green : .Muted,
+				textures,
+				d,
+			)
 			if clay.UI_WithId(clay.ID("spotify_link"))(
 			{
 				layout = {

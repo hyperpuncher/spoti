@@ -35,6 +35,7 @@ View :: struct {
 	shuffle:      bool,
 	volume:       f32,
 	input_active: bool,
+	pinned:       bool,
 }
 
 chip :: proc(label: string, id: u32, active: bool, d: f32) {

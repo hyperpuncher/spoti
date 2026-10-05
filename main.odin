@@ -242,8 +242,13 @@ main :: proc() {
 	}
 	load_icons(&state, &textures)
 	library_client: library.Client
-	filter := library.Kind.Playlists
-	sidebar_width: f32 = 360
+	settings := load_settings()
+	filter := settings.tab
+	sidebar_width := settings.sidebar_width
+	settings_dirty := false
+	order_dirty := false
+	detail_pinned := false
+	page_counts: [library.Kind]int
 	resizing := false
 	scrollbar_drag: Scrollbar_Drag
 	defer {
@@ -268,6 +273,7 @@ main :: proc() {
 		delete(displayed_cover)
 		free_play_queue(&play_queue)
 		delete(input)
+		free_settings(&settings)
 	}
 	stage := Stage.Idle
 	finished := false
@@ -313,7 +319,10 @@ main :: proc() {
 				case .QUIT, .WINDOW_CLOSE_REQUESTED:
 					running = false
 				case .MOUSE_BUTTON_UP:
-					if event.button.button == sdl.BUTTON_LEFT {resizing = false}
+					if event.button.button == sdl.BUTTON_LEFT {
+						if resizing {settings_dirty = true}
+						resizing = false
+					}
 				case .KEY_DOWN:
 					if input_active {
 						#partial switch event.key.scancode {
@@ -606,6 +615,7 @@ main :: proc() {
 			shuffle      = shuffle,
 			volume       = volume,
 			input_active = input_active,
+			pinned       = detail_pinned,
 		}
 		width, height = ui.size(&state)
 		mouse_x, mouse_y: f32
@@ -656,6 +666,7 @@ main :: proc() {
 				handled := false
 				if hit("toolbar_back", mouse_click) || hit("toolbar_library", mouse_click) {
 					library.clear_detail(&library_client)
+					detail_pinned = false
 					handled = true
 				} else if hit("track_input", mouse_click) {
 					if !input_active {input_active = sdl.StartTextInput(state.window)}
@@ -666,8 +677,12 @@ main :: proc() {
 					for index in 0 ..< len(tabs) {
 						if hit_index("chip", mouse_click, u32(index)) {
 							selected_filter := tabs[index]
-							if selected_filter != filter {library.clear_detail(&library_client)}
+							if selected_filter != filter {
+								library.clear_detail(&library_client)
+								detail_pinned = false
+							}
 							filter = selected_filter
+							settings_dirty = true
 							retry_failed_covers(&textures)
 							handled = true
 							break
@@ -691,12 +706,23 @@ main :: proc() {
 							id = id[len("spotify:artist:"):]
 						} else {break}
 						handled = library.open_detail(&library_client, source, id, entry)
-						if handled {retry_failed_covers(&textures)}
+						if handled {
+							retry_failed_covers(&textures)
+							detail_pinned = settings_is_pinned(&settings, entry.uri)
+						}
 						break
 					}
 				}
 				if !handled && library_client.detail.ready {
-					if hit("spotify_link", mouse_click) && !library_client.detail_loading {
+					if hit("hero_pin", mouse_click) {
+						detail_pinned = settings_toggle_pin(
+							&settings,
+							detail_card_uri(library_client.detail),
+						)
+						order_dirty = true
+						settings_dirty = true
+						handled = true
+					} else if hit("spotify_link", mouse_click) && !library_client.detail_loading {
 						open_spotify_detail(&library_client.detail)
 						handled = true
 					} else if hit_clipped("detail_more", "detail_rows", mouse_click) {
@@ -738,6 +764,14 @@ main :: proc() {
 								&selected,
 								&player_cover,
 							)
+							if track_selected {
+								settings_note_recent(
+									&settings,
+									detail_card_uri(library_client.detail),
+								)
+								order_dirty = true
+								settings_dirty = true
+							}
 							delete(input)
 							input = {}
 							handled = true
@@ -754,6 +788,7 @@ main :: proc() {
 		if resizing {
 			if .LEFT not_in buttons {
 				resizing = false
+				settings_dirty = true
 			} else {
 				sidebar_width = clamp(mouse.x / density, SIDEBAR_MIN, SIDEBAR_MAX)
 			}
@@ -811,6 +846,9 @@ main :: proc() {
 			)
 			play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
 			_ = select_play_item(play_queue[:], play_index, &selected, &player_cover)
+			settings_note_recent(&settings, detail_card_uri(library_client.detail))
+			order_dirty = true
+			settings_dirty = true
 		}
 		track_delta := 0
 		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
@@ -886,6 +924,12 @@ main :: proc() {
 			case .Paused:
 				if stream != nil && sdl.ResumeAudioStreamDevice(stream) {stage = .Playing}
 			}
+		}
+		sort_library_pages(&library_client, &settings, &page_counts, order_dirty)
+		order_dirty = false
+		if settings_dirty {
+			settings_dirty = false
+			save_settings(&settings)
 		}
 		if clicked {first_frame = true}
 	}

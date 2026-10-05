@@ -31,6 +31,8 @@ ICON_NAMES :: []string {
 	"skip-back",
 	"skip-forward",
 	"heart",
+	"pin",
+	"pin-off",
 	"clock",
 	"ellipsis",
 	"plus",
