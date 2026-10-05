@@ -164,6 +164,10 @@ library_card :: proc(
 	id: string = "card",
 	selected: bool = false,
 	pinned: bool = false,
+	// Visible slot, not the absolute index: truncation clips register a
+	// persistent Clay scroll entry each, so slot keys keep the entries
+	// stable while scrolling instead of churning one per row per frame.
+	clip_slot: u32 = 0,
 ) {
 	hovered := clay.PointerOver(clay.ID(id, index))
 	padding := 8 * d
@@ -202,7 +206,9 @@ library_card :: proc(
 				icon_element(textures, "pin-filled", .White, 13 * d)
 			}
 		}
-		if clay.UI()(
+		clip_id :=
+			id == "card" ? clay.ID("card_clip", clip_slot) : clay.ID("release_clip", clip_slot)
+		if clay.UI_WithId(clip_id)(
 		{
 			layout = {
 				layoutDirection = .TopToBottom,
@@ -312,6 +318,7 @@ sidebar :: proc(
 							d,
 							selected = card_selected(&page.items[next], &client.detail),
 							pinned = settings_is_pinned(settings, page.items[next].uri),
+							clip_slot = u32(next - visible.first),
 						)
 					}
 				}
@@ -423,7 +430,9 @@ track_table :: proc(
 					)
 				}
 				// The middle column grows so the duration stays at the right edge.
-				if clay.UI()(
+				// Slot-keyed like card clips: one stable scroll entry per
+				// visible row instead of one per absolute index per frame.
+				if clay.UI_WithId(clay.ID("row_clip", u32(index - visible.first)))(
 				{
 					layout = {
 						sizing = {width = clay.SizingGrow({})},
@@ -529,6 +538,7 @@ artist_discography :: proc(
 							card_width,
 							d,
 							"release_card",
+							clip_slot = u32(next - visible.first),
 						)
 					} else {
 						release_skeleton(card_width, row_height, d)
