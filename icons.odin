@@ -40,6 +40,7 @@ ICON_NAMES :: []string {
 	"chevron-left",
 	"chevron-right",
 	"volume-2",
+	"music",
 }
 
 icon_tint_color :: proc(tint: Icon_Tint) -> (r, g, b: u8) {

@@ -66,10 +66,10 @@ album_queue_retains_owned_artwork_for_every_track :: proc(t: ^testing.T) {
 	items: [dynamic]Play_Item
 	build_play_queue(&items, rows, fallback)
 	defer free_play_queue(&items)
-	selected, cover: string
-	defer {delete(selected); delete(cover)}
+	selected, cover, artist: string
+	defer {delete(selected); delete(cover); delete(artist)}
 	for expected, index in ([]string{"album-cover", "album-cover", "large-cover", "small-cover"}) {
-		testing.expect(t, select_play_item(items[:], index, &selected, &cover))
+		testing.expect(t, select_play_item(items[:], index, &selected, &cover, &artist))
 		testing.expect_value(t, cover, expected)
 	}
 }
@@ -77,28 +77,31 @@ album_queue_retains_owned_artwork_for_every_track :: proc(t: ^testing.T) {
 @(test)
 next_after_manual_selection_advances_and_stops_at_queue_end :: proc(t: ^testing.T) {
 	rows := []library.Track_Row {
-		{uri = "first"},
-		{uri = "second"},
-		{uri = "third"},
-		{uri = "fourth"},
+		{uri = "first", artists = "A"},
+		{uri = "second", artists = "B"},
+		{uri = "third", artists = "C"},
+		{uri = "fourth", artists = "D"},
 	}
 	items: [dynamic]Play_Item
 	build_play_queue(&items, rows)
 	defer free_play_queue(&items)
-	selected, cover: string
-	defer {delete(selected); delete(cover)}
+	selected, cover, artist: string
+	defer {delete(selected); delete(cover); delete(artist)}
 	index := 1
-	testing.expect(t, select_play_item(items[:], index, &selected, &cover))
+	testing.expect(t, select_play_item(items[:], index, &selected, &cover, &artist))
 	testing.expect_value(t, selected, "second")
+	testing.expect_value(t, artist, "B")
 	for expected in ([]string{"third", "fourth"}) {
-		testing.expect(t, advance_play_item(items[:], &index, 1, &selected, &cover))
+		testing.expect(t, advance_play_item(items[:], &index, 1, &selected, &cover, &artist))
 		testing.expect_value(t, selected, expected)
 	}
-	testing.expect(t, !advance_play_item(items[:], &index, 1, &selected, &cover))
+	testing.expect_value(t, artist, "D")
+	testing.expect(t, !advance_play_item(items[:], &index, 1, &selected, &cover, &artist))
 	testing.expect_value(t, index, 3)
 	testing.expect_value(t, selected, "fourth")
-	testing.expect(t, advance_play_item(items[:], &index, -1, &selected, &cover))
+	testing.expect(t, advance_play_item(items[:], &index, -1, &selected, &cover, &artist))
 	testing.expect_value(t, selected, "third")
+	testing.expect_value(t, artist, "C")
 }
 
 @(test)

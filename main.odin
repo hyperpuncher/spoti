@@ -216,6 +216,26 @@ clear_audio_stream :: proc(stream: ^^sdl.AudioStream) {
 	if stream^ != nil {sdl.DestroyAudioStream(stream^); stream^ = nil}
 }
 
+// Replace an owned string without leaking or double-freeing.
+replace_string :: proc(destination: ^string, value: string) {
+	delete(destination^)
+	destination^ = strings.clone(value)
+}
+
+parse_card_uri :: proc(uri: string) -> (source: library.Source, id: string, ok: bool) {
+	if strings.has_prefix(uri, "spotify:playlist:") {
+		source, id = .Playlist, uri[len("spotify:playlist:"):]
+	} else if strings.has_prefix(uri, "spotify:album:") {
+		source, id = .Album, uri[len("spotify:album:"):]
+	} else if strings.has_prefix(uri, "spotify:artist:") {
+		source, id = .Artist, uri[len("spotify:artist:"):]
+	} else {
+		return {}, "", false
+	}
+	if !library.safe_id(id) {return {}, "", false}
+	return source, id, true
+}
+
 main :: proc() {
 	diagnostic.init()
 	diagnostic.write("application starting")
@@ -250,6 +270,7 @@ main :: proc() {
 	cancel, closed := false, false
 	stream: ^sdl.AudioStream
 	title: string
+	artist: string
 	selected := strings.clone(session.TRACK_URL)
 	player_cover, displayed_cover: string
 	play_queue: [dynamic]Play_Item
@@ -278,6 +299,25 @@ main :: proc() {
 	menu: Context_Menu
 	resizing := false
 	scrollbar_drag: Scrollbar_Drag
+	// Resume the last played track and reopen its collection. The footer
+	// shows it without starting playback; pressing play resumes it.
+	if len(settings.last_track) > 0 {
+		delete(selected)
+		selected = strings.clone(settings.last_track)
+	}
+	if len(settings.last_title) > 0 {
+		delete(title)
+		title = strings.clone(settings.last_title)
+	}
+	if len(settings.last_artist) > 0 {
+		delete(artist)
+		artist = strings.clone(settings.last_artist)
+	}
+	if len(settings.last_cover) > 0 {
+		delete(player_cover)
+		player_cover = strings.clone(settings.last_cover)
+	}
+	restore_pending := len(settings.last_collection) > 0
 	defer {
 		if worker != nil {release_worker(worker, queue, &cancel, closed)}
 		if preload_worker != nil {
@@ -295,6 +335,7 @@ main :: proc() {
 		delete(textures.by_key)
 		delete(textures.requested)
 		delete(title)
+		delete(artist)
 		delete(selected)
 		delete(player_cover)
 		delete(displayed_cover)
@@ -409,6 +450,8 @@ main :: proc() {
 								player_cover = {}
 								delete(displayed_cover)
 								displayed_cover = {}
+								delete(artist)
+								artist = {}
 								free_play_queue(&play_queue)
 								play_index = -1
 								delete(input)
@@ -521,6 +564,24 @@ main :: proc() {
 				delete(cover.image.pixels)
 			}
 		}
+		if restore_pending && library_client.state == .Ready {
+			restore_pending = false
+			if !library_client.detail.ready &&
+			   !library_client.detail_loading &&
+			   len(settings.last_collection) > 0 {
+				source, id, valid := parse_card_uri(settings.last_collection)
+				if valid {
+					preview := library.Entry {
+						name  = settings.last_name != "" ? settings.last_name : settings.last_title,
+						uri   = settings.last_collection,
+						image = settings.last_cover,
+					}
+					if library.open_detail(&library_client, source, id, preview) {
+						detail_pinned = settings_is_pinned(&settings, settings.last_collection)
+					}
+				}
+			}
+		}
 		if stop_pressed {
 			if preload_worker != nil {sync.atomic_store(&preload_work.cancel, true)}
 			seek_dragging, start_paused = false, false
@@ -621,7 +682,14 @@ main :: proc() {
 			if !seek_dragging && repeat {
 				replay_pending = true
 			} else if !seek_dragging &&
-			   advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover) {
+			   advance_play_item(
+				   play_queue[:],
+				   &play_index,
+				   1,
+				   &selected,
+				   &player_cover,
+				   &artist,
+			   ) {
 				replay_pending = true
 			}
 			redraw = true
@@ -689,10 +757,16 @@ main :: proc() {
 		case .Stopping:
 			status = "Stopping..."
 		case .Idle:
-			status = "Ready to play"
+			// No history yet shows nothing, not a placeholder.
+			status = len(title) > 0 ? "Ready to play" : ""
 		}
 		shown_title := title
-		if len(shown_title) == 0 {shown_title = "Nothing playing"}
+		// The footer names the artist like spotifast; the status line only
+		// surfaces while nothing is known or when playback failed.
+		shown_status := status
+		if stage != .Failed && len(artist) > 0 {
+			shown_status = artist
+		}
 		shown_input := input
 		if len(shown_input) == 0 {
 			shown_input = input_active ? "" : "Search Spotify or paste a track link"
@@ -702,7 +776,7 @@ main :: proc() {
 		retain_player_cover(&displayed_cover, player_cover, &textures)
 		view := View {
 			title        = shown_title,
-			status       = status,
+			status       = shown_status,
 			button       = button,
 			progress     = progress,
 			elapsed      = duration_text(shown_ms, times[0][:]),
@@ -805,6 +879,7 @@ main :: proc() {
 							play_index,
 							&selected,
 							&player_cover,
+							&artist,
 						)
 					}
 				}
@@ -854,12 +929,7 @@ main :: proc() {
 						library_tabs := LIBRARY_TABS
 						for index in 0 ..< len(library_tabs) {
 							if hit_index("chip", mouse_click, u32(index)) {
-								selected_filter := library_tabs[index]
-								if selected_filter != filter {
-									library.clear_detail(&library_client)
-									detail_pinned = false
-								}
-								filter = selected_filter
+								filter = library_tabs[index]
 								settings.tab = filter
 								settings_dirty = true
 								retry_failed_covers(&textures)
@@ -882,21 +952,12 @@ main :: proc() {
 								play_index,
 								&selected,
 								&player_cover,
+								&artist,
 							)
 							handled = track_selected
 						} else {
-							source: library.Source
-							id := entry.uri
-							if strings.has_prefix(id, "spotify:playlist:") {
-								source = .Playlist
-								id = id[len("spotify:playlist:"):]
-							} else if strings.has_prefix(id, "spotify:album:") {
-								source = .Album
-								id = id[len("spotify:album:"):]
-							} else if strings.has_prefix(id, "spotify:artist:") {
-								source = .Artist
-								id = id[len("spotify:artist:"):]
-							} else {break}
+							source, id, valid := parse_card_uri(entry.uri)
+							if !valid {break}
 							handled = library.open_detail(&library_client, source, id, entry)
 							if handled {
 								retry_failed_covers(&textures)
@@ -956,6 +1017,7 @@ main :: proc() {
 								play_index,
 								&selected,
 								&player_cover,
+								&artist,
 							)
 							if track_selected {
 								settings_note_recent(
@@ -1072,7 +1134,7 @@ main :: proc() {
 				library_client.detail.image_small,
 			)
 			play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
-			_ = select_play_item(play_queue[:], play_index, &selected, &player_cover)
+			_ = select_play_item(play_queue[:], play_index, &selected, &player_cover, &artist)
 			settings_note_recent(&settings, detail_card_uri(library_client.detail))
 			order_dirty = true
 			settings_dirty = true
@@ -1081,7 +1143,14 @@ main :: proc() {
 		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
 		if clicked && hit("footer_next", mouse_click) {track_delta = 1}
 		if track_delta != 0 &&
-		   advance_play_item(play_queue[:], &play_index, track_delta, &selected, &player_cover) {
+		   advance_play_item(
+			   play_queue[:],
+			   &play_index,
+			   track_delta,
+			   &selected,
+			   &player_cover,
+			   &artist,
+		   ) {
 			restart_playback = true
 		}
 		if restart_playback {seek_ms = 0; start_paused = false; seek_dragging = false}
@@ -1153,10 +1222,6 @@ main :: proc() {
 			}
 		}
 		if mpris_active {
-			artist := ""
-			if play_index >= 0 && play_index < len(play_queue) {
-				artist = play_queue[play_index].artist
-			}
 			mpris.update(
 				{
 					title = title,
@@ -1175,6 +1240,28 @@ main :: proc() {
 		}
 		sort_library_pages(&library_client, &settings, &page_counts, order_dirty)
 		order_dirty = false
+		// Persist the last played track. Title and artist arrive after the
+		// selection via the Ready packet, so every field is watched, not
+		// just the URI. Settings hold the saved copy; no shadow variables.
+		collection := ""
+		if library_client.detail.ready {
+			collection = detail_card_uri(library_client.detail)
+		}
+		if selected != settings.last_track ||
+		   title != settings.last_title ||
+		   artist != settings.last_artist ||
+		   player_cover != settings.last_cover ||
+		   (library_client.detail.ready && collection != settings.last_collection) {
+			replace_string(&settings.last_track, selected)
+			replace_string(&settings.last_title, title)
+			replace_string(&settings.last_artist, artist)
+			replace_string(&settings.last_cover, player_cover)
+			if library_client.detail.ready {
+				replace_string(&settings.last_collection, collection)
+				replace_string(&settings.last_name, library_client.detail.name)
+			}
+			settings_dirty = true
+		}
 		if settings_dirty {
 			settings_dirty = false
 			save_settings(&settings)

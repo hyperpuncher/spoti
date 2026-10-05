@@ -52,3 +52,36 @@ settings_toggle_pin_and_recent_keep_most_recent_first :: proc(t: ^testing.T) {
 	testing.expect_value(t, settings.recent[0], "r1")
 	testing.expect_value(t, settings.recent[1], "r2")
 }
+
+@(test)
+settings_last_played_round_trips_and_rejects_bad_values :: proc(t: ^testing.T) {
+	loaded := parse_settings(
+		"last_track=spotify:track:abc\nlast_title=Song = Live\nlast_artist=X, Y\nlast_cover=https://i.scdn.co/image/c\nlast_collection=spotify:album:abc\nlast_name=An Album\nlast_track=https://evil\n",
+	)
+	defer free_settings(&loaded)
+	testing.expect_value(t, loaded.last_track, "spotify:track:abc")
+	testing.expect_value(t, loaded.last_title, "Song = Live")
+	testing.expect_value(t, loaded.last_artist, "X, Y")
+	testing.expect_value(t, loaded.last_cover, "https://i.scdn.co/image/c")
+	testing.expect_value(t, loaded.last_collection, "spotify:album:abc")
+	testing.expect_value(t, loaded.last_name, "An Album")
+
+	encoded := format_settings(&loaded)
+	defer delete(encoded)
+	decoded := parse_settings(encoded)
+	defer free_settings(&decoded)
+	testing.expect_value(t, decoded.last_track, loaded.last_track)
+	testing.expect_value(t, decoded.last_title, loaded.last_title)
+	testing.expect_value(t, decoded.last_artist, loaded.last_artist)
+	testing.expect_value(t, decoded.last_cover, loaded.last_cover)
+	testing.expect_value(t, decoded.last_collection, loaded.last_collection)
+	testing.expect_value(t, decoded.last_name, loaded.last_name)
+
+	bad := parse_settings(
+		"last_track=spotify:album:abc\nlast_cover=http://insecure\nlast_collection=spotify:track:abc\n",
+	)
+	defer free_settings(&bad)
+	testing.expect_value(t, bad.last_track, "")
+	testing.expect_value(t, bad.last_cover, "")
+	testing.expect_value(t, bad.last_collection, "")
+}

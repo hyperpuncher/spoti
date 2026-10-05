@@ -15,10 +15,16 @@ MAX_PINNED :: 32
 MAX_RECENT :: 60
 
 Settings :: struct {
-	sidebar_width: f32,
-	tab:           library.Kind,
-	pinned:        [dynamic]string, // pin order; drawn first
-	recent:        [dynamic]string, // most recently played first
+	sidebar_width:   f32,
+	tab:             library.Kind,
+	pinned:          [dynamic]string, // pin order; drawn first
+	recent:          [dynamic]string, // most recently played first
+	last_track:      string, // last played track URI, resumed on launch
+	last_title:      string, // track title for the footer
+	last_artist:     string, // track artists for the footer
+	last_cover:      string, // track cover URL
+	last_collection: string, // spotify:<source>:<id> reopened on launch
+	last_name:       string, // collection name for the optimistic header
 }
 
 free_settings :: proc(settings: ^Settings) {
@@ -26,6 +32,12 @@ free_settings :: proc(settings: ^Settings) {
 	for uri in settings.recent {delete(uri)}
 	delete(settings.pinned)
 	delete(settings.recent)
+	delete(settings.last_track)
+	delete(settings.last_title)
+	delete(settings.last_artist)
+	delete(settings.last_cover)
+	delete(settings.last_collection)
+	delete(settings.last_name)
 	settings^ = {}
 }
 
@@ -76,6 +88,42 @@ parse_settings :: proc(data: string, allocator := context.allocator) -> Settings
 			if len(uri) > 0 && len(settings.recent) < MAX_RECENT {
 				append(&settings.recent, strings.clone(uri, allocator))
 			}
+		case "last_track":
+			uri := strings.trim_space(value)
+			if strings.has_prefix(uri, "spotify:track:") && len(uri) < 128 {
+				delete(settings.last_track)
+				settings.last_track = strings.clone(uri, allocator)
+			}
+		case "last_title":
+			if len(value) > 0 && len(value) < 256 {
+				delete(settings.last_title)
+				settings.last_title = strings.clone(value, allocator)
+			}
+		case "last_artist":
+			if len(value) > 0 && len(value) < 256 {
+				delete(settings.last_artist)
+				settings.last_artist = strings.clone(value, allocator)
+			}
+		case "last_cover":
+			uri := strings.trim_space(value)
+			if strings.has_prefix(uri, "https://") && len(uri) <= 512 {
+				delete(settings.last_cover)
+				settings.last_cover = strings.clone(uri, allocator)
+			}
+		case "last_collection":
+			uri := strings.trim_space(value)
+			if (strings.has_prefix(uri, "spotify:playlist:") ||
+				   strings.has_prefix(uri, "spotify:album:") ||
+				   strings.has_prefix(uri, "spotify:artist:")) &&
+			   len(uri) < 128 {
+				delete(settings.last_collection)
+				settings.last_collection = strings.clone(uri, allocator)
+			}
+		case "last_name":
+			if len(value) > 0 && len(value) < 256 {
+				delete(settings.last_name)
+				settings.last_name = strings.clone(value, allocator)
+			}
 		}
 	}
 	return settings
@@ -92,6 +140,24 @@ format_settings :: proc(settings: ^Settings, allocator := context.allocator) -> 
 	)
 	for uri in settings.pinned {_ = fmt.sbprintf(&builder, "pin=%s\n", uri)}
 	for uri in settings.recent {_ = fmt.sbprintf(&builder, "recent=%s\n", uri)}
+	if len(settings.last_track) > 0 {
+		_ = fmt.sbprintf(&builder, "last_track=%s\n", settings.last_track)
+	}
+	if len(settings.last_title) > 0 {
+		_ = fmt.sbprintf(&builder, "last_title=%s\n", settings.last_title)
+	}
+	if len(settings.last_artist) > 0 {
+		_ = fmt.sbprintf(&builder, "last_artist=%s\n", settings.last_artist)
+	}
+	if len(settings.last_cover) > 0 {
+		_ = fmt.sbprintf(&builder, "last_cover=%s\n", settings.last_cover)
+	}
+	if len(settings.last_collection) > 0 {
+		_ = fmt.sbprintf(&builder, "last_collection=%s\n", settings.last_collection)
+	}
+	if len(settings.last_name) > 0 {
+		_ = fmt.sbprintf(&builder, "last_name=%s\n", settings.last_name)
+	}
 	return strings.to_string(builder)
 }
 

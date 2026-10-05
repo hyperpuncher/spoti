@@ -149,7 +149,21 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 			},
 		},
 		) {
-			cover_element(textures, view.cover, 64 * d, 7 * d)
+			// The slot stays reserved so the title never shifts when art loads.
+			if len(view.cover) > 0 {
+				cover_element(textures, view.cover, 64 * d, 7 * d)
+			} else if clay.UI()(
+			{
+				layout = {
+					sizing = {width = clay.SizingFixed(64 * d), height = clay.SizingFixed(64 * d)},
+					childAlignment = {x = .Center, y = .Center},
+				},
+				backgroundColor = CARD,
+				cornerRadius = clay.CornerRadiusAll(7 * d),
+			},
+			) {
+				icon_element(textures, "music", .Muted, 24 * d)
+			}
 			if clay.UI()(
 			{
 				layout = {

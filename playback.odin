@@ -94,12 +94,18 @@ reorder_play_queue :: proc(items: []Play_Item, index: int, shuffle: bool) -> int
 	return index
 }
 
-select_play_item :: proc(items: []Play_Item, index: int, selected, cover: ^string) -> bool {
+select_play_item :: proc(
+	items: []Play_Item,
+	index: int,
+	selected, cover, artist: ^string,
+) -> bool {
 	if index < 0 || index >= len(items) {return false}
 	delete(selected^)
 	selected^ = strings.clone(items[index].uri)
 	delete(cover^)
 	cover^ = strings.clone(items[index].cover)
+	delete(artist^)
+	artist^ = strings.clone(items[index].artist)
 	return true
 }
 
@@ -107,9 +113,9 @@ advance_play_item :: proc(
 	items: []Play_Item,
 	index: ^int,
 	delta: int,
-	selected, cover: ^string,
+	selected, cover, artist: ^string,
 ) -> bool {
-	if !select_play_item(items, index^ + delta, selected, cover) {return false}
+	if !select_play_item(items, index^ + delta, selected, cover, artist) {return false}
 	index^ += delta
 	return true
 }
