@@ -29,6 +29,29 @@ resolve_font :: proc(pattern: string) -> (path: string, index: int, ok: bool) {
 	return path, face, len(path) > 0
 }
 
+// Read the desktop's fontconfig hinting so text matches system apps.
+// Falls back to normal hinting when fontconfig is unavailable. Subpixel
+// (rgba) has no SDL GPU-text equivalent, so system text stays slightly
+// darker; shapes and spacing follow the configured hinter.
+system_hinting :: proc() -> ttf.Hinting {
+	state, output, errors, err := os.process_exec(
+		{command = {"fc-match", "-f", "%{hinting} %{hintstyle} %{antialias}\n", "sans-serif"}},
+		context.allocator,
+	)
+	defer delete(output)
+	defer delete(errors)
+	if err != nil || !state.exited || state.exit_code != 0 {return .NORMAL}
+	fields := strings.fields(string(output))
+	defer delete(fields)
+	if len(fields) < 3 {return .NORMAL}
+	if !strings.equal_fold(fields[2], "true") && fields[2] != "1" {return .MONO}
+	if !strings.equal_fold(fields[0], "true") && fields[0] != "1" {return .NONE}
+	style, parsed := strconv.parse_int(fields[1])
+	if !parsed || style <= 0 {return .NONE}
+	if style == 1 || style == 2 {return .LIGHT}
+	return .NORMAL
+}
+
 font_for_size :: proc(state: ^State, size: f32, font_id: u16 = 0) -> ^ttf.Font {
 	size_key := max(1, int(size * 8 + 0.5))
 	key := size_key | int(font_id) << 24
@@ -55,8 +78,7 @@ font_for_size :: proc(state: ^State, size: f32, font_id: u16 = 0) -> ^ttf.Font {
 		fmt.eprintln("could not load system font:", path)
 		return nil
 	}
-	// Unhinted outlines stay sharp and consistent across fractional scales.
-	ttf.SetFontHinting(font, .NONE)
+	ttf.SetFontHinting(font, state.hinting)
 	state.fonts[key] = font
 	return font
 }

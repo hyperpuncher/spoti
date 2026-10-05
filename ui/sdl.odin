@@ -24,6 +24,7 @@ State :: struct {
 	bold_font_index:    int,
 	medium_font_path:   string,
 	medium_font_index:  int,
+	hinting:            ttf.Hinting,
 	fonts:              map[int]^ttf.Font,
 	text_engine:        ^ttf.TextEngine,
 	texts:              [dynamic]^ttf.Text,
@@ -86,6 +87,7 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 	if !ok {close(&state); return}
 	state.medium_font_path, state.medium_font_index, ok = resolve_font("sans-serif:style=Medium")
 	if !ok {close(&state); return}
+	state.hinting = system_hinting()
 	state.fonts = make(map[int]^ttf.Font)
 	state.masks = make(map[u64]^sdl.Texture)
 	state.cursors[.Default] = sdl.GetDefaultCursor()
