@@ -1,11 +1,12 @@
 vet_flags := "-vet -vet-cast -vet-style -vet-semicolon -vet-tabs"
-project_packages := "main,ap,artwork,audio,credential,diagnostic,http,library,oauth,player,session,shannon,track,ui"
+project_packages := "main,ap,artwork,audio,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui"
 
 default: run
 
 _prepare:
 	./scripts/build-vorbis.sh
 	./scripts/build-icons.sh
+	./scripts/build-mpris.sh
 
 # Optimized portable release build. Keep runtime safety checks enabled.
 build: _prepare
@@ -24,8 +25,7 @@ check: _prepare
 	odin check cmd/ap_login {{vet_flags}}
 	odin check cmd/logout {{vet_flags}}
 
-test:
-	./scripts/build-vorbis.sh
+test: _prepare
 	odin test .
 	odin test spotify/ap
 	odin test spotify/shannon

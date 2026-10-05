@@ -24,14 +24,16 @@ Stage :: enum {
 }
 
 Play_Item :: struct {
-	uri:   string,
-	cover: string,
-	order: int,
+	uri:    string,
+	artist: string,
+	cover:  string,
+	order:  int,
 }
 
 free_play_queue :: proc(items: ^[dynamic]Play_Item) {
 	for item in items^ {
 		delete(item.uri)
+		delete(item.artist)
 		delete(item.cover)
 	}
 	delete(items^)
@@ -50,7 +52,12 @@ build_play_queue :: proc(
 			row.image_small != "" ? row.image_small : row.image != "" ? row.image : fallback_cover
 		append(
 			items,
-			Play_Item{uri = strings.clone(row.uri), cover = strings.clone(cover), order = index},
+			Play_Item {
+				uri = strings.clone(row.uri),
+				artist = strings.clone(row.artists),
+				cover = strings.clone(cover),
+				order = index,
+			},
 		)
 	}
 }

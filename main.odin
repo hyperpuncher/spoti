@@ -10,6 +10,7 @@ import "core:sync/chan"
 import "core:thread"
 import diagnostic "diagnostic"
 import library "spotify/library"
+import mpris "spotify/mpris"
 import player "spotify/player"
 import session "spotify/session"
 import track "spotify/track"
@@ -241,6 +242,7 @@ main :: proc() {
 		requested = make(map[u64]Cover_Request_State),
 	}
 	load_icons(&state, &textures)
+	mpris_active := mpris.start()
 	library_client: library.Client
 	settings := load_settings()
 	filter := settings.tab
@@ -274,6 +276,7 @@ main :: proc() {
 		free_play_queue(&play_queue)
 		delete(input)
 		free_settings(&settings)
+		if mpris_active {mpris.close()}
 	}
 	stage := Stage.Idle
 	finished := false
@@ -310,6 +313,8 @@ main :: proc() {
 		}
 		if preload_worker != nil && stage != .Playing {wait_ms = 40}
 		if first_frame {wait_ms = 0}
+		// MPRIS commands arrive on the bus, which SDL does not watch, so poll it.
+		if mpris_active && wait_ms < 0 {wait_ms = 100}
 		has_event := sdl.WaitEventTimeout(&event, wait_ms)
 		redraw := has_event || first_frame
 		first_frame = false
@@ -822,7 +827,41 @@ main :: proc() {
 			repeat = !repeat
 			replay_pending = repeat && stage == .Ended
 		}
-		seek_requested := false
+		mpris_delta := 0
+		mpris_seek_ms := 0
+		mpris_seek_requested := false
+		for {
+			command, value, received := mpris.poll()
+			if !received {break}
+			switch command {
+			case .Play:
+				if stage != .Playing {space_pressed = true}
+			case .Pause:
+				if stage == .Playing {space_pressed = true}
+			case .Play_Pause:
+				space_pressed = true
+			case .Stop:
+				stop_pressed = true
+			case .Next:
+				mpris_delta += 1
+			case .Previous:
+				mpris_delta -= 1
+			case .Seek:
+				mpris_seek_ms = displayed_ms + value
+				mpris_seek_requested = true
+			case .Set_Position:
+				mpris_seek_ms = value
+				mpris_seek_requested = true
+			case .Quit:
+				running = false
+			}
+		}
+		seek_requested := mpris_seek_requested
+		if mpris_seek_requested {
+			seek_ms = clamp(mpris_seek_ms, 0, max(0, duration_ms))
+			start_paused = stage == .Paused
+			mpris.seeked(seek_ms)
+		}
 		if clicked && seek_enabled && hit("seek_slider", mouse_click) {seek_dragging = true}
 		if seek_dragging {
 			if !seek_enabled {seek_dragging = false} else {
@@ -851,7 +890,7 @@ main :: proc() {
 			order_dirty = true
 			settings_dirty = true
 		}
-		track_delta := 0
+		track_delta := mpris_delta
 		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
 		if clicked && hit("footer_next", mouse_click) {track_delta = 1}
 		if track_delta != 0 &&
@@ -925,6 +964,27 @@ main :: proc() {
 			case .Paused:
 				if stream != nil && sdl.ResumeAudioStreamDevice(stream) {stage = .Playing}
 			}
+		}
+		if mpris_active {
+			artist := ""
+			if play_index >= 0 && play_index < len(play_queue) {
+				artist = play_queue[play_index].artist
+			}
+			mpris.update(
+				{
+					title = title,
+					artist = artist,
+					duration_ms = duration_ms,
+					position_ms = displayed_ms,
+					playing = stage == .Playing,
+					shuffle = shuffle,
+					repeat = repeat,
+					volume = volume,
+					can_seek = seek_enabled,
+					can_next = play_index >= 0 && play_index + 1 < len(play_queue),
+					can_previous = play_index > 0,
+				},
+			)
 		}
 		sort_library_pages(&library_client, &settings, &page_counts, order_dirty)
 		order_dirty = false
