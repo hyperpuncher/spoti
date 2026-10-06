@@ -58,6 +58,27 @@ settings_sort_defaults_albums_to_added_and_round_trips :: proc(t: ^testing.T) {
 }
 
 @(test)
+settings_volume_round_trips_and_clamps :: proc(t: ^testing.T) {
+	fresh := parse_settings("")
+	defer free_settings(&fresh)
+	testing.expect_value(t, fresh.volume, DEFAULT_VOLUME)
+
+	loaded := parse_settings("volume=0.8\n")
+	defer free_settings(&loaded)
+	testing.expect_value(t, loaded.volume, f32(0.8))
+
+	clamped := parse_settings("volume=7\n")
+	defer free_settings(&clamped)
+	testing.expect_value(t, clamped.volume, f32(1))
+
+	encoded := format_settings(&loaded)
+	defer delete(encoded)
+	decoded := parse_settings(encoded)
+	defer free_settings(&decoded)
+	testing.expect_value(t, decoded.volume, f32(0.8))
+}
+
+@(test)
 settings_toggle_pin_and_recent_keep_most_recent_first :: proc(t: ^testing.T) {
 	settings := Settings{}
 	defer free_settings(&settings)

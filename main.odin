@@ -456,7 +456,7 @@ main :: proc() {
 	repeat, replay_pending, play_after_stop := false, false, false
 	fx_animating := false
 	shuffle, volume_dragging := false, false
-	volume: f32 = 0.5
+	volume := settings.volume
 	seek_dragging, start_paused := false, false
 	seek_ms := 0
 	sent_frames, sample_rate, duration_ms := 0, 0, 0
@@ -1343,6 +1343,8 @@ main :: proc() {
 			box := clay.GetElementData(clay.ID("volume_slider")).boundingBox
 			if box.width > 0 {
 				volume = clamp((mouse.x - box.x) / box.width, 0, 1)
+				settings.volume = volume
+				settings_dirty = true
 				if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
 			}
 			if .LEFT not_in buttons {volume_dragging = false}

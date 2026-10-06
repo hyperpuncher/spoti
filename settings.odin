@@ -10,12 +10,14 @@ import "core:strings"
 import library "spotify/library"
 
 DEFAULT_SIDEBAR_WIDTH :: f32(360)
+DEFAULT_VOLUME :: f32(0.5)
 SETTINGS_FILE :: "settings"
 MAX_PINNED :: 32
 MAX_RECENT :: 60
 
 Settings :: struct {
 	sidebar_width:   f32,
+	volume:          f32,
 	tab:             library.Kind,
 	sort:            [library.Kind]Sort, // per-tab card order
 	pinned:          [dynamic]string, // pin order; drawn first
@@ -131,6 +133,7 @@ sort_supported :: proc(kind: library.Kind, sort: Sort) -> bool {
 parse_settings :: proc(data: string, allocator := context.allocator) -> Settings {
 	settings := Settings {
 		sidebar_width = DEFAULT_SIDEBAR_WIDTH,
+		volume        = DEFAULT_VOLUME,
 		tab           = .Playlists,
 	}
 	// Recently added is the default where Spotify dates exist (albums).
@@ -144,6 +147,10 @@ parse_settings :: proc(data: string, allocator := context.allocator) -> Settings
 			}
 		case "tab":
 			settings.tab = settings_tab_kind(strings.trim_space(value))
+		case "volume":
+			if gain, ok := strconv.parse_f32(strings.trim_space(value)); ok {
+				settings.volume = clamp(gain, 0, 1)
+			}
 		case "sort_playlists", "sort_albums", "sort_artists":
 			tab := settings_tab_kind(strings.trim_space(key)[len("sort_"):])
 			if value, ok := sort_kind(strings.trim_space(value)); ok {
@@ -206,9 +213,10 @@ format_settings :: proc(settings: ^Settings, allocator := context.allocator) -> 
 	strings.builder_init(&builder, allocator)
 	_ = fmt.sbprintf(
 		&builder,
-		"sidebar_width=%v\ntab=%s\nsort_playlists=%s\nsort_albums=%s\nsort_artists=%s\n",
+		"sidebar_width=%v\ntab=%s\nvolume=%v\nsort_playlists=%s\nsort_albums=%s\nsort_artists=%s\n",
 		settings.sidebar_width,
 		settings_tab_name(settings.tab),
+		settings.volume,
 		sort_serial(settings.sort[.Playlists]),
 		sort_serial(settings.sort[.Albums]),
 		sort_serial(settings.sort[.Artists]),
