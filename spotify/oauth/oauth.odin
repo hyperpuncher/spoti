@@ -25,13 +25,15 @@ Grant :: struct {
 PLAYBACK_GRANT :: Grant{PLAYBACK_CLIENT_ID, REDIRECT_URI, 8898, "streaming", "streaming"}
 // The caller supplies its own registered Web API client ID. Never use the
 // playback identity or another app's shared Web API grant for account reads.
+// Writes (hero heart) need the modify set; sessions approved without it
+// re-approve once through the required-scope check below.
 web_grant :: proc(client_id: string) -> Grant {
 	return {
 		client_id,
 		WEB_REDIRECT_URI,
 		8989,
-		"playlist-read-private playlist-read-collaborative user-library-read user-follow-read",
-		"user-library-read",
+		"playlist-read-private playlist-read-collaborative user-library-read user-follow-read user-library-modify user-follow-modify playlist-modify-public",
+		"user-library-modify",
 	}
 }
 

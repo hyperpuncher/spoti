@@ -1,4 +1,4 @@
-// Separate, read-only Web API approval for account library data.
+// Separate Web API approval for account library reads and likes.
 package library
 
 import diagnostic "../../diagnostic"
@@ -74,7 +74,7 @@ authorize :: proc(
 		delete(flow.state)
 		delete(flow.url)
 	}
-	fmt.println("Open this URL in your browser to allow read-only Spotify library access:")
+	fmt.println("Open this URL in your browser to allow Spotify library access:")
 	fmt.println(flow.url)
 	code, response := oauth.wait_for_code(listener, flow.state, cancel)
 	diagnostic.writef("library browser=%v", response)

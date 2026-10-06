@@ -87,7 +87,7 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Text)
 		return
 	}
-	for id in ([]string{"toolbar_back", "toolbar_library", "sort_button", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "autoscroll"}) {
+	for id in ([]string{"toolbar_back", "toolbar_library", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "autoscroll"}) {
 		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
 		if id == "spotify_link" && client.detail_loading {continue}
 		if pointer_over(id) {
@@ -1258,7 +1258,20 @@ main :: proc() {
 					}
 				}
 				if !handled && library_client.detail.ready {
-					if hit("hero_pin", mouse_click) {
+					if hit("hero_like", mouse_click) {
+						detail := library_client.detail
+						if detail.source != .Liked &&
+						   !library_client.detail_loading &&
+						   !library_client.like_pending &&
+						   library.toggle_like(
+							   &library_client,
+							   detail.source,
+							   detail.id,
+							   !detail.liked,
+						   ) {
+							handled = true
+						}
+					} else if hit("hero_pin", mouse_click) {
 						detail_pinned = settings_toggle_pin(
 							&settings,
 							detail_card_uri(library_client.detail),

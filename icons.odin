@@ -33,7 +33,6 @@ ICON_NAMES :: []string {
 	"skip-forward",
 	"skip-back-filled",
 	"skip-forward-filled",
-	"heart",
 	"pin",
 	"pin-filled",
 	"pin-off",
@@ -47,6 +46,8 @@ ICON_NAMES :: []string {
 	"chevrons-up-down",
 	"check",
 	"list-sort-descending",
+	"circle-plus",
+	"circle-check",
 }
 
 // Tint lives in the texture color mod, not the pixels, so a theme switch

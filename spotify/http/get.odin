@@ -12,6 +12,7 @@ import "core:time"
 Options :: struct {
 	bearer:     string, // empty for signed CDN URLs; never forward account tokens
 	range:      string, // optional HTTP byte range, e.g. "0-65535"
+	method:     string, // PUT or DELETE with an empty body; empty keeps GET/POST
 	limit:      int,
 	range_info: ^Range_Info, // optional validated Content-Range from a ranged GET
 	cancel:     ^bool, // optional worker cancellation, observed by curl during transfer
@@ -105,6 +106,23 @@ get :: proc(
 	ok: bool,
 ) {
 	return request(address, options, reuse = reuse)
+}
+
+// Authenticated library writes: PUT and DELETE with an empty body.
+// The method is restricted to the two verbs the library needs.
+write :: proc(
+	method, address: string,
+	options: Options = {},
+	reuse: rawptr = nil,
+) -> (
+	status: int,
+	ok: bool,
+) {
+	if method != "PUT" && method != "DELETE" {return 0, false}
+	opts := options
+	opts.method = method
+	_, status, ok = request(address, opts, reuse = reuse)
+	return status, ok
 }
 
 // OAuth uses the same curl lifetime and bounded response handling as GETs.
@@ -212,6 +230,14 @@ request :: proc(
 	if len(form) > 0 {
 		if easy_setopt(client, CURL_POSTFIELDSIZE, c.long(len(form))) != 0 ||
 		   easy_setopt(client, CURL_POSTFIELDS, raw_data(form)) != 0 {return nil, 0, false}
+	}
+	if options.method != "" {
+		c_method := strings.clone_to_cstring(options.method)
+		defer delete(c_method)
+		if easy_setopt(client, CURL_CUSTOMREQUEST, c_method) != 0 {return nil, 0, false}
+		// An explicit empty body so the write carries Content-Length: 0.
+		if easy_setopt(client, CURL_POSTFIELDS, "") != 0 ||
+		   easy_setopt(client, CURL_POSTFIELDSIZE, c.long(0)) != 0 {return nil, 0, false}
 	}
 	if options.range != "" {
 		c_range := strings.clone_to_cstring(options.range)

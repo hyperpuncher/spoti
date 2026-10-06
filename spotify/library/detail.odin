@@ -2,10 +2,12 @@
 // Like a library page, a detail owns one arena and is released in one call.
 package library
 
+import http "../http"
 import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
 import "core:mem/virtual"
+import "core:net"
 import "core:strings"
 
 Source :: enum {
@@ -27,6 +29,7 @@ Track_Row :: struct {
 Detail :: struct {
 	arena:         virtual.Arena,
 	ready:         bool,
+	liked:         bool, // in the account library; hero heart state
 	source:        Source,
 	id:            string,
 	label:         string, // Album, Playlist, Artist or Liked Songs
@@ -503,4 +506,73 @@ safe_id :: proc(id: string) -> bool {
 			   ch >= 'A' && ch <= 'Z') {return false}
 	}
 	return true
+}
+
+// Library membership for the hero heart through the unified /me/library
+// endpoints: GET contains to check, PUT to save, DELETE to remove. Liked
+// Songs has no membership to check. Spotify IDs are alphanumeric, but the
+// full URI still rides percent-encoded in the query string.
+library_uri :: proc(source: Source, id: string, allocator := context.allocator) -> string {
+	if !safe_id(id) {return ""}
+	#partial switch source {
+	case .Playlist:
+		return fmt.aprintf("spotify:playlist:%s", id, allocator = allocator)
+	case .Album:
+		return fmt.aprintf("spotify:album:%s", id, allocator = allocator)
+	case .Artist:
+		return fmt.aprintf("spotify:artist:%s", id, allocator = allocator)
+	}
+	return ""
+}
+
+saved_check_url :: proc(source: Source, id: string, allocator := context.allocator) -> string {
+	uri := library_uri(source, id, allocator)
+	if len(uri) == 0 {return ""}
+	defer delete(uri, allocator)
+	encoded := net.percent_encode(uri)
+	defer delete(encoded)
+	return fmt.aprintf(
+		"https://api.spotify.com/v1/me/library/contains?uris=%s",
+		encoded,
+		allocator = allocator,
+	)
+}
+
+like_url :: proc(uri: string, allocator := context.allocator) -> string {
+	if len(uri) == 0 {return ""}
+	encoded := net.percent_encode(uri)
+	defer delete(encoded)
+	return fmt.aprintf(
+		"https://api.spotify.com/v1/me/library?uris=%s",
+		encoded,
+		allocator = allocator,
+	)
+}
+
+// Reads through the shared worker handle but never the GET cache, so a
+// just-toggled collection reports its new state on reopen.
+fetch_saved :: proc(access: string, source: Source, id: string, reuse: rawptr = nil) -> bool {
+	address := saved_check_url(source, id)
+	if len(address) == 0 {return false}
+	defer delete(address)
+	body, status, ok := http.get(address, {bearer = access, limit = 1024}, reuse)
+	defer delete(body)
+	if !ok || status != 200 {return false}
+	flags: [dynamic]bool
+	if json.unmarshal(body[:], &flags, allocator = context.temp_allocator) != nil {return false}
+	return len(flags) > 0 && flags[0]
+}
+
+set_saved :: proc(
+	access, uri: string,
+	liked: bool,
+	reuse: rawptr = nil,
+) -> (
+	status: int,
+	ok: bool,
+) {
+	address := like_url(uri)
+	if len(address) == 0 {return 0, false}
+	defer delete(address)
+	return http.write(liked ? "PUT" : "DELETE", address, {bearer = access}, reuse)
 }

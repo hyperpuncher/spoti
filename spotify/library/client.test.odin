@@ -155,3 +155,57 @@ discography_selection_clones_metadata_before_releasing_detail :: proc(t: ^testin
 	testing.expect_value(t, client.detail_request_id, "album")
 	testing.expect_value(t, client.detail.image_preview, "https://i.scdn.co/image/card")
 }
+
+@(test)
+like_toggle_syncs_sidebar_membership :: proc(t: ^testing.T) {
+	client: Client
+	if virtual.arena_init_growing(&client.pages[.Albums].arena) != nil {
+		testing.fail_now(t, "arena")
+	}
+	defer free_page(&client.pages[.Albums])
+	page_allocator := virtual.arena_allocator(&client.pages[.Albums].arena)
+	client.pages[.Albums].items = make([dynamic]Entry, 0, 2, page_allocator)
+	append(
+		&client.pages[.Albums].items,
+		Entry{uri = strings.clone("spotify:album:gone", page_allocator)},
+	)
+	client.pages[.Albums].total = 1
+	if virtual.arena_init_growing(&client.detail.arena) != nil {testing.fail_now(t, "arena")}
+	defer free_detail(&client.detail)
+	detail_allocator := virtual.arena_allocator(&client.detail.arena)
+	client.detail.source = .Album
+	client.detail.id = strings.clone("fresh", detail_allocator)
+	client.detail.name = strings.clone("Fresh Album", detail_allocator)
+	client.detail.subtitle = strings.clone("Some Artist", detail_allocator)
+	client.detail.image = strings.clone("https://i.scdn.co/image/fresh", detail_allocator)
+	client.detail.total = 10
+
+	// Unlike drops the card and decrements the server total.
+	sync_library_membership(&client, .Album, "gone", false)
+	testing.expect_value(t, len(client.pages[.Albums].items), 0)
+	testing.expect_value(t, client.pages[.Albums].total, 0)
+
+	// Like appends a card built from the open detail when it is current.
+	sync_library_membership(&client, .Album, "fresh", true)
+	testing.expect_value(t, len(client.pages[.Albums].items), 1)
+	testing.expect_value(t, client.pages[.Albums].items[0].uri, "spotify:album:fresh")
+	testing.expect_value(t, client.pages[.Albums].items[0].name, "Fresh Album")
+	testing.expect_value(t, len(client.pages[.Albums].items[0].added_at), 20)
+	testing.expect_value(t, client.pages[.Albums].total, 1)
+
+	// Repeating either direction is a no-op.
+	sync_library_membership(&client, .Album, "fresh", true)
+	testing.expect_value(t, len(client.pages[.Albums].items), 1)
+	sync_library_membership(&client, .Album, "missing", false)
+	testing.expect_value(t, len(client.pages[.Albums].items), 1)
+
+	// Liked Songs has no sidebar membership to sync.
+	sync_library_membership(&client, .Liked, "anything", true)
+	testing.expect_value(t, len(client.pages[.Playlists].items), 0)
+
+	kind, kind_ok := source_kind(.Playlist)
+	testing.expect(t, kind_ok)
+	testing.expect_value(t, kind, Kind.Playlists)
+	_, liked_ok := source_kind(.Liked)
+	testing.expect(t, !liked_ok)
+}

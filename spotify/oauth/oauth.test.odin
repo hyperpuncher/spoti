@@ -31,7 +31,7 @@ authorization_uses_pkce_and_fresh_state :: proc(t: ^testing.T) {
 }
 
 @(test)
-web_grant_is_separate_and_read_only :: proc(t: ^testing.T) {
+web_grant_is_separate_and_write_capable :: proc(t: ^testing.T) {
 	grant := web_grant("example-public-client-id")
 	flow := begin(grant)
 	defer {delete(flow.url); delete(flow.state); delete(flow.verifier)}
@@ -41,9 +41,13 @@ web_grant_is_separate_and_read_only :: proc(t: ^testing.T) {
 		strings.contains(flow.url, "redirect_uri=http%3A%2F%2F127.0.0.1%3A8989%2Flogin"),
 	)
 	testing.expect(t, strings.contains(flow.url, "user-library-read"))
-	testing.expect(t, !strings.contains(flow.url, "library-modify"))
-	body: string = `{"access_token":"fake","scope":"playlist-read-private user-library-read"}`
-	tokens, result := decode_token(200, transmute([]u8)body, true, grant.required_scope)
+	testing.expect(t, strings.contains(flow.url, "user-library-modify"))
+	// Sessions approved without the write scopes re-approve once.
+	old: string = `{"access_token":"fake","scope":"playlist-read-private user-library-read"}`
+	_, old_result := decode_token(200, transmute([]u8)old, true, grant.required_scope)
+	testing.expect(t, old_result == .Rejected)
+	fresh: string = `{"access_token":"fake","scope":"playlist-read-private user-library-read user-library-modify"}`
+	tokens, result := decode_token(200, transmute([]u8)fresh, true, grant.required_scope)
 	defer wipe_tokens(&tokens)
 	testing.expect(t, result == .Authorized)
 }
@@ -110,4 +114,13 @@ callback_rejects_forgery_and_accepts_authorization :: proc(t: ^testing.T) {
 	testing.expect(t, status == .Ignored)
 	_, status = parse_callback("GET /login?state=correct&code=%zz HTTP/1.1", "correct")
 	testing.expect(t, status == .Rejected)
+}
+
+@(test)
+web_grant_requests_library_write_scopes :: proc(t: ^testing.T) {
+	grant := web_grant("0123456789abcdef0123456789abcdef")
+	for scope in ([]string{"user-library-modify", "user-follow-modify", "playlist-modify-public"}) {
+		testing.expect(t, strings.contains(grant.scopes, scope), scope)
+	}
+	testing.expect_value(t, grant.required_scope, "user-library-modify")
 }

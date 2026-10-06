@@ -16,6 +16,7 @@ import "core:strings"
 import "core:sync"
 import "core:sync/chan"
 import "core:thread"
+import "core:time"
 
 State :: enum {
 	Idle,
@@ -31,6 +32,7 @@ Request_Kind :: enum {
 	Detail,
 	More,
 	Search,
+	Like,
 }
 
 Request :: struct {
@@ -42,6 +44,7 @@ Request :: struct {
 	id:     string, // Detail, More; worker frees
 	query:  string, // Search; worker frees
 	serial: u64, // Search; echoes back so stale results are dropped
+	liked:  bool, // Like; the membership to set
 }
 
 Result :: struct {
@@ -62,6 +65,7 @@ Result :: struct {
 	id:            string, // Detail, More; receiver frees
 	status:        int,
 	ok:            bool,
+	liked:         bool, // Like; echoes the requested membership
 }
 
 Cover_Request :: struct {
@@ -101,6 +105,7 @@ Client :: struct {
 	search_loading:        bool,
 	search_error:          int,
 	search_pages:          [Kind]Page,
+	like_pending:          bool, // hero heart toggle in flight
 }
 
 run :: proc(pointer: rawptr) {
@@ -188,6 +193,17 @@ fail_request :: proc(client: ^Client, request: Request) {
 				status = -1,
 			},
 		)
+	case .Like:
+		send(
+			client,
+			Result {
+				kind = .Like,
+				source = request.source,
+				id = strings.clone(request.id),
+				liked = request.liked,
+				status = -1,
+			},
+		)
 	}
 }
 
@@ -239,6 +255,9 @@ handle :: proc(
 				detail.rows_error = rows_status != 0 ? rows_status : -1
 			}
 		}
+		if ok {
+			detail.liked = fetch_saved(tokens.access, request.source, request.id, reuse)
+		}
 		send(
 			client,
 			Result {
@@ -246,6 +265,21 @@ handle :: proc(
 				source = request.source,
 				id = strings.clone(request.id),
 				detail = detail,
+				status = status,
+				ok = ok,
+			},
+		)
+	case .Like:
+		uri := library_uri(request.source, request.id)
+		defer delete(uri)
+		status, ok := set_saved(tokens.access, uri, request.liked, reuse)
+		send(
+			client,
+			Result {
+				kind = .Like,
+				source = request.source,
+				id = strings.clone(request.id),
+				liked = request.liked,
 				status = status,
 				ok = ok,
 			},
@@ -485,6 +519,94 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	return true
 }
 
+// Queues a library membership flip for the hero heart. The worker answers
+// with a Like result that flips the detail and syncs the sidebar grids.
+toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) -> bool {
+	if client.worker == nil || client.state != .Ready || len(id) == 0 {return false}
+	request := Request {
+		kind   = .Like,
+		source = source,
+		id     = strings.clone(id),
+		liked  = liked,
+	}
+	if !chan.try_send(client.requests, request) {
+		delete(request.id)
+		return false
+	}
+	client.like_pending = true
+	return true
+}
+
+// Keeps the sidebar grids in step with hero heart toggles. Unlike drops
+// the card; like appends one built from the open detail, stamped now so a
+// just-added collection sorts first. Anything else surfaces on the next
+// full load.
+sync_library_membership :: proc(client: ^Client, source: Source, id: string, liked: bool) {
+	kind, ok := source_kind(source)
+	if !ok {return}
+	uri := library_uri(source, id)
+	if len(uri) == 0 {return}
+	defer delete(uri)
+	page := &client.pages[kind]
+	allocator := virtual.arena_allocator(&page.arena)
+	page.items.allocator = allocator
+	if liked {
+		for entry in page.items {if entry.uri == uri {return}}
+		if client.detail.source != source || client.detail.id != id {return}
+		detail := client.detail
+		append(
+			&page.items,
+			Entry {
+				name = strings.clone(detail.name, allocator),
+				uri = strings.clone(uri, allocator),
+				image = strings.clone(detail.image, allocator),
+				subtitle = strings.clone(detail.subtitle, allocator),
+				total = detail.total,
+				added_at = strings.clone(now_iso(context.temp_allocator), allocator),
+			},
+		)
+		page.total += 1
+	} else {
+		for entry, index in page.items {
+			if entry.uri != uri {continue}
+			ordered_remove(&page.items, index)
+			page.total = max(0, page.total - 1)
+			return
+		}
+	}
+}
+
+source_kind :: proc(source: Source) -> (kind: Kind, ok: bool) {
+	switch source {
+	case .Playlist:
+		return .Playlists, true
+	case .Album:
+		return .Albums, true
+	case .Artist:
+		return .Artists, true
+	case .Liked:
+		return .Playlists, false
+	}
+	return .Playlists, false
+}
+
+// Zulu stamp for just-liked cards; Odin wall time already runs on UTC.
+now_iso :: proc(allocator := context.allocator) -> string {
+	now := time.now()
+	year, month, day := time.date(now)
+	hour, minute, second := time.clock(now)
+	return fmt.aprintf(
+		"%04d-%02d-%02dT%02d:%02d:%02dZ",
+		year,
+		int(month),
+		day,
+		hour,
+		minute,
+		second,
+		allocator = allocator,
+	)
+}
+
 clear_detail :: proc(client: ^Client) {
 	free_detail(&client.detail)
 	delete(client.detail_request_id)
@@ -662,6 +784,19 @@ apply :: proc(client: ^Client, result: Result) {
 			virtual.arena_allocator(&local.detail.arena),
 		)
 		move_detail(&client.detail, &local.detail)
+	case .Like:
+		if !local.ok {
+			client.like_pending = false
+			client.last_http_status = local.status
+			diagnostic.result("like", false, local.status, 0, 0, false)
+			return
+		}
+		diagnostic.result("like", true, local.status, 0, 0, false)
+		client.like_pending = false
+		if local.source == client.detail.source && local.id == client.detail.id {
+			client.detail.liked = local.liked
+		}
+		sync_library_membership(client, local.source, local.id, local.liked)
 	case .More:
 		if local.source == client.detail.source && local.id == client.detail.id {
 			client.detail_loading = false

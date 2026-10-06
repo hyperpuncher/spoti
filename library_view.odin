@@ -934,7 +934,17 @@ detail_page :: proc(
 					d,
 				)
 			}
-			icon_element(textures, "heart", client.detail_loading ? .Disabled : .Muted, 22 * d)
+			if client.detail.source != .Liked {
+				like_disabled := client.detail_loading || client.like_pending
+				player_control(
+					"hero_like",
+					client.detail.liked ? "circle-check" : "circle-plus",
+					like_disabled ? .Disabled : client.detail.liked ? .Green : .Muted,
+					textures,
+					fx,
+					d,
+				)
+			}
 			player_control(
 				"hero_pin",
 				view.pinned ? "pin-filled" : "pin-off",
