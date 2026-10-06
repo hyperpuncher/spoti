@@ -11,12 +11,7 @@ PLAYLIST_AUTH_REQUIRED :: -3
 authorize_session :: proc(client: ^Client, tokens: ^oauth.Tokens, force: bool = false) -> bool {
 	if sync.atomic_load(&client.cancel) {return false}
 	if !force && tokens.access != "" && !oauth.expired(tokens^) {return true}
-	fresh, ok := session.authorize(
-		client.remember ? .Remember : .Restore,
-		&client.cancel,
-		tokens.refresh,
-		force,
-	)
+	fresh, ok := session.authorize(.Remember, &client.cancel, tokens.refresh, force)
 	if !ok {return false}
 	oauth.wipe_tokens(tokens)
 	tokens^ = fresh

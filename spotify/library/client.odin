@@ -99,7 +99,6 @@ Client :: struct {
 	remaining_initial:     int,
 	last_http_status:      int,
 	failed:                bool,
-	remember:              bool,
 	search_query:          string, // applied query; owned
 	search_serial:         u64, // latest request; stale results are dropped
 	search_loading:        bool,
@@ -115,7 +114,7 @@ run :: proc(pointer: rawptr) {
 	// worker; easy handles are thread-confined.
 	reuse := http.open_handle()
 	defer http.close_handle(reuse)
-	tokens, auth := authorize(client.remember, &client.cancel)
+	tokens, auth := authorize(&client.cancel)
 	diagnostic.writef("library auth=%v", auth)
 	if auth != .Ready {
 		if auth != .Cancelled {
@@ -163,7 +162,7 @@ ensure_tokens :: proc(client: ^Client, tokens: ^oauth.Tokens) -> bool {
 	if status != .Authorized {return false}
 	oauth.wipe_tokens(tokens)
 	tokens^ = fresh
-	if client.remember && len(fresh.refresh) > 0 {
+	if len(fresh.refresh) > 0 {
 		_ = credential.save(fresh.refresh, .Library)
 	}
 	return true
@@ -393,7 +392,7 @@ free_result :: proc(result: Result) {
 	delete(local.id)
 }
 
-start :: proc(client: ^Client, remember: bool) -> bool {
+start :: proc(client: ^Client) -> bool {
 	if client.worker != nil {return true}
 	id := os.get_env("WEB_CLIENT_ID", context.allocator)
 	valid := valid_client_id(id)
@@ -434,7 +433,6 @@ start :: proc(client: ^Client, remember: bool) -> bool {
 		client.state = .Failed
 		return false
 	}
-	client.remember = remember
 	client.worker = thread.create_and_start_with_data(client, run)
 	client.cover_worker = thread.create_and_start_with_data(client, run_covers)
 	if client.worker == nil || client.cover_worker == nil {

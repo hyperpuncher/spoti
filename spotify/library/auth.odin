@@ -28,14 +28,9 @@ valid_client_id :: proc(id: string) -> bool {
 }
 
 // Tokens belong to the caller and must be wiped with oauth.wipe_tokens.
-// The refresh grant is saved only after explicit opt-in via `just remember`.
-authorize :: proc(
-	remember: bool,
-	cancel: ^bool = nil,
-) -> (
-	tokens: oauth.Tokens,
-	result: Auth_Result,
-) {
+// A browser approval persists its refresh grant in the system keyring, so
+// later launches refresh silently; rotation re-saves over the same entry.
+authorize :: proc(cancel: ^bool = nil) -> (tokens: oauth.Tokens, result: Auth_Result) {
 	client_id := os.get_env("WEB_CLIENT_ID", context.allocator)
 	defer delete(client_id)
 	if !valid_client_id(client_id) {return {}, .Missing_Client_ID}
@@ -84,7 +79,7 @@ authorize :: proc(
 	status: oauth.Token_Result
 	tokens, status = oauth.exchange_code(code, flow.verifier, grant)
 	if status != .Authorized {return {}, .Unavailable}
-	if remember && len(tokens.refresh) > 0 && !credential.save(tokens.refresh, .Library) {
+	if len(tokens.refresh) > 0 && !credential.save(tokens.refresh, .Library) {
 		fmt.eprintln("system keyring unavailable; library approval will be needed next time")
 	}
 	return tokens, .Ready
