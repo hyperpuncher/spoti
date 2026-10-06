@@ -298,6 +298,7 @@ library_card :: proc(
 					attachTo = .Parent,
 					attachment = {element = .LeftTop, parent = .LeftTop},
 					pointerCaptureMode = .Passthrough,
+					clipTo = .AttachedParent,
 				},
 				backgroundColor = clay.Color{12, 12, 12, 200},
 				cornerRadius = clay.CornerRadiusAll(11 * d),
