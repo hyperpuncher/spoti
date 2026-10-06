@@ -140,6 +140,16 @@ free_request :: proc(request: Request) {
 	delete(request.query)
 }
 
+// Sends a worker request; drops and frees it when the queue is full.
+queue_request :: proc(client: ^Client, request: ^Request) -> bool {
+	if client.worker == nil || client.state != .Ready {return false}
+	if !chan.try_send(client.requests, request^) {
+		free_request(request^)
+		return false
+	}
+	return true
+}
+
 // The access token lives about an hour. Search and pagination fire long
 // after startup, so they renew it on demand instead of failing with 401.
 // A failed renewal fails the request; the UI keeps its old state.
@@ -467,24 +477,19 @@ more :: proc(client: ^Client, kind: Kind) {
 		offset = page.next_offset,
 		cursor = strings.clone(page.cursor),
 	}
-	if chan.try_send(client.requests, request) {
+	if queue_request(client, &request) {
 		client.pending[i] = true
-	} else {
-		delete(request.cursor)
 	}
 }
 
 open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry) -> bool {
-	if client.worker == nil || client.state != .Ready || len(id) == 0 {return false}
+	if len(id) == 0 {return false}
 	request := Request {
 		kind   = .Detail,
 		source = source,
 		id     = strings.clone(id),
 	}
-	if !chan.try_send(client.requests, request) {
-		delete(request.id)
-		return false
-	}
+	if !queue_request(client, &request) {return false}
 	// Clone before releasing the current detail: discography cards can borrow
 	// their strings from that arena. Keep the card cover through hero loading.
 	next: Detail
@@ -522,17 +527,14 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 // Queues a library membership flip for the hero heart. The worker answers
 // with a Like result that flips the detail and syncs the sidebar grids.
 toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) -> bool {
-	if client.worker == nil || client.state != .Ready || len(id) == 0 {return false}
+	if len(id) == 0 {return false}
 	request := Request {
 		kind   = .Like,
 		source = source,
 		id     = strings.clone(id),
 		liked  = liked,
 	}
-	if !chan.try_send(client.requests, request) {
-		delete(request.id)
-		return false
-	}
+	if !queue_request(client, &request) {return false}
 	client.like_pending = true
 	return true
 }
@@ -590,21 +592,11 @@ source_kind :: proc(source: Source) -> (kind: Kind, ok: bool) {
 	return .Playlists, false
 }
 
-// Zulu stamp for just-liked cards; Odin wall time already runs on UTC.
+// Zulu stamp for just-liked cards.
 now_iso :: proc(allocator := context.allocator) -> string {
-	now := time.now()
-	year, month, day := time.date(now)
-	hour, minute, second := time.clock(now)
-	return fmt.aprintf(
-		"%04d-%02d-%02dT%02d:%02d:%02dZ",
-		year,
-		int(month),
-		day,
-		hour,
-		minute,
-		second,
-		allocator = allocator,
-	)
+	stamp, ok := time.time_to_rfc3339(time.now(), 0, false, allocator)
+	if !ok {return ""}
+	return stamp
 }
 
 clear_detail :: proc(client: ^Client) {
@@ -645,10 +637,7 @@ search :: proc(client: ^Client, query: string) -> bool {
 		query  = strings.clone(trimmed),
 		serial = client.search_serial,
 	}
-	if !chan.try_send(client.requests, request) {
-		delete(request.query)
-		return false
-	}
+	if !queue_request(client, &request) {return false}
 	client.search_loading = true
 	client.search_error = 0
 	return true
