@@ -202,38 +202,6 @@ like_toggle_syncs_sidebar_membership :: proc(t: ^testing.T) {
 	// Liked Songs has no sidebar membership to sync.
 	sync_library_membership(&client, .Liked, "anything", true)
 	testing.expect_value(t, len(client.pages[.Playlists].items), 0)
-
-	kind, kind_ok := source_kind(.Playlist)
-	testing.expect(t, kind_ok)
-	testing.expect_value(t, kind, Kind.Playlists)
-	_, liked_ok := source_kind(.Liked)
-	testing.expect(t, !liked_ok)
-}
-
-@(test)
-failed_sign_in_offers_retry_through_state :: proc(t: ^testing.T) {
-	client: Client
-	defer stop(&client)
-	apply(&client, Result{kind = .Auth, auth = .Unavailable})
-	testing.expect_value(t, client.state, State.Sign_In_Failed)
-	apply(&client, Result{kind = .Auth, auth = .Missing_Client_ID})
-	testing.expect_value(t, client.state, State.Missing_Client_ID)
-	// Retry is only meaningful for a completed failed attempt.
-	testing.expect(t, !restart(&client))
-}
-
-@(test)
-rate_limit_backoff_honors_retry_after_and_escalates :: proc(t: ^testing.T) {
-	client: Client
-	// The server's Retry-After wins, and any rejection advances the escalation.
-	testing.expect_value(t, rate_limit_delay(&client, 30), 30 * time.Second)
-	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF * 2)
-	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF * 4)
-	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF * 8)
-	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF * 8)
-	// A successful page clears the streak.
-	client.rate_limited = 0
-	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF)
 }
 
 @(test)

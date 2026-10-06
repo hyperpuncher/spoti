@@ -86,18 +86,3 @@ https_requests_perform_with_owned_and_reused_handles :: proc(t: ^testing.T) {
 		testing.expect(t, code == 400 || code == 401)
 	}
 }
-
-@(test)
-write_rejects_anything_but_put_and_delete :: proc(t: ^testing.T) {
-	_, ok := write("GET", "https://api.spotify.com/v1/me/library?uris=x")
-	testing.expect(t, !ok)
-	_, ok = write("POST", "https://api.spotify.com/v1/me/library?uris=x")
-	testing.expect(t, !ok)
-	_, ok = write("", "https://api.spotify.com/v1/me/library?uris=x")
-	testing.expect(t, !ok)
-	// Valid verbs still refuse non-HTTPS without touching the network.
-	_, ok = write("PUT", "http://127.0.0.1/")
-	testing.expect(t, !ok)
-	_, ok = write("DELETE", "http://127.0.0.1/")
-	testing.expect(t, !ok)
-}

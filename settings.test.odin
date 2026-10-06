@@ -34,7 +34,7 @@ settings_round_trip_preserves_order_and_clamps_input :: proc(t: ^testing.T) {
 }
 
 @(test)
-settings_sort_defaults_albums_to_added_and_round_trips :: proc(t: ^testing.T) {
+settings_sorts_default_then_round_trips :: proc(t: ^testing.T) {
 	fresh := parse_settings("")
 	defer free_settings(&fresh)
 	testing.expect_value(t, fresh.sort[.Albums], Sort.Default)

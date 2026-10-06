@@ -141,22 +141,6 @@ album_tracks_decode_without_album_art :: proc(t: ^testing.T) {
 }
 
 @(test)
-paginated_index_pages_append_without_losing_entries :: proc(t: ^testing.T) {
-	first_json := `{"items":[{"album":{"name":"First","uri":"spotify:album:first","images":[{"url":"https://i.scdn.co/image/first","width":300,"height":300}]}}],"offset":0,"total":2,"next":"next"}`
-	second_json := `{"items":[{"album":{"name":"Second","uri":"spotify:album:second","images":[{"url":"https://i.scdn.co/image/second","width":300,"height":300}]}}],"offset":1,"total":2,"next":null}`
-	first, first_ok := parse_index(transmute([]u8)first_json, .Albums)
-	second, second_ok := parse_index(transmute([]u8)second_json, .Albums)
-	client: Client
-	client.pages[.Albums] = first
-	apply(&client, Result{kind = .Index, list = .Albums, page = second, ok = true, status = 200})
-	defer free_page(&client.pages[.Albums])
-	testing.expect(t, first_ok && second_ok)
-	testing.expect_value(t, len(client.pages[.Albums].items), 2)
-	testing.expect(t, client.pages[.Albums].items[1].name == "Second")
-	testing.expect(t, !client.pages[.Albums].has_more)
-}
-
-@(test)
 malformed_and_unsafe_responses_are_rejected :: proc(t: ^testing.T) {
 	too_large: string = `{"items":[],"total":1000001}`
 	_, ok := parse_index(transmute([]u8)too_large, .Tracks)

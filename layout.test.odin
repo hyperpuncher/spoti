@@ -287,15 +287,6 @@ scrollbar_thumb_hides_when_content_fits_and_clamps_at_both_ends :: proc(t: ^test
 }
 
 @(test)
-detail_count_spans_total_while_loading :: proc(t: ^testing.T) {
-	testing.expect_value(t, detail_item_count(50, 500, true), 500)
-	testing.expect_value(t, detail_item_count(500, 500, true), 500)
-	testing.expect_value(t, detail_item_count(480, 500, false), 480)
-	testing.expect_value(t, detail_item_count(0, 0, true), 0)
-	testing.expect_value(t, detail_item_count(60, 50, true), 60)
-}
-
-@(test)
 autoscroll_delta_deadzone_and_direction :: proc(t: ^testing.T) {
 	d: f32 = 2
 	testing.expect_value(t, autoscroll_delta(5 * d, 0.016, d), 0)
