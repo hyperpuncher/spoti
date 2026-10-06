@@ -7,6 +7,7 @@ package library
 import diagnostic "../../diagnostic"
 import http "../http"
 import "core:fmt"
+import "core:mem/virtual"
 import "core:os"
 import "core:time"
 
@@ -32,6 +33,13 @@ cache_directory :: proc(prefix: string) -> (dir: string, ok: bool) {
 	return dir, true
 }
 
+cache_path :: proc(prefix: string, address: string) -> (path: string, ok: bool) {
+	dir, has_dir := cache_directory(prefix)
+	if !has_dir {return "", false}
+	defer delete(dir)
+	return fmt.aprintf("%s/%016x", dir, url_key(address)), true
+}
+
 cache_read :: proc(
 	prefix: string,
 	address: string,
@@ -40,10 +48,8 @@ cache_read :: proc(
 	body: [dynamic]u8,
 	ok: bool,
 ) {
-	dir, has_dir := cache_directory(prefix)
-	if !has_dir {return nil, false}
-	defer delete(dir)
-	path := fmt.aprintf("%s/%016x", dir, url_key(address))
+	path, has_path := cache_path(prefix, address)
+	if !has_path {return nil, false}
 	defer delete(path)
 	if ttl > 0 {
 		written, time_error := os.modification_time_by_path(path)
@@ -59,22 +65,43 @@ cache_read :: proc(
 
 cache_write :: proc(prefix: string, address: string, body: []u8) {
 	if len(body) == 0 {return}
-	dir, has_dir := cache_directory(prefix)
-	if !has_dir {return}
-	defer delete(dir)
-	path := fmt.aprintf("%s/%016x", dir, url_key(address))
+	path, has_path := cache_path(prefix, address)
+	if !has_path {return}
 	defer delete(path)
-	_ = os.write_entire_file_from_bytes(path, body)
+	// Write beside the target and rename into place, so a crash can never
+	// leave a half body that a later read would trust.
+	temp := fmt.aprintf("%s.tmp", path)
+	defer delete(temp)
+	if os.write_entire_file_from_bytes(temp, body) != nil {return}
+	_ = os.rename(temp, path)
 }
 
 // Invalid decoded covers must not remain in the immutable-image cache.
 cache_remove :: proc(prefix, address: string) {
-	dir, ok := cache_directory(prefix)
+	path, ok := cache_path(prefix, address)
 	if !ok {return}
-	defer delete(dir)
-	path := fmt.aprintf("%s/%016x", dir, url_key(address))
 	defer delete(path)
 	_ = os.remove(path)
+}
+
+// Read-time TTLs only hide old bodies, so the api directory would otherwise
+// grow forever. Swept once when the library worker starts.
+cache_prune :: proc(prefix: string, max_age: time.Duration) {
+	dir, has_dir := cache_directory(prefix)
+	if !has_dir {return}
+	defer delete(dir)
+	arena: virtual.Arena
+	if virtual.arena_init_growing(&arena) != nil {return}
+	defer virtual.arena_destroy(&arena)
+	entries, read_error := os.read_directory_by_path(dir, -1, virtual.arena_allocator(&arena))
+	if read_error != nil {return}
+	removed := 0
+	for entry in entries {
+		if entry.type == .Directory || time.since(entry.modification_time) <= max_age {continue}
+		path := fmt.aprintf("%s/%s", dir, entry.name, allocator = virtual.arena_allocator(&arena))
+		if os.remove(path) == nil {removed += 1}
+	}
+	if removed > 0 {diagnostic.writef("library cache pruned prefix=%s files=%d", prefix, removed)}
 }
 
 // One cached HTTPS GET. `prefix` keeps API entries and covers apart.
@@ -85,6 +112,7 @@ cached_get :: proc(
 	ttl: time.Duration = API_TTL,
 	reuse: rawptr = nil,
 	stale: time.Duration = 0,
+	cache_only: bool = false,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -95,6 +123,10 @@ cached_get :: proc(
 		return cached, 200, true
 	}
 	if prefix == "cover" {diagnostic.cover_cache_result(false)}
+	if cache_only {
+		if older, found := cache_read(prefix, address, stale); found {return older, 200, true}
+		return nil, 0, false
+	}
 	fresh, code, fetched := http.get(address, options, reuse)
 	if fetched && code == 200 {
 		cache_write(prefix, address, fresh[:])
@@ -117,6 +149,7 @@ api_get :: proc(
 	retry_after: ^int = nil,
 	ttl: time.Duration = API_TTL,
 	stale: time.Duration = API_STALE,
+	cache_only: bool = false,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -129,6 +162,7 @@ api_get :: proc(
 		ttl,
 		reuse,
 		stale,
+		cache_only,
 	)
 }
 

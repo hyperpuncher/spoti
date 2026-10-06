@@ -116,6 +116,8 @@ Client :: struct {
 
 run :: proc(pointer: rawptr) {
 	client := (^Client)(pointer)
+	// Read-time TTLs only hide old bodies, so sweep them once at startup.
+	cache_prune("api", API_STALE)
 	// One easy handle for the worker's lifetime keeps TCP/TLS sessions
 	// alive across sequential API requests. Never shared with the cover
 	// worker; easy handles are thread-confined.
@@ -530,28 +532,37 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	// Clone before releasing the current detail: discography cards can borrow
 	// their strings from that arena. Keep the card cover through hero loading.
 	next: Detail
-	if virtual.arena_init_growing(&next.arena) == nil {
-		allocator := virtual.arena_allocator(&next.arena)
-		next.ready = true
-		next.source = source
-		next.id = strings.clone(id, allocator)
-		next.name = strings.clone(preview.name, allocator)
-		next.subtitle = strings.clone(preview.subtitle, allocator)
-		next.year = strings.clone(preview.year, allocator)
-		next.image = strings.clone(preview.image, allocator)
-		next.image_preview = strings.clone(preview.image, allocator)
-		next.image_small = strings.clone(preview.image, allocator)
-		next.total = preview.total
-		next.generation = client.detail.generation + 1
-		switch source {
-		case .Playlist, .Liked:
-			next.label = strings.clone("Playlist", allocator)
-		case .Album:
-			next.label = strings.clone("Album", allocator)
-		case .Artist:
-			next.label = strings.clone("Artist", allocator)
+	warm, _, warm_ok := fetch_detail("", source, id, cache_only = true)
+	if warm_ok && warm.rows_error == 0 {
+		// The page is already on disk, so it opens with its rows in place.
+		// The queued request above still revalidates it in the background.
+		next = warm
+		next.image_preview = strings.clone(preview.image, virtual.arena_allocator(&next.arena))
+	} else {
+		if warm_ok {free_detail(&warm)}
+		if virtual.arena_init_growing(&next.arena) == nil {
+			allocator := virtual.arena_allocator(&next.arena)
+			next.ready = true
+			next.source = source
+			next.id = strings.clone(id, allocator)
+			next.name = strings.clone(preview.name, allocator)
+			next.subtitle = strings.clone(preview.subtitle, allocator)
+			next.year = strings.clone(preview.year, allocator)
+			next.image = strings.clone(preview.image, allocator)
+			next.image_preview = strings.clone(preview.image, allocator)
+			next.image_small = strings.clone(preview.image, allocator)
+			next.total = preview.total
+			switch source {
+			case .Playlist, .Liked:
+				next.label = strings.clone("Playlist", allocator)
+			case .Album:
+				next.label = strings.clone("Album", allocator)
+			case .Artist:
+				next.label = strings.clone("Artist", allocator)
+			}
 		}
 	}
+	next.generation = client.detail.generation + 1
 	request_id := strings.clone(id)
 	move_detail(&client.detail, &next)
 	delete(client.detail_request_id)
