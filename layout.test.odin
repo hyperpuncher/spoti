@@ -189,7 +189,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					)
 					testing.expect(t, !clay.GetElementData(clay.ID("toolbar_home")).found)
 					testing.expect(t, !clay.GetElementData(clay.ID("toolbar_search")).found)
-					testing.expect(t, clay.GetElementData(clay.ID("toolbar_library")).found)
+					testing.expect(t, clay.GetElementData(clay.ID("toolbar_forward")).found)
 					input := clay.GetElementData(clay.ID("track_input"))
 					input_center := input.boundingBox.x + input.boundingBox.width / 2
 					testing.expect(

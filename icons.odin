@@ -20,7 +20,6 @@ Icon_Tint :: enum {
 ICON_NAMES :: []string {
 	"house",
 	"search",
-	"library",
 	"layout-grid",
 	"list",
 	"play",

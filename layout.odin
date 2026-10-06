@@ -106,6 +106,8 @@ View :: struct {
 	input_active:  bool,
 	pinned:        bool,
 	sign_in:       bool, // a library browser approval is waiting for a click
+	can_back:      bool,
+	can_forward:   bool,
 	search_mode:   bool,
 	search_kind:   library.Kind,
 	menu_open:     bool,
@@ -198,8 +200,9 @@ toolbar_button :: proc(
 	tint: Icon_Tint,
 	fx: ^Button_Fx_Ctx,
 	d: f32,
+	enabled: bool = true,
 ) {
-	scale, hovered := button_fx(fx, id)
+	scale, hovered := button_fx(fx, id, enabled)
 	if clay.UI_WithId(clay.ID(id))(
 	{
 		layout = {
@@ -226,8 +229,24 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 		backgroundColor = BG,
 	},
 	) {
-		toolbar_button("toolbar_back", "chevron-left", textures, .Muted, fx, d)
-		toolbar_button("toolbar_library", "library", textures, .Muted, fx, d)
+		toolbar_button(
+			"toolbar_back",
+			"chevron-left",
+			textures,
+			view.can_back ? .Muted : .Disabled,
+			fx,
+			d,
+			view.can_back,
+		)
+		toolbar_button(
+			"toolbar_forward",
+			"chevron-right",
+			textures,
+			view.can_forward ? .Muted : .Disabled,
+			fx,
+			d,
+			view.can_forward,
+		)
 		if clay.UI_WithId(clay.ID("track_input"))(
 		{
 			layout = {

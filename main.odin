@@ -429,6 +429,8 @@ main :: proc() {
 	settings_dirty := false
 	order_dirty := false
 	detail_pinned := false
+	nav: Nav
+	nav_back_pressed, nav_forward_pressed: bool
 	library_prompt_shown := false
 	playback_prompt_opened := false
 	page_counts: [library.Kind]int
@@ -488,6 +490,7 @@ main :: proc() {
 		delete(input)
 		free_settings(&settings)
 		free_context_menu(&menu)
+		nav_free_all(&nav)
 		delete(button_anims)
 		if mpris_active {mpris.close()}
 	}
@@ -585,6 +588,10 @@ main :: proc() {
 								search_pending = false
 								delete(input)
 								input = {}
+								nav_replace(
+									&nav,
+									nav_capture(&library_client, filter, false, search_kind, ""),
+								)
 							}
 						case .BACKSPACE:
 							if len(input) > 0 {
@@ -634,6 +641,13 @@ main :: proc() {
 								search_pending = false
 								if library.search(&library_client, input) {
 									search_mode = true
+									nav_record_search(
+										&nav,
+										&library_client,
+										filter,
+										search_kind,
+										input,
+									)
 								}
 							}
 						}
@@ -645,6 +659,10 @@ main :: proc() {
 							stop_pressed = true
 						case .SPACE:
 							space_pressed = true
+						case .LEFT:
+							if .LALT in event.key.mod {nav_back_pressed = true}
+						case .RIGHT:
+							if .LALT in event.key.mod {nav_forward_pressed = true}
 						case .K:
 							mod := event.key.mod
 							if .LCTRL in mod || .RCTRL in mod || .LGUI in mod || .RGUI in mod {
@@ -690,6 +708,10 @@ main :: proc() {
 					} else if event.button.button == sdl.BUTTON_RIGHT {
 						mouse_right = ui.mouse_position(&state, event.button.x, event.button.y)
 						right_clicked = true
+					} else if event.button.button == sdl.BUTTON_X1 {
+						nav_back_pressed = true
+					} else if event.button.button == sdl.BUTTON_X2 {
+						nav_forward_pressed = true
 					}
 				}
 				if !sdl.PollEvent(&event) {break}
@@ -697,6 +719,31 @@ main :: proc() {
 		}
 		if !running {break}
 		t0 := sdl.GetTicksNS()
+		if nav_back_pressed || nav_forward_pressed {
+			state: Nav_State
+			moved := false
+			if nav_back_pressed {
+				nav_back_pressed = false
+				state, moved = nav_back(&nav)
+			} else {
+				nav_forward_pressed = false
+				state, moved = nav_forward(&nav)
+			}
+			if moved {
+				nav_restore(
+					state,
+					&library_client,
+					&settings,
+					&settings_dirty,
+					&filter,
+					&search_mode,
+					&search_kind,
+					&input,
+					&detail_pinned,
+				)
+				redraw = true
+			}
+		}
 		if input_changed {
 			input_changed = false
 			trimmed := strings.trim_space(input)
@@ -706,11 +753,13 @@ main :: proc() {
 				search_pending = false
 				delete(input)
 				input = {}
+				nav_replace(&nav, nav_capture(&library_client, filter, false, search_kind, ""))
 			} else if _, valid := track.parse_id(trimmed); valid {
 				// A pasted link waits for Enter; never catalog-search it.
 				library.clear_search(&library_client)
 				search_mode = false
 				search_pending = false
+				nav_replace(&nav, nav_capture(&library_client, filter, false, search_kind, input))
 			} else {
 				search_pending = true
 				search_deadline = sdl.GetTicksNS() + SEARCH_DEBOUNCE_NS
@@ -720,6 +769,7 @@ main :: proc() {
 			search_pending = false
 			if library.search(&library_client, input) {
 				search_mode = true
+				nav_record_search(&nav, &library_client, filter, search_kind, input)
 			}
 		}
 		if preload_worker != nil && thread.is_done(preload_worker) {
@@ -793,6 +843,9 @@ main :: proc() {
 		}
 		if restore_pending && library_client.state == .Ready {
 			restore_pending = false
+			// The library root is always the first history entry, so a restored
+			// collection lands on top of it and back closes it again.
+			nav_commit(&nav, nav_capture(&library_client, filter, search_mode, search_kind, input))
 			if !library_client.detail.ready &&
 			   !library_client.detail_loading &&
 			   len(settings.last_collection) > 0 {
@@ -805,6 +858,10 @@ main :: proc() {
 					}
 					if library.open_detail(&library_client, source, id, preview) {
 						detail_pinned = settings_is_pinned(&settings, settings.last_collection)
+						nav_commit(
+							&nav,
+							nav_capture(&library_client, filter, search_mode, search_kind, input),
+						)
 					}
 				}
 			}
@@ -1039,6 +1096,8 @@ main :: proc() {
 			pinned        = detail_pinned,
 			search_mode   = search_mode,
 			sign_in       = library_prompt,
+			can_back      = nav_can_back(&nav),
+			can_forward   = nav_can_forward(&nav),
 			search_kind   = search_kind,
 			menu_open     = menu.open,
 			menu_x        = menu.point.x,
@@ -1229,21 +1288,11 @@ main :: proc() {
 				if library.restart(&library_client) {redraw = true}
 			} else {
 				handled := false
-				if hit("toolbar_back", mouse_click) || hit("toolbar_library", mouse_click) {
-					if search_mode {
-						library.clear_search(&library_client)
-						search_mode = false
-						search_pending = false
-						delete(input)
-						input = {}
-						if input_active {
-							input_active = false
-							_ = sdl.StopTextInput(state.window)
-						}
-					} else {
-						library.clear_detail(&library_client)
-						detail_pinned = false
-					}
+				if hit("toolbar_back", mouse_click) {
+					nav_back_pressed = true
+					handled = true
+				} else if hit("toolbar_forward", mouse_click) {
+					nav_forward_pressed = true
 					handled = true
 				} else if hit("track_input", mouse_click) {
 					if !input_active {input_active = sdl.StartTextInput(state.window)}
@@ -1254,7 +1303,19 @@ main :: proc() {
 						search_tabs := SEARCH_TABS
 						for index in 0 ..< len(search_tabs) {
 							if hit_index("chip", mouse_click, u32(index)) {
-								search_kind = search_tabs[index]
+								if search_kind != search_tabs[index] {
+									search_kind = search_tabs[index]
+									nav_commit(
+										&nav,
+										nav_capture(
+											&library_client,
+											filter,
+											search_mode,
+											search_kind,
+											input,
+										),
+									)
+								}
 								handled = true
 								break
 							}
@@ -1263,9 +1324,21 @@ main :: proc() {
 						library_tabs := LIBRARY_TABS
 						for index in 0 ..< len(library_tabs) {
 							if hit_index("chip", mouse_click, u32(index)) {
-								filter = library_tabs[index]
-								settings.tab = filter
-								settings_dirty = true
+								if filter != library_tabs[index] {
+									filter = library_tabs[index]
+									settings.tab = filter
+									settings_dirty = true
+									nav_commit(
+										&nav,
+										nav_capture(
+											&library_client,
+											filter,
+											search_mode,
+											search_kind,
+											input,
+										),
+									)
+								}
 								retry_failed_covers(&textures)
 								handled = true
 								break
@@ -1300,6 +1373,16 @@ main :: proc() {
 							if handled {
 								retry_failed_covers(&textures)
 								detail_pinned = settings_is_pinned(&settings, entry.uri)
+								nav_commit(
+									&nav,
+									nav_capture(
+										&library_client,
+										filter,
+										search_mode,
+										search_kind,
+										input,
+									),
+								)
 							}
 						}
 						break
