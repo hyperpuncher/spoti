@@ -329,7 +329,7 @@ fetch_index :: proc(
 	defer delete(address)
 	bytes: [dynamic]u8
 	fetched: bool
-	bytes, status, fetched = api_get(access, address, 512 * 1024, reuse, retry_after)
+	bytes, status, fetched = api_get(access, address, 512 * 1024, reuse, retry_after, PAGE_TTL)
 	if !fetched {return {}, status, false}
 	defer delete(bytes)
 	if status != 200 {return {}, status, false}

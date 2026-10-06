@@ -1,6 +1,7 @@
 // Small on-disk cache for Spotify Web API responses and cover images.
 // Only 200 OK bodies reach the cache, so no token, error body or signed CDN
-// URL is ever stored. API entries expire quickly; covers are immutable.
+// URL is ever stored. Library pages stay fresh for hours and fall back to the
+// last good body when the api refuses; covers are immutable.
 package library
 
 import diagnostic "../../diagnostic"
@@ -10,6 +11,12 @@ import "core:os"
 import "core:time"
 
 API_TTL :: 5 * time.Minute
+// Library index pages change slowly, so a body inside PAGE_TTL is served
+// straight from disk and a relaunch costs no api requests at all.
+PAGE_TTL :: 6 * time.Hour
+// When the api refuses (quota, rate limit, offline) the last good body still
+// beats an empty tab, so any cached api body younger than this is a fallback.
+API_STALE :: 30 * 24 * time.Hour
 COVER_TTL :: 30 * 24 * time.Hour
 
 cache_directory :: proc(prefix: string) -> (dir: string, ok: bool) {
@@ -77,6 +84,7 @@ cached_get :: proc(
 	options: http.Options = {},
 	ttl: time.Duration = API_TTL,
 	reuse: rawptr = nil,
+	stale: time.Duration = 0,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -88,9 +96,18 @@ cached_get :: proc(
 	}
 	if prefix == "cover" {diagnostic.cover_cache_result(false)}
 	fresh, code, fetched := http.get(address, options, reuse)
-	if !fetched {return nil, code, false}
-	if code == 200 {cache_write(prefix, address, fresh[:])}
-	return fresh, code, true
+	if fetched && code == 200 {
+		cache_write(prefix, address, fresh[:])
+		return fresh, code, true
+	}
+	delete(fresh)
+	if stale > 0 {
+		if older, found := cache_read(prefix, address, stale); found {
+			diagnostic.writef("library api reused stale body status=%d", code)
+			return older, 200, true
+		}
+	}
+	return nil, code, fetched
 }
 
 api_get :: proc(
@@ -98,6 +115,8 @@ api_get :: proc(
 	limit: int,
 	reuse: rawptr = nil,
 	retry_after: ^int = nil,
+	ttl: time.Duration = API_TTL,
+	stale: time.Duration = API_STALE,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -107,8 +126,9 @@ api_get :: proc(
 		"api",
 		address,
 		{bearer = access, limit = limit, retry_after = retry_after},
-		API_TTL,
+		ttl,
 		reuse,
+		stale,
 	)
 }
 
