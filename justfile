@@ -8,8 +8,12 @@ _prepare:
 	./scripts/build-icons.sh
 	./scripts/build-mpris.sh
 
-# Optimized portable release build. Keep runtime safety checks enabled.
+# Fast dev build with default optimization.
 build: _prepare
+	odin build . -out:build/spoti
+
+# Optimized portable release build. Keep runtime safety checks enabled.
+release: _prepare
 	odin build . -out:build/spoti -o:speed
 
 run *args: _prepare
