@@ -84,6 +84,13 @@ track_skeleton :: proc(index: int, d: f32) {
 			cornerRadius = clay.CornerRadiusAll(7 * d),
 		},
 		) {}
+		if clay.UI()(
+		{
+			layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(14 * d)}},
+			backgroundColor = CARD,
+			cornerRadius = clay.CornerRadiusAll(7 * d),
+		},
+		) {}
 	}
 }
 
@@ -283,10 +290,11 @@ sidebar :: proc(
 		layout = {
 			layoutDirection = .TopToBottom,
 			sizing = {width = clay.SizingFixed(width * d), height = clay.SizingGrow({})},
-			padding = clay.PaddingAll(u16(18 * d)),
+			padding = {left = u16(18 * d), right = u16(18 * d), top = u16(18 * d)},
 			childGap = u16(18 * d),
 		},
 		backgroundColor = SIDEBAR,
+		cornerRadius = clay.CornerRadius{topRight = 12 * d},
 	},
 	) {
 		if clay.UI()({layout = {childGap = u16(8 * d), childAlignment = {y = .Center}}}) {
@@ -395,26 +403,47 @@ track_table :: proc(
 		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 	},
 	) {
-		// Header: # / TITLE on the left, the duration clock on the right.
+		// Header mirrors the row grid so each label sits over its column.
 		if clay.UI()(
 		{
 			layout = {
 				sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(36 * d)},
-				padding = {left = u16(12 * d), right = u16(24 * d)},
+				padding = {left = u16(12 * d), right = u16(92 * d)},
 				childAlignment = {y = .Center},
 				childGap = u16(18 * d),
 			},
 			border = {color = CARD, width = {bottom = 1}},
 		},
 		) {
-			clay.Text("#", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
-			clay.Text("TITLE", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
-			if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {}
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {width = clay.SizingFixed(24 * d)},
+					childAlignment = {x = .Right},
+				},
+			},
+			) {
+				clay.Text("#", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+			}
+			if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {
+				clay.Text("TITLE", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+			}
+			if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {
+				clay.Text("ARTIST", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+			}
 			if clay.UI()(
 			{
 				layout = {
 					sizing = {width = clay.SizingFixed(56 * d)},
 					childAlignment = {x = .Right, y = .Center},
+				},
+				floating = {
+					offset = {-24 * d, 0},
+					zIndex = 1,
+					attachment = {element = .RightCenter, parent = .RightCenter},
+					pointerCaptureMode = .Passthrough,
+					attachTo = .Parent,
+					clipTo = .AttachedParent,
 				},
 			},
 			) {
@@ -466,14 +495,13 @@ track_table :: proc(
 						clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
 					)
 				}
-				// The middle column grows so the duration stays at the right edge.
-				// Slot-keyed like card clips: one stable scroll entry per
-				// visible row instead of one per absolute index per frame.
+				// The title column grows so the artist and duration stay pinned
+				// to the right edge. Slot-keyed like card clips: one stable
+				// scroll entry per visible row instead of one per absolute index.
 				if clay.UI_WithId(clay.ID("row_clip", u32(index - visible.first)))(
 				{
 					layout = {
 						sizing = {width = clay.SizingGrow({})},
-						childGap = u16(10 * d),
 						childAlignment = {y = .Center},
 					},
 					clip = {horizontal = true},
@@ -488,7 +516,16 @@ track_table :: proc(
 							wrapMode = .None,
 						},
 					)
-					clay.Text("•", clay.TextElementConfig{fontSize = 15, textColor = MUTED})
+				}
+				if clay.UI_WithId(clay.ID("artist_clip", u32(index - visible.first)))(
+				{
+					layout = {
+						sizing = {width = clay.SizingGrow({})},
+						childAlignment = {y = .Center},
+					},
+					clip = {horizontal = true},
+				},
+				) {
 					clay.Text(
 						row.artists,
 						clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
@@ -646,6 +683,7 @@ detail_page :: proc(
 			return
 		}
 		// Spotify-style hero: substantial artwork and a strong, bold title.
+		// No panel behind it; the cover floats on the page with a soft shadow.
 		hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
 		if clay.UI()(
 		{
@@ -658,15 +696,60 @@ detail_page :: proc(
 				childGap = u16(24 * d),
 				childAlignment = {y = .Center},
 			},
-			backgroundColor = PANEL,
-			cornerRadius = clay.CornerRadiusAll(10 * d),
 		},
 		) {
 			cover := detail.image
 			if textures.by_key[cover_key(cover)] == nil && len(detail.image_preview) > 0 {
 				cover = detail.image_preview
 			}
-			cover_element(textures, cover, hero_cover, 10 * d)
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {
+						width = clay.SizingFixed(hero_cover),
+						height = clay.SizingFixed(hero_cover),
+					},
+				},
+			},
+			) {
+				if clay.UI()(
+				{
+					layout = {
+						sizing = {
+							width = clay.SizingFixed(hero_cover + 28 * d),
+							height = clay.SizingFixed(hero_cover + 28 * d),
+						},
+					},
+					backgroundColor = {0, 0, 0, 60},
+					cornerRadius = clay.CornerRadiusAll(18 * d),
+					floating = {
+						offset = {-14 * d, -6 * d},
+						zIndex = -1,
+						pointerCaptureMode = .Passthrough,
+						attachTo = .Parent,
+					},
+				},
+				) {}
+				if clay.UI()(
+				{
+					layout = {
+						sizing = {
+							width = clay.SizingFixed(hero_cover + 12 * d),
+							height = clay.SizingFixed(hero_cover + 12 * d),
+						},
+					},
+					backgroundColor = {0, 0, 0, 120},
+					cornerRadius = clay.CornerRadiusAll(14 * d),
+					floating = {
+						offset = {-6 * d, 0},
+						zIndex = -1,
+						pointerCaptureMode = .Passthrough,
+						attachTo = .Parent,
+					},
+				},
+				) {}
+				cover_element(textures, cover, hero_cover, 10 * d)
+			}
 			if clay.UI()(
 			{
 				layout = {

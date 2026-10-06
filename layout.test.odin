@@ -191,10 +191,11 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					testing.expect(t, !clay.GetElementData(clay.ID("toolbar_search")).found)
 					testing.expect(t, clay.GetElementData(clay.ID("toolbar_library")).found)
 					input := clay.GetElementData(clay.ID("track_input"))
+					input_center := input.boundingBox.x + input.boundingBox.width / 2
 					testing.expect(
 						t,
-						input.found && input.boundingBox.x < 120 * d,
-						"removed buttons must not leave empty toolbar space",
+						input.found && math.abs(input_center - 640 * d) < 120 * d,
+						"toolbar search and buttons must sit centered",
 					)
 					testing.expect(
 						t,

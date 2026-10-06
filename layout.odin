@@ -154,7 +154,7 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 		layout = {
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(58 * d)},
 			padding = {left = u16(10 * d), right = u16(10 * d)},
-			childAlignment = {y = .Center},
+			childAlignment = {x = .Center, y = .Center},
 			childGap = u16(4 * d),
 		},
 		backgroundColor = BG,
@@ -530,6 +530,10 @@ layout :: proc(
 				&visible,
 			)
 		}
+		// Breathing room between the content row and the player bar.
+		if clay.UI()(
+		{layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(8 * d)}}},
+		) {}
 		player_bar(view, textures, fx, d)
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
