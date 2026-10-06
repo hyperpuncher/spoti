@@ -509,6 +509,7 @@ layout :: proc(
 				viewport_height,
 				card_text_height,
 				d,
+				dt,
 			)
 			if clay.UI_WithId(clay.ID("sidebar_handle"))(
 			{

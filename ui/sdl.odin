@@ -268,6 +268,60 @@ draw_texture :: proc(state: ^State, texture: ^sdl.Texture, rect: sdl.FRect) {
 	_ = sdl.RenderTexture(state.renderer, texture, nil, &area)
 }
 
+// Scroll-edge fade strips: white pixels carrying a Bayer-dithered alpha
+// ramp. Stretched with linear filtering, the dither dissolves into a smooth
+// gradient with no banding on 8-bit outputs. The caller tints via color mod.
+FADE_TEX_W :: 8
+// Baked at the zone height so texels map 1:1 to screen rows and the
+// ordered dither survives instead of being averaged into clean steps.
+FADE_TEX_H :: 16
+FADE_DITHER :: 8.0
+
+// Ordered 8x8 Bayer threshold without the 64-entry table. Each level adds
+// one coarse quadrant offset below the finer bits, ending at the 2x2
+// base. Pinned by fade_bayer_matches_reference below.
+bayer_value :: proc(x, y: int) -> u8 {
+	quad := [4]int{0, 2, 3, 1}
+	xx, yy := x & 7, y & 7
+	value, mult, size := 0, 1, 8
+	for _ in 0 ..< 2 {
+		size /= 2
+		qx := 0
+		if xx >= size {qx = 1; xx -= size}
+		qy := 0
+		if yy >= size {qy = 1; yy -= size}
+		value += quad[qx | (qy << 1)] * mult
+		mult *= 4
+	}
+	return u8(value + quad[xx | (yy << 1)] * mult)
+}
+
+make_fade_texture :: proc(state: ^State, flip: bool) -> ^sdl.Texture {
+	pixels: [FADE_TEX_W * FADE_TEX_H * 4]u8
+	for y in 0 ..< FADE_TEX_H {
+		t := 1 - f32(y) / f32(FADE_TEX_H - 1)
+		if flip {t = 1 - t}
+		// Cubic: flat landing at clear so the fade melts into content,
+		// steep finish so almost no solid lip lingers at the edge.
+		t = t * t * t
+		for x in 0 ..< FADE_TEX_W {
+			threshold := (f32(bayer_value(x, y)) - 31.5) / 63 * FADE_DITHER
+			alpha := u8(clamp(t * 255 + threshold, 0, 255))
+			// Pin the clear tail so the stretched strip meets content with
+			// no dither residue line. The solid head needs no pin: the
+			// curve reaches it naturally on the last texel.
+			tail := flip ? y : FADE_TEX_H - 1 - y
+			if tail < 2 {alpha = 0}
+			base := (y * FADE_TEX_W + x) * 4
+			pixels[base + 0] = 255
+			pixels[base + 1] = 255
+			pixels[base + 2] = 255
+			pixels[base + 3] = alpha
+		}
+	}
+	return create_texture(state, pixels[:], FADE_TEX_W, FADE_TEX_H)
+}
+
 // Rounded variants used by the Clay renderer, which carries a radius per box.
 // A solid rounded box is drawn from a supersampled alpha mask, so its curved
 // edges are antialiased; SDL3's renderer has no multisampling of its own.

@@ -137,6 +137,66 @@ list_spacer :: proc(height: f32) {
 	)
 }
 
+// Scroll-edge fades over the library grid while content overflows past
+// them. Dithered ramp strips stretched over each zone. Opacity eases in
+// and out instead of popping. Only overflowed edges draw.
+FADE_HEIGHT :: 16
+FADE_RATE :: 12.0
+
+approach_alpha :: proc(current, target, dt: f32) -> f32 {
+	next := current + (target - current) * min(1, dt * FADE_RATE)
+	if abs(next - target) < 0.01 {return target}
+	return next
+}
+
+scroll_fades :: proc(id: string, textures: ^Textures, grid_width, dt, d: f32) {
+	top_target, bottom_target: f32
+	data := clay.GetScrollContainerData(clay.ID(id))
+	if data.found && data.scrollPosition != nil {
+		pos := data.scrollPosition.y
+		height := data.scrollContainerDimensions.height
+		if pos < -1 {top_target = 1}
+		if data.contentDimensions.height + pos > height + 1 {bottom_target = 1}
+		fade_height := FADE_HEIGHT * d
+		fade_image(
+			textures,
+			textures.fade_top,
+			textures.fade_top_alpha,
+			grid_width,
+			fade_height,
+			0,
+		)
+		fade_image(
+			textures,
+			textures.fade_bottom,
+			textures.fade_bottom_alpha,
+			grid_width,
+			fade_height,
+			height - fade_height,
+		)
+	}
+	textures.fade_top_alpha = approach_alpha(textures.fade_top_alpha, top_target, dt)
+	textures.fade_bottom_alpha = approach_alpha(textures.fade_bottom_alpha, bottom_target, dt)
+}
+
+fade_image :: proc(textures: ^Textures, key: u64, alpha, width, height, y: f32) {
+	texture := textures.by_key[key]
+	if texture == nil || alpha <= 0.005 {return}
+	sdl.SetTextureAlphaMod(texture, u8(alpha * 255))
+	if clay.UI()(
+	{
+		layout = {sizing = {width = clay.SizingFixed(width), height = clay.SizingFixed(height)}},
+		image = {imageData = rawptr(uintptr(key))},
+		floating = {
+			offset = {0, y},
+			zIndex = 1,
+			pointerCaptureMode = .Passthrough,
+			attachTo = .Parent,
+		},
+	},
+	) {}
+}
+
 // Three green bars replace the track number on the current row. Heights
 // oscillate while audio plays and rest at fixed steps when paused.
 playing_bars :: proc(playing: bool, d: f32) {
@@ -281,7 +341,7 @@ sidebar :: proc(
 	active: library.Kind,
 	searching: bool,
 	textures: ^Textures,
-	width, viewport_height, card_text_height, d: f32,
+	width, viewport_height, card_text_height, d, dt: f32,
 ) -> (
 	visible: Visible_Items,
 ) {
@@ -365,6 +425,7 @@ sidebar :: proc(
 				}
 			}
 			list_spacer(visible.after)
+			scroll_fades("library_grid", textures, (width - 36) * d, dt, d)
 		}
 	}
 	return

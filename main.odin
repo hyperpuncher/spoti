@@ -381,6 +381,7 @@ main :: proc() {
 		requested = make(map[u64]Cover_Request_State),
 	}
 	load_icons(&state, &textures)
+	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
 	mpris_active := mpris.start(WAKE_EVENT != 0 ? wake_mpris : nil)
 	library_client: library.Client
@@ -492,7 +493,10 @@ main :: proc() {
 			if pending {wait_ms = 40; break}
 		}
 		if preload_worker != nil && stage != .Playing {wait_ms = 40}
-		if fx_animating {wait_ms = 0}
+		fades_animating :=
+			(textures.fade_top_alpha != 0 && textures.fade_top_alpha != 1) ||
+			(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1)
+		if fx_animating || fades_animating {wait_ms = 0}
 		if first_frame {wait_ms = 0}
 		// If the wake event could not be registered, poll the bus instead.
 		if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
@@ -505,7 +509,7 @@ main :: proc() {
 			wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
 		}
 		has_event := sdl.WaitEventTimeout(&event, wait_ms)
-		redraw := has_event || first_frame || fx_animating
+		redraw := has_event || first_frame || fx_animating || fades_animating
 		first_frame = false
 		if has_event {
 			for {

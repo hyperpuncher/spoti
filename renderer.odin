@@ -17,8 +17,29 @@ Cover_Request_State :: struct {
 }
 
 Textures :: struct {
-	by_key:    map[u64]^sdl.Texture,
-	requested: map[u64]Cover_Request_State,
+	by_key:            map[u64]^sdl.Texture,
+	requested:         map[u64]Cover_Request_State,
+	fade_top:          u64,
+	fade_bottom:       u64,
+	fade_top_alpha:    f32,
+	fade_bottom_alpha: f32,
+}
+
+// Scroll-edge fades baked once as dithered ramp strips, keyed by texture
+// address like covers and freed with them. Tinted panel-dark at upload.
+load_fades :: proc(state: ^ui.State, textures: ^Textures) {
+	top := ui.make_fade_texture(state, false)
+	if top != nil {
+		_ = sdl.SetTextureColorMod(top, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
+		textures.by_key[u64(uintptr(top))] = top
+		textures.fade_top = u64(uintptr(top))
+	}
+	bottom := ui.make_fade_texture(state, true)
+	if bottom != nil {
+		_ = sdl.SetTextureColorMod(bottom, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
+		textures.by_key[u64(uintptr(bottom))] = bottom
+		textures.fade_bottom = u64(uintptr(bottom))
+	}
 }
 
 // Keep the previous artwork visible until the requested replacement is uploaded.
