@@ -35,6 +35,7 @@ Detail :: struct {
 	label:         string, // Album, Playlist, Artist or Liked Songs
 	name:          string,
 	subtitle:      string,
+	year:          string, // album release year, e.g. "2024"
 	image:         string,
 	image_small:   string,
 	image_preview: string, // selected card cover, retained until hero texture is ready
@@ -134,17 +135,10 @@ fetch_detail :: proc(
 		detail.label = strings.clone("Album", allocator)
 		detail.name = strings.clone(header.name, allocator)
 		detail.subtitle = joined_artists(header.artists, allocator)
+		detail.year = release_year(header.release_date, allocator)
 		detail.image = strings.clone(cover_url_largest(header.images), allocator)
 		detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
 		detail.total = header.total_tracks
-		if len(header.release_date) >= 4 {
-			detail.subtitle = fmt.aprintf(
-				"%s · %s",
-				detail.subtitle,
-				header.release_date[:4],
-				allocator = allocator,
-			)
-		}
 	case .Artist:
 		header, header_status, header_ok := fetch_header(
 			Raw_Artist,
@@ -449,7 +443,7 @@ parse_artist_albums :: proc(
 				name = strings.clone(album.name, allocator),
 				uri = strings.clone(album.uri, allocator),
 				image = strings.clone(cover_url(album.images), allocator),
-				subtitle = len(album.release_date) >= 4 ? strings.clone(album.release_date[:4], allocator) : "",
+				subtitle = release_year(album.release_date, allocator),
 				total = album.total_tracks,
 			},
 		)

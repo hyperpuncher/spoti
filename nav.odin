@@ -43,6 +43,7 @@ nav_capture :: proc(
 				uri = detail_card_uri(detail),
 				image = detail.image,
 				subtitle = detail.subtitle,
+				year = detail.year,
 				total = detail.total,
 			},
 			context.allocator,
@@ -57,6 +58,7 @@ nav_free_state :: proc(state: Nav_State) {
 	delete(state.detail.uri)
 	delete(state.detail.image)
 	delete(state.detail.subtitle)
+	delete(state.detail.year)
 }
 
 nav_drop_forward :: proc(nav: ^Nav) {

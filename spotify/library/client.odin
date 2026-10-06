@@ -537,6 +537,7 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 		next.id = strings.clone(id, allocator)
 		next.name = strings.clone(preview.name, allocator)
 		next.subtitle = strings.clone(preview.subtitle, allocator)
+		next.year = strings.clone(preview.year, allocator)
 		next.image = strings.clone(preview.image, allocator)
 		next.image_preview = strings.clone(preview.image, allocator)
 		next.image_small = strings.clone(preview.image, allocator)
@@ -611,6 +612,7 @@ sync_library_membership :: proc(client: ^Client, source: Source, id: string, lik
 				uri = strings.clone(uri, allocator),
 				image = strings.clone(detail.image, allocator),
 				subtitle = strings.clone(detail.subtitle, allocator),
+				year = strings.clone(detail.year, allocator),
 				total = detail.total,
 			},
 		)

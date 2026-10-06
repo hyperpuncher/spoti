@@ -864,9 +864,18 @@ detail_page :: proc(
 					clay.TextElementConfig{fontId = 2, fontSize = 54, textColor = WHITE},
 				)
 				count_label := detail.source == .Artist ? "releases" : "songs"
+				base := detail.subtitle
+				if len(detail.year) >= 4 {
+					base = fmt.aprintf(
+						"%s · %s",
+						base,
+						detail.year,
+						allocator = context.temp_allocator,
+					)
+				}
 				metadata := fmt.aprintf(
 					"%s · %d %s",
-					detail.subtitle,
+					base,
 					detail.total,
 					count_label,
 					allocator = context.temp_allocator,
@@ -874,7 +883,7 @@ detail_page :: proc(
 				if detail.source == .Playlist && detail.rows_error != 0 {
 					metadata = fmt.aprintf(
 						"%s · tracks unavailable",
-						detail.subtitle,
+						base,
 						allocator = context.temp_allocator,
 					)
 				}

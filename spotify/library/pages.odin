@@ -24,6 +24,7 @@ Entry :: struct {
 	uri:      string,
 	image:    string, // cover URL; never a token or signed CDN URL
 	subtitle: string, // owner or artists
+	year:     string, // album release year, e.g. "2024"
 	total:    int, // track count where Spotify reports one
 }
 
@@ -48,6 +49,7 @@ clone_entry :: proc(entry: Entry, allocator: runtime.Allocator) -> Entry {
 		uri = strings.clone(entry.uri, allocator),
 		image = strings.clone(entry.image, allocator),
 		subtitle = strings.clone(entry.subtitle, allocator),
+		year = strings.clone(entry.year, allocator),
 		total = entry.total,
 	}
 }
@@ -206,7 +208,7 @@ joined_artists :: proc(artists: []Artist, allocator: runtime.Allocator) -> strin
 // imageless track still plays.
 append_card_entry :: proc(
 	items: ^[dynamic]Entry,
-	name, uri, image, subtitle: string,
+	name, uri, image, subtitle, year: string,
 	total: int,
 	allocator: runtime.Allocator,
 ) {
@@ -218,9 +220,16 @@ append_card_entry :: proc(
 			uri = strings.clone(uri, allocator),
 			image = strings.clone(image, allocator),
 			subtitle = strings.clone(subtitle, allocator),
+			year = release_year(year, allocator),
 			total = total,
 		},
 	)
+}
+
+// Spotify sends a full release date; the hero and the cards only show a year.
+release_year :: proc(date: string, allocator: runtime.Allocator) -> string {
+	if len(date) < 4 {return ""}
+	return strings.clone(date[:4], allocator)
 }
 
 append_playlist_entry :: proc(
@@ -234,6 +243,7 @@ append_playlist_entry :: proc(
 		row.uri,
 		cover_url(row.images),
 		row.owner.display_name,
+		"",
 		row.items.total,
 		allocator,
 	)
@@ -259,6 +269,7 @@ append_saved_album :: proc(
 		album.uri,
 		cover_url(album.images),
 		joined_artists(album.artists, context.temp_allocator),
+		album.release_date,
 		album.total_tracks,
 		allocator,
 	)
@@ -269,7 +280,7 @@ append_artist_entry :: proc(items: ^[dynamic]Entry, row: Artist, allocator: runt
 	uri := row.uri
 	if len(uri) ==
 	   0 {uri = fmt.aprintf("spotify:artist:%s", row.id, allocator = context.temp_allocator)}
-	append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", 0, allocator)
+	append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", "", 0, allocator)
 }
 
 append_track_entry :: proc(
