@@ -81,46 +81,33 @@ Sort :: enum {
 	Library, // Spotify's own order
 }
 
+SORT_NAMES := [Sort]string {
+	.Added   = "Recently added",
+	.Played  = "Recently played",
+	.Name    = "Name",
+	.Library = "Library order",
+}
+
+SORT_SERIALS := [Sort]string {
+	.Added   = "added",
+	.Played  = "played",
+	.Name    = "name",
+	.Library = "library",
+}
+
 sort_name :: proc(sort: Sort) -> string {
-	switch sort {
-	case .Added:
-		return "Recently added"
-	case .Played:
-		return "Recently played"
-	case .Name:
-		return "Name"
-	case .Library:
-		return "Library order"
-	}
-	return ""
+	return SORT_NAMES[sort]
 }
 
 sort_kind :: proc(name: string) -> (Sort, bool) {
-	switch name {
-	case "added":
-		return .Added, true
-	case "played":
-		return .Played, true
-	case "name":
-		return .Name, true
-	case "library":
-		return .Library, true
+	for serial, index in SORT_SERIALS {
+		if name == serial {return Sort(index), true}
 	}
 	return .Library, false
 }
 
 sort_serial :: proc(sort: Sort) -> string {
-	switch sort {
-	case .Added:
-		return "added"
-	case .Played:
-		return "played"
-	case .Name:
-		return "name"
-	case .Library:
-		return "library"
-	}
-	return "library"
+	return SORT_SERIALS[sort]
 }
 
 sort_supported :: proc(kind: library.Kind, sort: Sort) -> bool {
@@ -249,13 +236,8 @@ settings_is_pinned :: proc(settings: ^Settings, uri: string) -> bool {
 	return false
 }
 
-settings_pin_rank :: proc(settings: ^Settings, uri: string) -> int {
-	for pinned, index in settings.pinned {if pinned == uri {return index}}
-	return max(int)
-}
-
-settings_recent_rank :: proc(settings: ^Settings, uri: string) -> int {
-	for recent, index in settings.recent {if recent == uri {return index}}
+settings_rank :: proc(list: [dynamic]string, uri: string) -> int {
+	for entry, index in list {if entry == uri {return index}}
 	return max(int)
 }
 

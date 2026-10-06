@@ -27,8 +27,8 @@ sort_library_page :: proc(page: ^library.Page, kind: library.Kind, settings: ^Se
 		if fold {name = strings.to_lower(entry.name, context.temp_allocator)}
 		rated[index] = {
 			index       = index,
-			pin_rank    = settings_pin_rank(settings, entry.uri),
-			recent_rank = settings_recent_rank(settings, entry.uri),
+			pin_rank    = settings_rank(settings.pinned, entry.uri),
+			recent_rank = settings_rank(settings.recent, entry.uri),
 			added       = entry.added_at,
 			name        = name,
 		}
