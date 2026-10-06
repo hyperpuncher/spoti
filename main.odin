@@ -757,8 +757,8 @@ main :: proc() {
 			release_worker(worker, queue, &cancel, closed)
 			worker = nil
 			finished = false
-			sent_frames, sample_rate, duration_ms = 0, 0, 0
-			displayed_ms = 0
+			sent_frames, sample_rate = 0, 0
+			displayed_ms = seek_ms
 			stage = .Idle
 			if play_after_stop {
 				// Cleared when the new worker starts, so the footer holds
@@ -887,11 +887,16 @@ main :: proc() {
 		if !redraw && stage != .Playing {continue}
 
 		progress := f32(0)
-		if sample_rate > 0 && duration_ms > 0 && stream != nil {
-			queued := max(0, sdl.GetAudioStreamQueued(stream))
-			measured_ms := (sent_frames - int(queued) / 4) * 1000 / sample_rate
-			displayed_ms = max(displayed_ms, clamp(measured_ms, 0, duration_ms))
+		if duration_ms > 0 {
+			// Kept times hold the bar steady across worker swaps; live audio
+			// refines it below.
 			progress = f32(displayed_ms) / f32(duration_ms)
+			if sample_rate > 0 && stream != nil {
+				queued := max(0, sdl.GetAudioStreamQueued(stream))
+				measured_ms := (sent_frames - int(queued) / 4) * 1000 / sample_rate
+				displayed_ms = max(displayed_ms, clamp(measured_ms, 0, duration_ms))
+				progress = f32(displayed_ms) / f32(duration_ms)
+			}
 		}
 		shown_ms := displayed_ms
 		seek_enabled :=
@@ -914,6 +919,9 @@ main :: proc() {
 		   stage == .Buffering ||
 		   (play_after_stop && (stage == .Stopping || stage == .Idle)) ||
 		   (replay_pending && stage == .Ended) {button = "pause"}
+		// A seek from paused lands back on paused, so its handoff keeps
+		// the resume icon instead of flashing pause.
+		if start_paused && button == "pause" {button = "resume"}
 		status := "Ready to play"
 		switch stage {
 		case .Signing_In:
@@ -1460,7 +1468,7 @@ main :: proc() {
 							clear_audio_stream(&stream)
 							finished = false
 							play_after_stop, replay_pending = false, false
-							sent_frames, sample_rate, duration_ms = 0, 0, 0
+							sent_frames, sample_rate = 0, 0
 							displayed_ms = seek_ms
 							seek_ms = 0
 							stage = .Signing_In
