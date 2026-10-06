@@ -59,3 +59,10 @@ detail_card_uri :: proc(detail: library.Detail) -> string {
 	}
 	return ""
 }
+
+// Clicking the open collection is a no-op: reopening would tear down the
+// loaded rows and refetch them for an identical page. A failed load stays
+// retryable through the error flag.
+detail_already_open :: proc(client: ^library.Client, uri: string) -> bool {
+	return client.detail.ready && client.detail_error == 0 && detail_card_uri(client.detail) == uri
+}

@@ -1210,6 +1210,8 @@ main :: proc() {
 								&artist,
 							)
 							handled = track_selected
+						} else if detail_already_open(&library_client, entry.uri) {
+							handled = true
 						} else {
 							source, id, valid := parse_card_uri(entry.uri)
 							if !valid {break}
@@ -1246,7 +1248,16 @@ main :: proc() {
 							id := release.uri
 							if strings.has_prefix(id, "spotify:album:") {
 								id = id[len("spotify:album:"):]
-								handled = library.open_detail(&library_client, .Album, id, release)
+								if detail_already_open(&library_client, release.uri) {
+									handled = true
+								} else {
+									handled = library.open_detail(
+										&library_client,
+										.Album,
+										id,
+										release,
+									)
+								}
 							}
 							break
 						}
