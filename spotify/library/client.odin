@@ -88,6 +88,7 @@ Client :: struct {
 	pending:               [Kind]bool,
 	detail:                Detail,
 	detail_loading:        bool,
+	detail_loading_at:     time.Time,
 	detail_error:          int,
 	detail_request_id:     string,
 	detail_request_source: Source,
@@ -488,6 +489,9 @@ PAGE_INTERVAL :: 400 * time.Millisecond
 PAGE_RATE_LIMIT_BACKOFF :: 2 * time.Second
 PAGE_RETRY_BACKOFF :: 500 * time.Millisecond
 RATE_LIMIT_STEPS :: 4
+// A placeholder only appears when a fetch is actually slow: a cached page
+// lands within a frame or two and must not flash "Loading tracks...".
+DETAIL_LOADING_DELAY :: 150 * time.Millisecond
 
 rate_limit_delay :: proc(client: ^Client, retry_after: int) -> time.Duration {
 	client.rate_limited = min(client.rate_limited + 1, RATE_LIMIT_STEPS)
@@ -553,8 +557,16 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	client.detail_request_id = request_id
 	client.detail_request_source = source
 	client.detail_loading = true
+	client.detail_loading_at = time.time_add(time.now(), DETAIL_LOADING_DELAY)
 	client.detail_error = 0
 	return true
+}
+
+// True while an open is slow enough, and empty enough, that a placeholder
+// helps. Pagination keeps its rows; only the first fill can show the table.
+detail_loading_visible :: proc(client: ^Client) -> bool {
+	if !client.detail_loading || time.since(client.detail_loading_at) < 0 {return false}
+	return len(client.detail.rows) == 0 && len(client.detail.releases) == 0
 }
 
 // Queues a library membership flip for the hero heart. The worker answers
@@ -646,6 +658,7 @@ more_rows :: proc(client: ^Client) -> bool {
 	}
 	if !queue_request(client, &request) {return false}
 	client.detail_loading = true
+	client.detail_loading_at = time.time_add(time.now(), DETAIL_LOADING_DELAY)
 	client.page_at = time.time_add(time.now(), PAGE_INTERVAL)
 	return true
 }

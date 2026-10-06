@@ -936,7 +936,7 @@ detail_page :: proc(
 				)
 			}
 			if client.detail.source != .Liked {
-				like_disabled := client.detail_loading || client.like_pending
+				like_disabled := library.detail_loading_visible(client) || client.like_pending
 				player_control(
 					"hero_like",
 					client.detail.liked ? "circle-check" : "circle-plus",
@@ -949,7 +949,7 @@ detail_page :: proc(
 			player_control(
 				"hero_pin",
 				view.pinned ? "pin-filled" : "pin-off",
-				client.detail_loading ? .Disabled : view.pinned ? .Green : .Muted,
+				library.detail_loading_visible(client) ? .Disabled : view.pinned ? .Green : .Muted,
 				textures,
 				fx,
 				d,
@@ -969,12 +969,12 @@ detail_page :: proc(
 					"Open in Spotify",
 					clay.TextElementConfig {
 						fontSize = 13,
-						textColor = client.detail_loading ? MUTED : WHITE,
+						textColor = library.detail_loading_visible(client) ? MUTED : WHITE,
 					},
 				)
 			}
 		}
-		if client.detail_loading {
+		if library.detail_loading_visible(client) {
 			loading_track_table(d)
 		} else if detail.source == .Artist {
 			visible.releases = artist_discography(
