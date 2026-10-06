@@ -424,10 +424,10 @@ main :: proc() {
 	mpris_active := mpris.start(WAKE_EVENT != 0 ? wake_mpris : nil)
 	oauth.set_prompt_handler(prompt_arrived)
 	library_client: library.Client
-	settings := load_settings()
-	filter := settings.tab
-	sidebar_width := settings.sidebar_width
-	settings_dirty := false
+	app_state := load_state()
+	filter := app_state.tab
+	sidebar_width := app_state.sidebar_width
+	state_dirty := false
 	order_dirty := false
 	detail_pinned := false
 	nav: Nav
@@ -447,23 +447,23 @@ main :: proc() {
 	stage_n := 0
 	// Resume the last played track and reopen its collection. The footer
 	// shows it without starting playback; pressing play resumes it.
-	if len(settings.last_track) > 0 {
+	if len(app_state.last_track) > 0 {
 		delete(selected)
-		selected = strings.clone(settings.last_track)
+		selected = strings.clone(app_state.last_track)
 	}
-	if len(settings.last_title) > 0 {
+	if len(app_state.last_title) > 0 {
 		delete(title)
-		title = strings.clone(settings.last_title)
+		title = strings.clone(app_state.last_title)
 	}
-	if len(settings.last_artist) > 0 {
+	if len(app_state.last_artist) > 0 {
 		delete(artist)
-		artist = strings.clone(settings.last_artist)
+		artist = strings.clone(app_state.last_artist)
 	}
-	if len(settings.last_cover) > 0 {
+	if len(app_state.last_cover) > 0 {
 		delete(player_cover)
-		player_cover = strings.clone(settings.last_cover)
+		player_cover = strings.clone(app_state.last_cover)
 	}
-	restore_pending := len(settings.last_collection) > 0
+	restore_pending := len(app_state.last_collection) > 0
 	button_anims := make(map[string]Button_Fx)
 	defer {
 		if worker != nil {release_worker(worker, queue, &cancel, closed)}
@@ -489,7 +489,7 @@ main :: proc() {
 		free_play_queue(&play_queue)
 		delete(queue_detail)
 		delete(input)
-		free_settings(&settings)
+		free_state(&app_state)
 		free_context_menu(&menu)
 		nav_free_all(&nav)
 		delete(button_anims)
@@ -500,7 +500,7 @@ main :: proc() {
 	repeat, replay_pending, play_after_stop := false, false, false
 	fx_animating := false
 	shuffle, volume_dragging := false, false
-	volume := settings.volume
+	volume := app_state.volume
 	seek_dragging, start_paused := false, false
 	seek_ms := 0
 	sent_frames, sample_rate, duration_ms := 0, 0, 0
@@ -578,8 +578,8 @@ main :: proc() {
 				case .MOUSE_BUTTON_UP:
 					if event.button.button == sdl.BUTTON_LEFT {
 						if resizing {
-							settings.sidebar_width = sidebar_width
-							settings_dirty = true
+							app_state.sidebar_width = sidebar_width
+							state_dirty = true
 						}
 						resizing = false
 					}
@@ -740,8 +740,8 @@ main :: proc() {
 				nav_restore(
 					state,
 					&library_client,
-					&settings,
-					&settings_dirty,
+					&app_state,
+					&state_dirty,
 					&filter,
 					&search_mode,
 					&search_kind,
@@ -855,16 +855,16 @@ main :: proc() {
 			nav_commit(&nav, nav_capture(&library_client, filter, search_mode, search_kind, input))
 			if !library_client.detail.ready &&
 			   !library_client.detail_loading &&
-			   len(settings.last_collection) > 0 {
-				source, id, valid := parse_card_uri(settings.last_collection)
+			   len(app_state.last_collection) > 0 {
+				source, id, valid := parse_card_uri(app_state.last_collection)
 				if valid {
 					preview := library.Entry {
-						name  = settings.last_name != "" ? settings.last_name : settings.last_title,
-						uri   = settings.last_collection,
-						image = settings.last_cover,
+						name  = app_state.last_name != "" ? app_state.last_name : app_state.last_title,
+						uri   = app_state.last_collection,
+						image = app_state.last_cover,
 					}
 					if library.open_detail(&library_client, source, id, preview) {
-						detail_pinned = settings_is_pinned(&settings, settings.last_collection)
+						detail_pinned = state_is_pinned(&app_state, app_state.last_collection)
 						nav_commit(
 							&nav,
 							nav_capture(&library_client, filter, search_mode, search_kind, input),
@@ -1146,7 +1146,7 @@ main :: proc() {
 		commands, visible := layout(
 			view,
 			&library_client,
-			&settings,
+			&app_state,
 			filter,
 			&textures,
 			&fx,
@@ -1234,7 +1234,7 @@ main :: proc() {
 				display_kind,
 				visible,
 				mouse_right,
-				&settings,
+				&app_state,
 			)
 		}
 		track_selected := false
@@ -1243,16 +1243,16 @@ main :: proc() {
 				if !hit_index("menu_item", mouse_click, u32(index)) {continue}
 				switch menu.items[index] {
 				case .Pin:
-					_ = settings_toggle_pin(&settings, menu.uri)
+					_ = state_toggle_pin(&app_state, menu.uri)
 					if menu.uri == detail_card_uri(library_client.detail) {
-						detail_pinned = settings_is_pinned(&settings, menu.uri)
+						detail_pinned = state_is_pinned(&app_state, menu.uri)
 					}
 					order_dirty = true
-					settings_dirty = true
+					state_dirty = true
 				case .Pick_Sort:
-					settings.sort[filter] = menu.sorts[index]
+					app_state.sort[filter] = menu.sorts[index]
 					order_dirty = true
-					settings_dirty = true
+					state_dirty = true
 				case .Open_In_Spotify:
 					open_spotify_uri(menu.uri)
 				case .Play:
@@ -1285,7 +1285,7 @@ main :: proc() {
 			} else if hit("sidebar_handle", mouse_click) {
 				resizing = true
 			} else if hit("sort_button", mouse_click) {
-				open_sort_menu(&menu, mouse_click, settings.sort[filter])
+				open_sort_menu(&menu, mouse_click, app_state.sort[filter])
 			} else if hit("library_sign_in", mouse_click) {
 				_ = open_prompt_url(.Library)
 			} else if hit("library_retry", mouse_click) {
@@ -1330,8 +1330,8 @@ main :: proc() {
 							if hit_index("chip", mouse_click, u32(index)) {
 								if filter != library_tabs[index] {
 									filter = library_tabs[index]
-									settings.tab = filter
-									settings_dirty = true
+									app_state.tab = filter
+									state_dirty = true
 									nav_commit(
 										&nav,
 										nav_capture(
@@ -1376,7 +1376,7 @@ main :: proc() {
 							handled = library.open_detail(&library_client, source, id, entry)
 							if handled {
 								retry_failed_covers(&textures)
-								detail_pinned = settings_is_pinned(&settings, entry.uri)
+								detail_pinned = state_is_pinned(&app_state, entry.uri)
 								nav_commit(
 									&nav,
 									nav_capture(
@@ -1407,12 +1407,12 @@ main :: proc() {
 							handled = true
 						}
 					} else if hit("hero_pin", mouse_click) {
-						detail_pinned = settings_toggle_pin(
-							&settings,
+						detail_pinned = state_toggle_pin(
+							&app_state,
 							detail_card_uri(library_client.detail),
 						)
 						order_dirty = true
-						settings_dirty = true
+						state_dirty = true
 						handled = true
 					} else if hit("spotify_link", mouse_click) && !library_client.detail_loading {
 						open_spotify_detail(&library_client.detail)
@@ -1466,12 +1466,12 @@ main :: proc() {
 								&artist,
 							)
 							if track_selected {
-								settings_note_recent(
-									&settings,
+								state_note_recent(
+									&app_state,
 									detail_card_uri(library_client.detail),
 								)
 								order_dirty = true
-								settings_dirty = true
+								state_dirty = true
 							}
 							delete(input)
 							input = {}
@@ -1489,7 +1489,7 @@ main :: proc() {
 		if resizing {
 			if .LEFT not_in buttons {
 				resizing = false
-				settings_dirty = true
+				state_dirty = true
 			} else {
 				sidebar_width = clamp(mouse.x / density, SIDEBAR_MIN, SIDEBAR_MAX)
 			}
@@ -1511,8 +1511,8 @@ main :: proc() {
 			box := clay.GetElementData(clay.ID("volume_slider")).boundingBox
 			if box.width > 0 {
 				volume = clamp((mouse.x - box.x) / box.width, 0, 1)
-				settings.volume = volume
-				settings_dirty = true
+				app_state.volume = volume
+				state_dirty = true
 				if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
 			}
 			if .LEFT not_in buttons {volume_dragging = false}
@@ -1588,9 +1588,9 @@ main :: proc() {
 			stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
 			play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
 			_ = select_play_item(play_queue[:], play_index, &selected, &player_cover, &artist)
-			settings_note_recent(&settings, detail_card_uri(library_client.detail))
+			state_note_recent(&app_state, detail_card_uri(library_client.detail))
 			order_dirty = true
-			settings_dirty = true
+			state_dirty = true
 		}
 		track_delta := mpris_delta
 		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
@@ -1692,33 +1692,33 @@ main :: proc() {
 				},
 			)
 		}
-		sort_library_pages(&library_client, &settings, &page_counts, order_dirty)
+		sort_library_pages(&library_client, &app_state, &page_counts, order_dirty)
 		order_dirty = false
 		// Persist the last played track. Title and artist arrive after the
 		// selection via the Ready packet, so every field is watched, not
-		// just the URI. Settings hold the saved copy; no shadow variables.
+		// just the URI. The state holds the saved copy; no shadow variables.
 		collection := ""
 		if library_client.detail.ready {
 			collection = detail_card_uri(library_client.detail)
 		}
-		if selected != settings.last_track ||
-		   title != settings.last_title ||
-		   artist != settings.last_artist ||
-		   player_cover != settings.last_cover ||
-		   (library_client.detail.ready && collection != settings.last_collection) {
-			replace_string(&settings.last_track, selected)
-			replace_string(&settings.last_title, title)
-			replace_string(&settings.last_artist, artist)
-			replace_string(&settings.last_cover, player_cover)
+		if selected != app_state.last_track ||
+		   title != app_state.last_title ||
+		   artist != app_state.last_artist ||
+		   player_cover != app_state.last_cover ||
+		   (library_client.detail.ready && collection != app_state.last_collection) {
+			replace_string(&app_state.last_track, selected)
+			replace_string(&app_state.last_title, title)
+			replace_string(&app_state.last_artist, artist)
+			replace_string(&app_state.last_cover, player_cover)
 			if library_client.detail.ready {
-				replace_string(&settings.last_collection, collection)
-				replace_string(&settings.last_name, library_client.detail.name)
+				replace_string(&app_state.last_collection, collection)
+				replace_string(&app_state.last_name, library_client.detail.name)
 			}
-			settings_dirty = true
+			state_dirty = true
 		}
-		if settings_dirty {
-			settings_dirty = false
-			save_settings(&settings)
+		if state_dirty {
+			state_dirty = false
+			save_state(&app_state)
 		}
 		if clicked {first_frame = true}
 	}

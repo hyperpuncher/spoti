@@ -339,7 +339,7 @@ SORT_LABEL_MIN_WIDTH :: 420
 
 sort_button :: proc(
 	textures: ^Textures,
-	settings: ^Settings,
+	app_state: ^State,
 	active: library.Kind,
 	label: bool,
 	d: f32,
@@ -350,7 +350,7 @@ sort_button :: proc(
 		icon_element(textures, "list-sort-descending", .Muted, 14 * d)
 		if label {
 			clay.Text(
-				sort_name(settings.sort[active]),
+				sort_name(app_state.sort[active]),
 				clay.TextElementConfig{fontSize = 13, textColor = MUTED},
 			)
 		}
@@ -359,7 +359,7 @@ sort_button :: proc(
 
 sidebar :: proc(
 	client: ^library.Client,
-	settings: ^Settings,
+	app_state: ^State,
 	page: ^library.Page,
 	tabs: []library.Kind,
 	labels: []string,
@@ -396,7 +396,7 @@ sidebar :: proc(
 			}
 			if !searching {
 				if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {}
-				sort_button(textures, settings, active, width >= SORT_LABEL_MIN_WIDTH, d)
+				sort_button(textures, app_state, active, width >= SORT_LABEL_MIN_WIDTH, d)
 			}
 		}
 		if searching {
@@ -455,7 +455,7 @@ sidebar :: proc(
 							card_width,
 							d,
 							selected = card_selected(&page.items[next], &client.detail),
-							pinned = settings_is_pinned(settings, page.items[next].uri),
+							pinned = state_is_pinned(app_state, page.items[next].uri),
 							clip_slot = u32(next - visible.first),
 						)
 					}

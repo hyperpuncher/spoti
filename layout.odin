@@ -616,7 +616,7 @@ sign_in_button :: proc(id, label: string, d: f32) {
 layout :: proc(
 	view: View,
 	client: ^library.Client,
-	settings: ^Settings,
+	app_state: ^State,
 	filter: library.Kind,
 	textures: ^Textures,
 	fx: ^Button_Fx_Ctx,
@@ -669,7 +669,7 @@ layout :: proc(
 			}
 			visible.cards = sidebar(
 				client,
-				settings,
+				app_state,
 				page,
 				tabs,
 				labels,

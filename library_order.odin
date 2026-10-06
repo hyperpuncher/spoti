@@ -15,18 +15,18 @@ Rated_Entry :: struct {
 // Pins always lead; the mode pass runs first so a second stable pass can
 // lift them without a capturing comparator (nested procs cannot close over
 // the sort mode).
-sort_library_page :: proc(page: ^library.Page, kind: library.Kind, settings: ^Settings) {
+sort_library_page :: proc(page: ^library.Page, kind: library.Kind, app_state: ^State) {
 	if len(page.items) < 2 {return}
 	rated := make([]Rated_Entry, len(page.items), context.temp_allocator)
 	for entry, index in page.items {
 		rated[index] = {
 			index       = index,
-			pin_rank    = settings_rank(settings.pinned, entry.uri),
-			recent_rank = settings_rank(settings.recent, entry.uri),
+			pin_rank    = state_rank(app_state.pinned, entry.uri),
+			recent_rank = state_rank(app_state.recent, entry.uri),
 		}
 	}
 	// The default order is Spotify's own, so only played needs a pass.
-	if settings.sort[kind] == .Played {slice.stable_sort_by(rated, less_played)}
+	if app_state.sort[kind] == .Played {slice.stable_sort_by(rated, less_played)}
 	slice.stable_sort_by(rated, less_pin)
 	ordered := make([]library.Entry, len(page.items), context.temp_allocator)
 	for entry, index in rated {ordered[index] = page.items[entry.index]}
@@ -44,14 +44,14 @@ less_played :: proc(a, b: Rated_Entry) -> bool {
 // Sorting only when a page grew (or the pins changed) keeps page merges cheap.
 sort_library_pages :: proc(
 	client: ^library.Client,
-	settings: ^Settings,
+	app_state: ^State,
 	counts: ^[library.Kind]int,
 	force: bool,
 ) {
 	for kind in library.Kind {
 		page := &client.pages[kind]
 		if !force && len(page.items) == counts[kind] {continue}
-		sort_library_page(page, kind, settings)
+		sort_library_page(page, kind, app_state)
 		counts[kind] = len(page.items)
 	}
 }

@@ -137,7 +137,7 @@ open_menu_at :: proc(
 	kind: library.Kind,
 	visible: Frame_Visible,
 	point: sdl.FPoint,
-	settings: ^Settings,
+	app_state: ^State,
 ) {
 	for index in visible.tracks.first ..< visible.tracks.last {
 		if !hit_clipped("track_row", "detail_rows", point, u32(index)) {continue}
@@ -150,7 +150,7 @@ open_menu_at :: proc(
 		if kind == .Tracks {
 			open_link_menu(menu, point, entry.uri)
 		} else {
-			open_card_menu(menu, point, entry.uri, settings_is_pinned(settings, entry.uri))
+			open_card_menu(menu, point, entry.uri, state_is_pinned(app_state, entry.uri))
 		}
 		return
 	}

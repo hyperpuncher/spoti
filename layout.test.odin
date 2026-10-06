@@ -80,7 +80,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		footer_overlap_found,
 		"regression must exercise a clipped row overlapping next",
 	)
-	settings: Settings
+	app_state: State
 	anims := make(map[string]Button_Fx)
 	defer delete(anims)
 	fx := Button_Fx_Ctx {
@@ -99,7 +99,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					_, _ = layout(
 						{button = "pause"},
 						&client,
-						&settings,
+						&app_state,
 						.Albums,
 						&textures,
 						&fx,
@@ -126,7 +126,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					commands, visible := layout(
 						{button = "pause"},
 						&client,
-						&settings,
+						&app_state,
 						.Albums,
 						&textures,
 						&fx,
@@ -331,7 +331,7 @@ wheel_target_glides_to_rest :: proc(t: ^testing.T) {
 		delete(textures.by_key)
 		delete(textures.requested)
 	}
-	settings: Settings
+	app_state: State
 	d: f32 = 1
 	clay.SetLayoutDimensions({1280, 820})
 	clay.UpdateScrollContainers(false, {}, 0)
@@ -343,7 +343,7 @@ wheel_target_glides_to_rest :: proc(t: ^testing.T) {
 	_, _ = layout(
 		{button = "pause"},
 		&client,
-		&settings,
+		&app_state,
 		.Playlists,
 		&textures,
 		&glide_fx,
@@ -430,11 +430,11 @@ fx_test_layout :: proc(fx: ^Button_Fx_Ctx, d: f32) {
 		by_key = make(map[u64]^sdl.Texture),
 	}
 	defer {delete(textures.by_key); delete(textures.requested)}
-	settings: Settings
+	app_state: State
 	_, _ = layout(
 		{button = "pause"},
 		&client,
-		&settings,
+		&app_state,
 		.Playlists,
 		&textures,
 		fx,

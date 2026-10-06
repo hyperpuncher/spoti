@@ -132,8 +132,8 @@ nav_forward :: proc(nav: ^Nav) -> (Nav_State, bool) {
 nav_restore :: proc(
 	state: Nav_State,
 	client: ^library.Client,
-	settings: ^Settings,
-	settings_dirty: ^bool,
+	app_state: ^State,
+	state_dirty: ^bool,
 	filter: ^library.Kind,
 	search_mode: ^bool,
 	search_kind: ^library.Kind,
@@ -143,9 +143,9 @@ nav_restore :: proc(
 	delete(input^)
 	input^ = strings.clone(state.input)
 	filter^ = state.filter
-	if settings.tab != state.filter {
-		settings.tab = state.filter
-		settings_dirty^ = true
+	if app_state.tab != state.filter {
+		app_state.tab = state.filter
+		state_dirty^ = true
 	}
 	if state.searching {
 		search_kind^ = state.search_kind
@@ -156,7 +156,7 @@ nav_restore :: proc(
 		search_mode^ = false
 	}
 	uri := state.detail.uri
-	detail_pinned^ = len(uri) > 0 && settings_is_pinned(settings, uri)
+	detail_pinned^ = len(uri) > 0 && state_is_pinned(app_state, uri)
 	if len(uri) == 0 {
 		if client.detail.ready {library.clear_detail(client)}
 	} else if detail_card_uri(client.detail) != uri {
