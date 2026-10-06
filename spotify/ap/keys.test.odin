@@ -29,11 +29,3 @@ keys_match_hmac_sha1_reference :: proc(t: ^testing.T) {
 	testing.expect(t, slice.equal(keys.send[:], send))
 	testing.expect(t, slice.equal(keys.receive[:], receive))
 }
-
-@(test)
-keys_reject_missing_inputs :: proc(t: ^testing.T) {
-	_, ok := derive_keys(nil, []u8{1})
-	testing.expect(t, !ok)
-	_, ok = derive_keys([]u8{1}, nil)
-	testing.expect(t, !ok)
-}

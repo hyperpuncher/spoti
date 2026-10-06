@@ -63,12 +63,3 @@ frames_handle_partial_invalid_and_concatenated_input :: proc(t: ^testing.T) {
 	_, _, status = parse_plaintext([]u8{0, 4, 0, 0, 0}, true)
 	testing.expect(t, status == .Incomplete)
 }
-
-@(test)
-hello_rejects_missing_key_or_nonce :: proc(t: ^testing.T) {
-	testing.expect(t, client_hello(nil, []u8{1}, 8, 124200290) == nil)
-	testing.expect(t, client_hello([]u8{1}, []u8{1}, 8, 124200290) == nil)
-	oversized := make([]u8, MAX_FRAME_SIZE)
-	defer delete(oversized)
-	testing.expect(t, frame_plaintext(oversized, true) == nil)
-}

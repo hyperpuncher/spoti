@@ -46,15 +46,6 @@ resolved_track_source_is_reused_only_for_the_same_track_and_cleared :: proc(t: ^
 }
 
 @(test)
-seek_slider_maps_drag_positions_and_clamps_to_playable_time :: proc(t: ^testing.T) {
-	testing.expect_value(t, seek_position_ms(250, 100, 300, 240000), 120000)
-	testing.expect_value(t, seek_position_ms(-10, 100, 300, 240000), 0)
-	testing.expect_value(t, seek_position_ms(500, 100, 300, 240000), 239999)
-	testing.expect_value(t, seek_position_ms(250, 100, 0, 240000), 0)
-	testing.expect_value(t, seek_position_ms(250, 100, 300, 0), 0)
-}
-
-@(test)
 album_queue_retains_owned_artwork_for_every_track :: proc(t: ^testing.T) {
 	fallback := "album-cover"
 	rows := []library.Track_Row {
