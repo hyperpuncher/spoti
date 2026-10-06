@@ -53,10 +53,6 @@ login:
 	./scripts/build-vorbis.sh
 	odin run cmd/ap_login
 
-# Explicitly allow saving the browser grant in the desktop keyring.
-remember:
-	SPOTI_REMEMBER_LOGIN=1 just run
-
 # Remove the saved refresh credential from the desktop keyring.
 logout:
 	odin run cmd/logout

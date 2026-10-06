@@ -699,8 +699,7 @@ main :: proc() {
 			preload_worker = nil
 		}
 		if library_client.worker == nil {
-			remember := os.get_env("SPOTI_REMEMBER_LOGIN", context.temp_allocator) == "1"
-			_ = library.start(&library_client, remember)
+			_ = library.start(&library_client)
 		}
 		if library.poll(&library_client) {redraw = true}
 		// A detail page keeps paging until the server runs dry. Rows stream
@@ -893,8 +892,7 @@ main :: proc() {
 				delete(preload_attempted)
 				preload_attempted = strings.clone(next_uri)
 				preload_work = {
-					track    = strings.clone(next_uri),
-					remember = work.remember,
+					track = strings.clone(next_uri),
 				}
 				preload_worker = thread.create_and_start_with_data(&preload_work, preload_track)
 			}
@@ -1506,10 +1504,6 @@ main :: proc() {
 							track_url = strings.clone(selected),
 							start_ms  = seek_ms,
 							source    = &play_source,
-							remember  = os.get_env(
-								"SPOTI_REMEMBER_LOGIN",
-								context.temp_allocator,
-							) == "1",
 						}
 						if preload_worker == nil &&
 						   preload_work.track == selected &&

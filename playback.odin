@@ -163,10 +163,9 @@ cached_play_source :: proc(cache: ^Play_Source, uri: string) -> ^session.Source 
 }
 
 Preload_Work :: struct {
-	track:    string,
-	source:   session.Source,
-	cancel:   bool,
-	remember: bool,
+	track:  string,
+	source: session.Source,
+	cancel: bool,
 }
 
 clear_preload :: proc(preload: ^Preload_Work) {
@@ -177,7 +176,7 @@ clear_preload :: proc(preload: ^Preload_Work) {
 
 preload_track :: proc(pointer: rawptr) {
 	work := (^Preload_Work)(pointer)
-	source, ok := session.open(work.remember ? .Remember : .Restore, &work.cancel, work.track)
+	source, ok := session.open(.Remember, &work.cancel, work.track)
 	if !ok {return}
 	work.source = source
 	if sync.atomic_load(&work.cancel) {return}
@@ -200,7 +199,6 @@ Login_Work :: struct {
 	queue:     chan.Chan(player.Packet),
 	cancel:    ^bool,
 	track_url: string, // owned by the worker
-	remember:  bool,
 	start_ms:  int,
 	source:    ^Play_Source,
 	preloaded: session.Source, // owned, transferred only after joining the preload worker
@@ -220,11 +218,7 @@ login_and_decode :: proc(pointer: rawptr) {
 			work.preloaded = {}
 			authorized = true
 		} else {
-			fresh, authorized = session.open(
-				work.remember ? .Remember : .Restore,
-				work.cancel,
-				work.track_url,
-			)
+			fresh, authorized = session.open(.Remember, work.cancel, work.track_url)
 		}
 		if !authorized {
 			if !sync.atomic_load(

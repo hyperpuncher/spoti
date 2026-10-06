@@ -63,7 +63,7 @@ authorize :: proc(
 		switch result {
 		case .Authorized:
 			if fresh.refresh == "" {fresh.refresh = strings.clone(refresh)}
-			if (found || keyring_mode == .Remember) && !credential.save(fresh.refresh) {
+			if keyring_mode != .None && !credential.save(fresh.refresh) {
 				fmt.eprintln("keyring did not save rotated streaming sign-in")
 			}
 			return fresh, true
@@ -100,7 +100,7 @@ authorize :: proc(
 	status: oauth.Token_Result
 	tokens, status = oauth.exchange_code(code, flow.verifier)
 	if status != .Authorized {fmt.eprintln("token exchange did not complete:", status); return}
-	if keyring_mode == .Remember && (tokens.refresh == "" || !credential.save(tokens.refresh)) {
+	if keyring_mode != .None && (tokens.refresh == "" || !credential.save(tokens.refresh)) {
 		fmt.eprintln("system keyring unavailable; browser approval will be needed next time")
 	}
 	return tokens, true

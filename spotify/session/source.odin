@@ -34,11 +34,10 @@ close_source :: proc(source: ^Source) {
 }
 
 // Only encrypted audio ranges may be cached on disk. Audio keys and signed
-// URLs stay in memory; refresh grants require explicit keyring opt-in.
+// URLs stay in memory; browser-approved refresh grants persist in the keyring.
 // Never print the callback URL or any tokens.
 Keyring_Mode :: enum {
 	None,
-	Restore,
 	Remember,
 }
 
