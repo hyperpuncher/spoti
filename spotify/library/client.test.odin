@@ -209,3 +209,15 @@ like_toggle_syncs_sidebar_membership :: proc(t: ^testing.T) {
 	_, liked_ok := source_kind(.Liked)
 	testing.expect(t, !liked_ok)
 }
+
+@(test)
+failed_sign_in_offers_retry_through_state :: proc(t: ^testing.T) {
+	client: Client
+	defer stop(&client)
+	apply(&client, Result{kind = .Auth, auth = .Unavailable})
+	testing.expect_value(t, client.state, State.Sign_In_Failed)
+	apply(&client, Result{kind = .Auth, auth = .Missing_Client_ID})
+	testing.expect_value(t, client.state, State.Missing_Client_ID)
+	// Retry is only meaningful for a completed failed attempt.
+	testing.expect(t, !restart(&client))
+}

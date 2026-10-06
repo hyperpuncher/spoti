@@ -124,3 +124,27 @@ web_grant_requests_library_write_scopes :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, grant.required_scope, "user-library-modify")
 }
+
+prompt_test_kind: Prompt
+prompt_test_url: string
+
+capture_prompt :: proc(kind: Prompt, url: string) {
+	prompt_test_kind = kind
+	delete(prompt_test_url)
+	prompt_test_url = len(url) > 0 ? strings.clone(url) : ""
+}
+
+@(test)
+prompt_handoff_reaches_the_handler_and_clears :: proc(t: ^testing.T) {
+	defer {
+		set_prompt_handler(nil)
+		delete(prompt_test_url)
+		prompt_test_url = ""
+	}
+	set_prompt_handler(capture_prompt)
+	publish_prompt(.Library, "https://example.test/authorize")
+	testing.expect(t, prompt_test_kind == .Library)
+	testing.expect_value(t, prompt_test_url, "https://example.test/authorize")
+	publish_prompt(.Library, "")
+	testing.expect_value(t, prompt_test_url, "")
+}

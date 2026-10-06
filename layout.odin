@@ -105,6 +105,7 @@ View :: struct {
 	volume:        f32,
 	input_active:  bool,
 	pinned:        bool,
+	sign_in:       bool, // a library browser approval is waiting for a click
 	search_mode:   bool,
 	search_kind:   library.Kind,
 	menu_open:     bool,
@@ -520,6 +521,79 @@ autoscroll_indicator :: proc(view: View, textures: ^Textures, d: f32) {
 	}
 }
 
+// The app is unusable until the account is approved, so sign-in takes over
+// the whole window instead of sharing it with an empty library.
+sign_in_pending :: proc(state: library.State) -> bool {
+	return state == .Authorizing || state == .Sign_In_Failed || state == .Missing_Client_ID
+}
+
+sign_in_screen :: proc(state: library.State, browser_ready: bool, d: f32) {
+	if clay.UI()(
+	{
+		layout = {
+			layoutDirection = .TopToBottom,
+			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+			padding = clay.PaddingAll(u16(32 * d)),
+			childGap = u16(12 * d),
+			childAlignment = {x = .Center, y = .Center},
+		},
+	},
+	) {
+		if clay.UI()(
+		{
+			layout = {
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingFit({})},
+				childGap = u16(12 * d),
+				childAlignment = {x = .Center},
+			},
+		},
+		) {
+			title := "Signing in..."
+			line := "Checking your saved Spotify approval."
+			button_id, button_label := "", ""
+			switch state {
+			case .Authorizing:
+				if browser_ready {
+					title = "Connect to Spotify"
+					line = "Approve access in your browser to load your library."
+					button_id, button_label = "library_sign_in", "Sign in with Spotify"
+				}
+			case .Sign_In_Failed:
+				title = "Could not sign in"
+				line = "Browser approval did not complete."
+				button_id, button_label = "library_retry", "Try again"
+			case .Missing_Client_ID:
+				title = "Spotify app key missing"
+				line = "Set WEB_CLIENT_ID in your environment and restart spoti."
+			case .Idle, .Loading, .Ready, .Failed:
+			}
+			clay.Text(title, clay.TextElementConfig{fontSize = 28, textColor = WHITE})
+			clay.Text(line, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+			if len(button_id) > 0 {
+				sign_in_button(button_id, button_label, d)
+			}
+		}
+	}
+}
+
+sign_in_button :: proc(id, label: string, d: f32) {
+	if clay.UI_WithId(clay.ID(id))(
+	{
+		layout = {
+			sizing = {width = clay.SizingFit({}), height = clay.SizingFixed(40 * d)},
+			padding = {left = u16(20 * d), right = u16(20 * d)},
+			childAlignment = {x = .Center, y = .Center},
+		},
+		backgroundColor = clay.PointerOver(clay.ID(id)) ? HERO_HOVER : GREEN,
+		cornerRadius = clay.CornerRadiusAll(20 * d),
+	},
+	) {
+		// Spotify green keeps dark text in both themes, like the hero play icon.
+		clay.Text(label, clay.TextElementConfig{fontSize = 14, textColor = {18, 18, 18, 255}})
+	}
+}
+
 layout :: proc(
 	view: View,
 	client: ^library.Client,
@@ -534,7 +608,20 @@ layout :: proc(
 ) {
 	visible: Frame_Visible
 	clay.BeginLayout()
-	if clay.UI()(
+	if sign_in_pending(client.state) {
+		if clay.UI()(
+		{
+			layout = {
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+				childAlignment = {x = .Center, y = .Center},
+			},
+			backgroundColor = BG,
+		},
+		) {
+			sign_in_screen(client.state, view.sign_in, d)
+		}
+	} else if clay.UI()(
 	{
 		layout = {
 			layoutDirection = .TopToBottom,

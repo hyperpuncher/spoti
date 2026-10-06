@@ -83,14 +83,13 @@ authorize :: proc(
 	defer net.close(listener)
 	flow := oauth.begin()
 	defer {
+		oauth.publish_prompt(.Playback, "")
 		crypto.zero_explicit(raw_data(flow.verifier), len(flow.verifier))
 		delete(flow.verifier)
 		delete(flow.state)
 		delete(flow.url)
 	}
-	fmt.println("Open this URL in your browser to approve Spotify streaming:")
-	fmt.println(flow.url)
-	fmt.println("Waiting up to ten minutes for the local redirect. Ctrl+C cancels.")
+	oauth.publish_prompt(.Playback, flow.url)
 	code, result := oauth.wait_for_code(listener, flow.state, cancel)
 	if result != .Authorized {
 		if result != .Cancelled {fmt.eprintln("browser approval did not complete:", result)}

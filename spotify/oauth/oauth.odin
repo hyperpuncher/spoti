@@ -7,6 +7,7 @@ import "core:encoding/base64"
 import "core:fmt"
 import "core:net"
 import "core:strings"
+import "core:sync"
 
 // This public client ID and redirect are the streaming-only grant used by
 // Spotifast. A personal Web API developer app is not needed for this grant.
@@ -80,6 +81,37 @@ begin :: proc(grant: Grant = PLAYBACK_GRANT) -> Flow {
 		state,
 	)
 	return {state = state, verifier = verifier, url = address}
+}
+
+// Which approval flow a browser URL belongs to: the app shows library
+// sign-in in the grid and playback sign-in in the status line.
+Prompt :: enum {
+	Library,
+	Playback,
+}
+
+// The app opens a browser and shows its own sign-in state; CLI diagnostics
+// without a handler print the URL. Empty url clears the pending prompt.
+Prompt_Handler :: proc(kind: Prompt, url: string)
+
+prompt_mutex: sync.Mutex
+prompt_handler: Prompt_Handler
+
+set_prompt_handler :: proc(handler: Prompt_Handler) {
+	sync.mutex_guard(&prompt_mutex)
+	prompt_handler = handler
+}
+
+// Called from worker threads while a browser approval is pending.
+publish_prompt :: proc(kind: Prompt, url: string) {
+	sync.mutex_guard(&prompt_mutex)
+	if prompt_handler != nil {
+		prompt_handler(kind, url)
+		return
+	}
+	if len(url) == 0 {return}
+	fmt.println("Open this URL in your browser to approve Spotify access:")
+	fmt.println(url)
 }
 
 Callback :: enum {

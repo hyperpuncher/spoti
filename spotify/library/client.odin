@@ -21,6 +21,7 @@ import "core:time"
 State :: enum {
 	Idle,
 	Authorizing,
+	Sign_In_Failed,
 	Loading,
 	Ready,
 	Missing_Client_ID,
@@ -33,6 +34,7 @@ Request_Kind :: enum {
 	More,
 	Search,
 	Like,
+	Auth, // result-only: the worker could not sign in
 }
 
 Request :: struct {
@@ -66,6 +68,7 @@ Result :: struct {
 	status:        int,
 	ok:            bool,
 	liked:         bool, // Like; echoes the requested membership
+	auth:          Auth_Result, // Auth; why sign-in stopped
 }
 
 Cover_Request :: struct {
@@ -118,7 +121,7 @@ run :: proc(pointer: rawptr) {
 	diagnostic.writef("library auth=%v", auth)
 	if auth != .Ready {
 		if auth != .Cancelled {
-			_ = chan.send(client.results, Result{status = auth == .Missing_Client_ID ? -1 : 0})
+			_ = chan.send(client.results, Result{kind = .Auth, auth = auth})
 		}
 		return
 	}
@@ -169,7 +172,7 @@ ensure_tokens :: proc(client: ^Client, tokens: ^oauth.Tokens) -> bool {
 }
 
 fail_request :: proc(client: ^Client, request: Request) {
-	switch request.kind {
+	#partial switch request.kind {
 	case .Index:
 		send(client, Result{kind = .Index, list = request.list, status = -1})
 	case .Detail:
@@ -227,7 +230,7 @@ handle :: proc(
 		fail_request(client, request)
 		return
 	}
-	switch request.kind {
+	#partial switch request.kind {
 	case .Index:
 		page, status, ok := fetch_index(
 			tokens.access,
@@ -394,6 +397,7 @@ free_result :: proc(result: Result) {
 
 start :: proc(client: ^Client) -> bool {
 	if client.worker != nil {return true}
+	client.cancel, client.failed = false, false
 	id := os.get_env("WEB_CLIENT_ID", context.allocator)
 	valid := valid_client_id(id)
 	delete(id)
@@ -745,6 +749,8 @@ apply :: proc(client: ^Client, result: Result) {
 			destination.has_more,
 		)
 		client.state = client.failed ? .Failed : client.remaining_initial > 0 ? .Loading : .Ready
+	case .Auth:
+		client.state = local.auth == .Missing_Client_ID ? .Missing_Client_ID : .Sign_In_Failed
 	case .Detail:
 		if local.source != client.detail_request_source ||
 		   local.id != client.detail_request_id {return}
@@ -840,27 +846,39 @@ apply :: proc(client: ^Client, result: Result) {
 	}
 }
 
+stop_workers :: proc(client: ^Client) {
+	if client.worker == nil {return}
+	sync.atomic_store(&client.cancel, true)
+	chan.close(client.requests)
+	chan.close(client.results)
+	chan.close(client.cover_requests)
+	chan.close(client.cover_results)
+	thread.join(client.worker)
+	thread.destroy(client.worker)
+	thread.join(client.cover_worker)
+	thread.destroy(client.cover_worker)
+	for request in chan.try_recv(client.requests) {free_request(request)}
+	for result in chan.try_recv(client.results) {free_result(result)}
+	for request in chan.try_recv(client.cover_requests) {delete(request.url)}
+	for result in chan.try_recv(client.cover_results) {delete(result.image.pixels)}
+	chan.destroy(client.requests)
+	chan.destroy(client.results)
+	chan.destroy(client.cover_requests)
+	chan.destroy(client.cover_results)
+	client.worker, client.cover_worker = nil, nil
+}
+
+// Retry a failed browser approval. The worker has already exited, so its
+// channels are dropped and a fresh worker starts like it does at launch.
+restart :: proc(client: ^Client) -> bool {
+	if client.state != .Sign_In_Failed {return false}
+	stop_workers(client)
+	return start(client)
+}
+
 stop :: proc(client: ^Client) {
 	diagnostic.write("library workers stopping")
-	if client.worker != nil {
-		sync.atomic_store(&client.cancel, true)
-		chan.close(client.requests)
-		chan.close(client.results)
-		chan.close(client.cover_requests)
-		chan.close(client.cover_results)
-		thread.join(client.worker)
-		thread.destroy(client.worker)
-		thread.join(client.cover_worker)
-		thread.destroy(client.cover_worker)
-		for request in chan.try_recv(client.requests) {free_request(request)}
-		for result in chan.try_recv(client.results) {free_result(result)}
-		for request in chan.try_recv(client.cover_requests) {delete(request.url)}
-		for result in chan.try_recv(client.cover_results) {delete(result.image.pixels)}
-		chan.destroy(client.requests)
-		chan.destroy(client.results)
-		chan.destroy(client.cover_requests)
-		chan.destroy(client.cover_results)
-	}
+	stop_workers(client)
 	for &page in client.pages {free_page(&page)}
 	free_detail(&client.detail)
 	delete(client.detail_request_id)

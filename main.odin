@@ -12,6 +12,7 @@ import "core:unicode/utf8"
 import diagnostic "diagnostic"
 import library "spotify/library"
 import mpris "spotify/mpris"
+import oauth "spotify/oauth"
 import player "spotify/player"
 import session "spotify/session"
 import track "spotify/track"
@@ -22,6 +23,31 @@ import ttf "vendor:sdl3/ttf"
 
 // The MPRIS worker pushes this event to wake the otherwise idle frame loop.
 WAKE_EVENT: u32
+
+// Browser approval URLs arrive from worker threads. Playback sign-in opens
+// the browser directly; the library pane offers a button instead.
+prompt_mutex: sync.Mutex
+prompt_urls: [oauth.Prompt]string
+
+prompt_arrived :: proc(kind: oauth.Prompt, url: string) {
+	sync.mutex_guard(&prompt_mutex)
+	delete(prompt_urls[kind])
+	prompt_urls[kind] = len(url) > 0 ? strings.clone(url) : ""
+}
+
+prompt_pending :: proc(kind: oauth.Prompt) -> bool {
+	sync.mutex_guard(&prompt_mutex)
+	return prompt_urls[kind] != ""
+}
+
+open_prompt_url :: proc(kind: oauth.Prompt) -> bool {
+	sync.mutex_guard(&prompt_mutex)
+	url := prompt_urls[kind]
+	if len(url) == 0 {return false}
+	c_url := strings.clone_to_cstring(url)
+	defer delete(c_url)
+	return sdl.OpenURL(c_url)
+}
 
 @(private = "file")
 wake_mpris :: proc "c" (_: rawptr) {
@@ -395,6 +421,7 @@ main :: proc() {
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
 	mpris_active := mpris.start(WAKE_EVENT != 0 ? wake_mpris : nil)
+	oauth.set_prompt_handler(prompt_arrived)
 	library_client: library.Client
 	settings := load_settings()
 	filter := settings.tab
@@ -402,6 +429,8 @@ main :: proc() {
 	settings_dirty := false
 	order_dirty := false
 	detail_pinned := false
+	library_prompt_shown := false
+	playback_prompt_opened := false
 	page_counts: [library.Kind]int
 	menu: Context_Menu
 	resizing := false
@@ -702,6 +731,22 @@ main :: proc() {
 			_ = library.start(&library_client)
 		}
 		if library.poll(&library_client) {redraw = true}
+		library_prompt := prompt_pending(.Library)
+		if library_prompt != library_prompt_shown {
+			library_prompt_shown = library_prompt
+			redraw = true
+		}
+		playback_prompt := prompt_pending(.Playback)
+		if playback_prompt {
+			if !playback_prompt_opened {
+				playback_prompt_opened = true
+				_ = open_prompt_url(.Playback)
+				redraw = true
+			}
+		} else if playback_prompt_opened {
+			playback_prompt_opened = false
+			redraw = true
+		}
 		// A detail page keeps paging until the server runs dry. Rows stream
 		// into the list while the scrollbar already spans the full total.
 		if library_client.detail.ready &&
@@ -947,7 +992,7 @@ main :: proc() {
 		status := "Ready to play"
 		switch stage {
 		case .Signing_In:
-			status = "Loading track..."
+			status = playback_prompt ? "Approve playback in your browser" : "Loading track..."
 		case .Buffering:
 			status = "Buffering audio..."
 		case .Playing:
@@ -957,7 +1002,7 @@ main :: proc() {
 		case .Ended:
 			status = "Track ended. Press play to replay."
 		case .Failed:
-			status = "Could not play. Check the terminal; press play to retry."
+			status = "Could not play. Press play to retry."
 		case .Stopping:
 			status = "Stopping..."
 		case .Idle:
@@ -968,7 +1013,7 @@ main :: proc() {
 		// The footer names the artist like spotifast; the status line only
 		// surfaces while nothing is known or when playback failed.
 		shown_status := status
-		if stage != .Failed && len(artist) > 0 {
+		if stage != .Failed && len(artist) > 0 && !(stage == .Signing_In && playback_prompt) {
 			shown_status = artist
 		}
 		shown_input := input
@@ -993,6 +1038,7 @@ main :: proc() {
 			input_active  = input_active,
 			pinned        = detail_pinned,
 			search_mode   = search_mode,
+			sign_in       = library_prompt,
 			search_kind   = search_kind,
 			menu_open     = menu.open,
 			menu_x        = menu.point.x,
@@ -1177,6 +1223,10 @@ main :: proc() {
 				resizing = true
 			} else if hit("sort_button", mouse_click) {
 				open_sort_menu(&menu, mouse_click, filter, settings.sort[filter])
+			} else if hit("library_sign_in", mouse_click) {
+				_ = open_prompt_url(.Library)
+			} else if hit("library_retry", mouse_click) {
+				if library.restart(&library_client) {redraw = true}
 			} else {
 				handled := false
 				if hit("toolbar_back", mouse_click) || hit("toolbar_library", mouse_click) {

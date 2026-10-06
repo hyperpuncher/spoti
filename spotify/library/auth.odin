@@ -64,13 +64,13 @@ authorize :: proc(cancel: ^bool = nil) -> (tokens: oauth.Tokens, result: Auth_Re
 	defer net.close(listener)
 	flow := oauth.begin(grant)
 	defer {
+		oauth.publish_prompt(.Library, "")
 		crypto.zero_explicit(raw_data(flow.verifier), len(flow.verifier))
 		delete(flow.verifier)
 		delete(flow.state)
 		delete(flow.url)
 	}
-	fmt.println("Open this URL in your browser to allow Spotify library access:")
-	fmt.println(flow.url)
+	oauth.publish_prompt(.Library, flow.url)
 	code, response := oauth.wait_for_code(listener, flow.state, cancel)
 	diagnostic.writef("library browser=%v", response)
 	if response == .Cancelled {return {}, .Cancelled}
