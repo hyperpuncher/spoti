@@ -42,6 +42,52 @@ Keyring_Mode :: enum {
 	Remember,
 }
 
+// Session memory of resolved tracks: file id, decrypt key and display
+// info by track id. Memory-only; keys and signed URLs never reach disk.
+// Lets repeat plays skip AP metadata, key requests and, on full disk
+// hits, storage-resolve too.
+Resolve_Entry :: struct {
+	file_id:     [20]u8,
+	key:         [16]u8,
+	format:      track.Audio_Format,
+	duration_ms: int,
+	name:        string,
+}
+resolve_cache: map[[16]u8]Resolve_Entry
+resolve_mutex: sync.Mutex
+
+// A lookup clones the name into the caller's allocator, so the entry can
+// be used after unlocking with no aliasing hazards.
+resolve_cache_lookup :: proc(id: [16]u8) -> (entry: Resolve_Entry, ok: bool) {
+	sync.mutex_guard(&resolve_mutex)
+	stored, found := resolve_cache[id]
+	if !found {return}
+	entry = stored
+	entry.name = strings.clone(stored.name)
+	return entry, true
+}
+
+resolve_cache_store :: proc(id: [16]u8, source: ^Source) {
+	sync.mutex_guard(&resolve_mutex)
+	if resolve_cache == nil {resolve_cache = make(map[[16]u8]Resolve_Entry)}
+	if old, found := resolve_cache[id]; found {delete(old.name)}
+	resolve_cache[id] = Resolve_Entry {
+		file_id     = source.file_id,
+		key         = source.key,
+		format      = source.format,
+		duration_ms = source.duration_ms,
+		name        = strings.clone(source.name),
+	}
+}
+
+// Tests only; the app keeps entries for the process lifetime.
+clear_resolve_cache :: proc() {
+	sync.mutex_guard(&resolve_mutex)
+	for _, entry in resolve_cache {delete(entry.name)}
+	delete(resolve_cache)
+	resolve_cache = nil
+}
+
 open :: proc(
 	keyring_mode: Keyring_Mode = .None,
 	cancel: ^bool = nil,
@@ -53,14 +99,45 @@ open :: proc(
 	defer if !ok {close_source(&source)}
 	id, valid := track.parse_id(track_url)
 	if !valid {fmt.eprintln("invalid Spotify track link or URI"); return}
-	tokens, authorized := authorize(keyring_mode, cancel)
-	if !authorized {return}
-	defer oauth.wipe_tokens(&tokens)
-	source, ok = resolve_ap_source(tokens.access, id, cancel)
-	if !ok {return}
-	ok = false
+	if entry, hit := resolve_cache_lookup(id); hit {
+		source.name = entry.name
+		source.format, source.file_id, source.duration_ms, source.key =
+			entry.format, entry.file_id, entry.duration_ms, entry.key
+	} else {
+		tokens, authorized := authorize(keyring_mode, cancel)
+		if !authorized {return}
+		defer oauth.wipe_tokens(&tokens)
+		source, ok = resolve_ap_source(tokens.access, id, cancel)
+		if !ok {return}
+		ok = false
+		resolve_cache_store(id, &source)
+	}
 	if cancelled(cancel) {return}
-	file_hex := hex.encode(source.file_id[:])
+	// Fully cached audio needs no network at all: no tokens, no
+	// storage-resolve, no CDN. Anything missing resolves its URL below.
+	if audio.disk_cache_complete(source.file_id) {
+		ok = true
+		return
+	}
+	if !fetch_cdn_url(keyring_mode, cancel, source.file_id, &source) {return}
+	ok = true
+	return
+}
+
+// One storage-resolve round trip for a known file id. Authorizes here so
+// fully cached opens above never touch tokens. The signed URL stays in
+// the returned storage bytes; callers keep them alive.
+fetch_cdn_url :: proc(
+	keyring_mode: Keyring_Mode,
+	cancel: ^bool,
+	file_id: [20]u8,
+	source: ^Source,
+) -> bool {
+	file_id := file_id
+	tokens, authorized := authorize(keyring_mode, cancel)
+	if !authorized {return false}
+	defer oauth.wipe_tokens(&tokens)
+	file_hex := hex.encode(file_id[:])
 	defer delete(file_hex)
 	endpoint := fmt.aprintf(
 		"https://spclient.wg.spotify.com/storage-resolve/files/audio/interactive/%s",
@@ -69,12 +146,12 @@ open :: proc(
 	defer delete(endpoint)
 	storage, status, fetched := http.get(endpoint, {bearer = tokens.access, cancel = cancel})
 	source.storage = storage
-	if !fetched {fmt.eprintln("CDN resolver request failed"); return}
-	if status != 200 {fmt.eprintln("CDN resolver returned HTTP", status); return}
-	source.url, ok = audio.cdn_url(storage[:], source.file_id)
-	if !ok {fmt.eprintln("CDN resolver did not return a usable URL"); return}
-	fmt.println("CDN URL resolved.")
-	return source, true
+	if !fetched {fmt.eprintln("CDN resolver request failed"); return false}
+	if status != 200 {fmt.eprintln("CDN resolver returned HTTP", status); return false}
+	url, valid := audio.cdn_url(storage[:], file_id)
+	if !valid {fmt.eprintln("CDN resolver did not return a usable URL"); return false}
+	source.url = url
+	return true
 }
 
 resolve_ap_source :: proc(access: string, id: [16]u8, cancel: ^bool) -> (Source, bool) {
@@ -162,7 +239,12 @@ fetch_ap_source :: proc(
 }
 
 // Optional first-range check, used by the non-playing diagnostic.
+// Fully cached sources carry no URL and skip the network entirely.
 probe :: proc(source: ^Source) -> bool {
+	if source.url == "" {
+		fmt.println("audio fully cached; no CDN range to verify.")
+		return true
+	}
 	chunk, status, fetched := http.get(source.url, {range = "0-65535", limit = 65536})
 	if !fetched {fmt.eprintln("CDN audio range request failed"); return false}
 	defer {crypto.zero_explicit(raw_data(chunk), len(chunk)); delete(chunk)}

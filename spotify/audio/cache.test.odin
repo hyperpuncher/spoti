@@ -199,3 +199,22 @@ cache_budget_evicts_closed_tracks_but_protects_active_tracks :: proc(t: ^testing
 	delete(entries)
 	testing.expect(t, used <= budget)
 }
+
+@(test)
+disk_cache_complete_tracks_range_presence :: proc(t: ^testing.T) {
+	dir, err := os.make_directory_temp("/tmp", "spoti-audio-complete-*", context.allocator)
+	testing.expect(t, err == nil)
+	if err != nil {return}
+	defer {_ = os.remove_all(dir); delete(dir)}
+	id: [20]u8
+	id[0] = 9
+	testing.expect(t, !disk_cache_complete(id, dir), "absent file is incomplete")
+	cache := open_disk_cache(id, dir)
+	defer close_disk_cache(&cache)
+	total := 2 * RANGE_SIZE
+	bytes: [RANGE_SIZE]u8 = 7
+	write_disk_range(&cache, 0, total, bytes[:])
+	testing.expect(t, !disk_cache_complete(id, dir), "partial ranges are incomplete")
+	write_disk_range(&cache, RANGE_SIZE, total, bytes[:])
+	testing.expect(t, disk_cache_complete(id, dir), "all ranges present is complete")
+}

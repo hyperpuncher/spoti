@@ -101,6 +101,24 @@ open_disk_cache :: proc(
 	return cache
 }
 
+// True when every range of the file is present. Opens the file, checks
+// the presence bitmap, and closes it, so callers can skip the
+// storage-resolve round trip on full hits. A file evicted between this
+// check and playback simply misses ranges and resolves afresh on retry.
+disk_cache_complete :: proc(
+	id: [20]u8,
+	directory: string = "",
+	limit: i64 = DEFAULT_AUDIO_CACHE_BYTES,
+) -> bool {
+	cache := open_disk_cache(id, directory, limit)
+	defer close_disk_cache(&cache)
+	if cache.file == nil || cache.total <= SPOTIFY_OGG_OFFSET {return false}
+	for i := 0; i < len(cache.blocks); i += CACHE_BLOCK_META_BYTES {
+		if cache.blocks[i] != 1 {return false}
+	}
+	return true
+}
+
 close_disk_cache :: proc(cache: ^Disk_Cache) {
 	sync.mutex_lock(&cache_mutex)
 	defer sync.mutex_unlock(&cache_mutex)
