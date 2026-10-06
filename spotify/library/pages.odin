@@ -25,6 +25,7 @@ Entry :: struct {
 	image:    string, // cover URL; never a token or signed CDN URL
 	subtitle: string, // owner or artists
 	total:    int, // track count where Spotify reports one
+	added_at: string, // library addition date; only saved albums carry one
 }
 
 Page :: struct {
@@ -231,6 +232,15 @@ append_album_entry :: proc(
 	album: Album_Ref,
 	allocator: runtime.Allocator,
 ) {
+	append_saved_album(items, Saved_Album{album = album}, allocator)
+}
+
+append_saved_album :: proc(
+	items: ^[dynamic]Entry,
+	row: Saved_Album,
+	allocator: runtime.Allocator,
+) {
+	album := row.album
 	image := cover_url(album.images)
 	if len(album.name) == 0 || len(album.uri) > 128 || image == "" {return}
 	append(
@@ -241,6 +251,7 @@ append_album_entry :: proc(
 			image = strings.clone(image, allocator),
 			subtitle = joined_artists(album.artists, allocator),
 			total = album.total_tracks,
+			added_at = strings.clone(row.added_at, allocator),
 		},
 	)
 }
@@ -364,7 +375,7 @@ parse_albums :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> b
 	page.next_offset = decoded.offset + len(decoded.items)
 	if !sane_page(page.total, len(decoded.items), page.next_offset) {return false}
 	page.items = make([dynamic]Entry, 0, len(decoded.items), allocator)
-	for row in decoded.items {append_album_entry(&page.items, row.album, allocator)}
+	for row in decoded.items {append_saved_album(&page.items, row, allocator)}
 	return true
 }
 

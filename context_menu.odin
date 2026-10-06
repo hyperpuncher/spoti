@@ -11,16 +11,19 @@ Menu_Item :: enum {
 	Pin,
 	Open_In_Spotify,
 	Play,
+	Pick_Sort,
 }
 
 Context_Menu :: struct {
-	open:   bool,
-	point:  sdl.FPoint,
-	track:  int, // detail row index, or -1 for cards
-	uri:    string, // owned clone of the target
-	items:  [2]Menu_Item,
-	labels: [2]string,
-	count:  int,
+	open:     bool,
+	point:    sdl.FPoint,
+	track:    int, // detail row index, or -1 for cards
+	uri:      string, // owned clone of the target
+	items:    [4]Menu_Item,
+	labels:   [4]string,
+	count:    int,
+	selected: int, // check-marked row, or -1
+	sorts:    [4]Sort, // sort payload per row for Pick_Sort
 }
 
 free_context_menu :: proc(menu: ^Context_Menu) {
@@ -66,7 +69,28 @@ open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 	menu.count = 1
 }
 
-context_menu :: proc(view: View, d: f32) {
+// Library sort picker for a tab. Only date-backed tabs offer recently
+// added; the current sort carries a check. The tab itself comes from the
+// sidebar filter when an item is picked.
+open_sort_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, kind: library.Kind, current: Sort) {
+	options := [4]Sort{.Added, .Played, .Name, .Library}
+	free_context_menu(menu)
+	menu.open = true
+	menu.point = point
+	menu.track = -1
+	menu.selected = -1
+	for option in options {
+		if !sort_supported(kind, option) {continue}
+		index := menu.count
+		menu.items[index] = .Pick_Sort
+		menu.sorts[index] = option
+		menu.labels[index] = sort_name(option)
+		if option == current {menu.selected = index}
+		menu.count += 1
+	}
+}
+
+context_menu :: proc(view: View, textures: ^Textures, d: f32) {
 	if !view.menu_open {return}
 	if clay.UI_WithId(clay.ID("context_menu"))(
 	{
@@ -88,12 +112,16 @@ context_menu :: proc(view: View, d: f32) {
 				layout = {
 					sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(32 * d)},
 					padding = {left = u16(10 * d), right = u16(10 * d)},
+					childGap = u16(8 * d),
 					childAlignment = {y = .Center},
 				},
 				backgroundColor = hovered ? HOVER : clay.Color{},
 				cornerRadius = clay.CornerRadiusAll(5 * d),
 			},
 			) {
+				if index == view.menu_selected {
+					icon_element(textures, "check", .White, 14 * d)
+				} else if clay.UI()({layout = {sizing = {width = clay.SizingFixed(14 * d)}}}) {}
 				clay.Text(
 					view.menu_labels[index],
 					clay.TextElementConfig{fontSize = 14, textColor = WHITE},

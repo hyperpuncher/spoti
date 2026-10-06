@@ -17,7 +17,7 @@ HERO_HOVER :: clay.Color{38, 224, 106, 255}
 MUTED :: clay.Color{165, 165, 165, 255}
 GREEN :: clay.Color{30, 215, 96, 255}
 
-SIDEBAR_MIN :: 284
+SIDEBAR_MIN :: 320
 SIDEBAR_MAX :: 640
 // The player seek bar stays a comfortable length on very wide windows.
 SEEK_MAX_WIDTH :: 620
@@ -47,7 +47,8 @@ View :: struct {
 	menu_x:        f32,
 	menu_y:        f32,
 	menu_count:    int,
-	menu_labels:   [2]string,
+	menu_labels:   [4]string,
+	menu_selected: int,
 	scroll_active: bool, // middle-click autoscroll anchor indicator
 	current_uri:   string, // borrowed selected track; matches a row uri while it owns playback
 	playing:       bool, // audio flowing this frame; freezes the row bars when false
@@ -538,7 +539,7 @@ layout :: proc(
 		player_bar(view, textures, fx, d)
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
-		context_menu(view, d)
+		context_menu(view, textures, d)
 		autoscroll_indicator(view, textures, d)
 	}
 	return clay.EndLayout(dt), visible

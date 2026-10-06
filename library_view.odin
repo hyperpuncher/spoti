@@ -332,6 +332,30 @@ library_card :: proc(
 	}
 }
 
+// Full sort labels fit beside the tabs past this sidebar width;
+// narrower sidebars show the sort icon alone on the same line.
+SORT_LABEL_MIN_WIDTH :: 420
+
+sort_button :: proc(
+	textures: ^Textures,
+	settings: ^Settings,
+	active: library.Kind,
+	label: bool,
+	d: f32,
+) {
+	if clay.UI_WithId(clay.ID("sort_button"))(
+	{layout = {childGap = u16(6 * d), childAlignment = {y = .Center}}},
+	) {
+		icon_element(textures, "list-sort-descending", .Muted, 14 * d)
+		if label {
+			clay.Text(
+				sort_name(settings.sort[active]),
+				clay.TextElementConfig{fontSize = 13, textColor = MUTED},
+			)
+		}
+	}
+}
+
 sidebar :: proc(
 	client: ^library.Client,
 	settings: ^Settings,
@@ -357,9 +381,21 @@ sidebar :: proc(
 		cornerRadius = clay.CornerRadius{topRight = 12 * d},
 	},
 	) {
-		if clay.UI()({layout = {childGap = u16(8 * d), childAlignment = {y = .Center}}}) {
+		if clay.UI()(
+		{
+			layout = {
+				sizing = {width = clay.SizingGrow({})},
+				childGap = u16(8 * d),
+				childAlignment = {y = .Center},
+			},
+		},
+		) {
 			for kind, index in tabs {
 				chip(labels[index], u32(index), active == kind, d)
+			}
+			if !searching {
+				if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {}
+				sort_button(textures, settings, active, width >= SORT_LABEL_MIN_WIDTH, d)
 			}
 		}
 		if searching {

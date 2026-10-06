@@ -34,6 +34,30 @@ settings_round_trip_preserves_order_and_clamps_input :: proc(t: ^testing.T) {
 }
 
 @(test)
+settings_sort_defaults_albums_to_added_and_round_trips :: proc(t: ^testing.T) {
+	fresh := parse_settings("")
+	defer free_settings(&fresh)
+	testing.expect_value(t, fresh.sort[.Albums], Sort.Added)
+	testing.expect_value(t, fresh.sort[.Playlists], Sort.Library)
+	testing.expect_value(t, fresh.sort[.Artists], Sort.Library)
+
+	loaded := parse_settings("sort_albums=played\nsort_playlists=name\nsort_artists=added\n")
+	defer free_settings(&loaded)
+	testing.expect_value(t, loaded.sort[.Albums], Sort.Played)
+	testing.expect_value(t, loaded.sort[.Playlists], Sort.Name)
+	// Added needs album dates; hand-edited files fall back to library order.
+	testing.expect_value(t, loaded.sort[.Artists], Sort.Library)
+
+	encoded := format_settings(&loaded)
+	defer delete(encoded)
+	decoded := parse_settings(encoded)
+	defer free_settings(&decoded)
+	testing.expect_value(t, decoded.sort[.Albums], Sort.Played)
+	testing.expect_value(t, decoded.sort[.Playlists], Sort.Name)
+	testing.expect_value(t, decoded.sort[.Artists], Sort.Library)
+}
+
+@(test)
 settings_toggle_pin_and_recent_keep_most_recent_first :: proc(t: ^testing.T) {
 	settings := Settings{}
 	defer free_settings(&settings)

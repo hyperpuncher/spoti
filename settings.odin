@@ -17,6 +17,7 @@ MAX_RECENT :: 60
 Settings :: struct {
 	sidebar_width:   f32,
 	tab:             library.Kind,
+	sort:            [library.Kind]Sort, // per-tab card order
 	pinned:          [dynamic]string, // pin order; drawn first
 	recent:          [dynamic]string, // most recently played first
 	last_track:      string, // last played track URI, resumed on launch
@@ -41,6 +42,13 @@ free_settings :: proc(settings: ^Settings) {
 	settings^ = {}
 }
 
+// Added sorts only where Spotify dates exist; hand-edited files fall back.
+normalize_sort :: proc(settings: ^Settings) {
+	for kind in library.Kind {
+		if !sort_supported(kind, settings.sort[kind]) {settings.sort[kind] = .Library}
+	}
+}
+
 settings_tab_name :: proc(kind: library.Kind) -> string {
 	#partial switch kind {
 	case .Albums:
@@ -62,6 +70,62 @@ settings_tab_kind :: proc(name: string) -> library.Kind {
 	}
 }
 
+// Card order per library tab. Recently added needs Spotify dates, which only
+// saved albums carry, so the other tabs offer played, name and library order.
+Sort :: enum {
+	Added, // recently added first; missing dates last
+	Played, // recently played first; unplayed last
+	Name, // case-insensitive title order
+	Library, // Spotify's own order
+}
+
+sort_name :: proc(sort: Sort) -> string {
+	switch sort {
+	case .Added:
+		return "Recently added"
+	case .Played:
+		return "Recently played"
+	case .Name:
+		return "Name"
+	case .Library:
+		return "Library order"
+	}
+	return ""
+}
+
+sort_kind :: proc(name: string) -> (Sort, bool) {
+	switch name {
+	case "added":
+		return .Added, true
+	case "played":
+		return .Played, true
+	case "name":
+		return .Name, true
+	case "library":
+		return .Library, true
+	}
+	return .Library, false
+}
+
+sort_serial :: proc(sort: Sort) -> string {
+	switch sort {
+	case .Added:
+		return "added"
+	case .Played:
+		return "played"
+	case .Name:
+		return "name"
+	case .Library:
+		return "library"
+	}
+	return "library"
+}
+
+sort_supported :: proc(kind: library.Kind, sort: Sort) -> bool {
+	if sort == .Added && kind != .Albums {return false}
+	return true
+}
+
 // Unknown or malformed lines fall back to defaults, so a corrupt settings file
 // can never stop the app from opening.
 parse_settings :: proc(data: string, allocator := context.allocator) -> Settings {
@@ -69,6 +133,8 @@ parse_settings :: proc(data: string, allocator := context.allocator) -> Settings
 		sidebar_width = DEFAULT_SIDEBAR_WIDTH,
 		tab           = .Playlists,
 	}
+	// Recently added is the default where Spotify dates exist (albums).
+	settings.sort[.Albums] = .Added
 	for line in strings.split_lines(data, context.temp_allocator) {
 		key, _, value := strings.partition(line, "=")
 		switch strings.trim_space(key) {
@@ -78,6 +144,11 @@ parse_settings :: proc(data: string, allocator := context.allocator) -> Settings
 			}
 		case "tab":
 			settings.tab = settings_tab_kind(strings.trim_space(value))
+		case "sort_playlists", "sort_albums", "sort_artists":
+			tab := settings_tab_kind(strings.trim_space(key)[len("sort_"):])
+			if value, ok := sort_kind(strings.trim_space(value)); ok {
+				settings.sort[tab] = value
+			}
 		case "pin":
 			uri := strings.trim_space(value)
 			if len(uri) > 0 && len(settings.pinned) < MAX_PINNED {
@@ -126,6 +197,7 @@ parse_settings :: proc(data: string, allocator := context.allocator) -> Settings
 			}
 		}
 	}
+	normalize_sort(&settings)
 	return settings
 }
 
@@ -134,9 +206,12 @@ format_settings :: proc(settings: ^Settings, allocator := context.allocator) -> 
 	strings.builder_init(&builder, allocator)
 	_ = fmt.sbprintf(
 		&builder,
-		"sidebar_width=%v\ntab=%s\n",
+		"sidebar_width=%v\ntab=%s\nsort_playlists=%s\nsort_albums=%s\nsort_artists=%s\n",
 		settings.sidebar_width,
 		settings_tab_name(settings.tab),
+		sort_serial(settings.sort[.Playlists]),
+		sort_serial(settings.sort[.Albums]),
+		sort_serial(settings.sort[.Artists]),
 	)
 	for uri in settings.pinned {_ = fmt.sbprintf(&builder, "pin=%s\n", uri)}
 	for uri in settings.recent {_ = fmt.sbprintf(&builder, "recent=%s\n", uri)}

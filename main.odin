@@ -78,7 +78,7 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Text)
 		return
 	}
-	for id in ([]string{"toolbar_back", "toolbar_library", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "autoscroll"}) {
+	for id in ([]string{"toolbar_back", "toolbar_library", "sort_button", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "autoscroll"}) {
 		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
 		if id == "spotify_link" && client.detail_loading {continue}
 		if pointer_over(id) {
@@ -980,6 +980,7 @@ main :: proc() {
 			menu_x        = menu.point.x,
 			menu_y        = menu.point.y,
 			menu_count    = menu.count,
+			menu_selected = menu.selected,
 			menu_labels   = menu.labels,
 			scroll_active = autoscroll_container != "",
 			scroll_x      = autoscroll_anchor.x,
@@ -1090,7 +1091,13 @@ main :: proc() {
 			display_page = &library_client.search_pages[search_kind]
 			display_kind = search_kind
 		}
-		if !search_mode {load_more_near_bottom(&library_client, filter, density)}
+		// A reordered tab needs the whole collection: the API offers no
+		// server-side sort, so drain every page before ordering.
+		if !search_mode && settings.sort[filter] != .Library {
+			library.more(&library_client, filter)
+		} else if !search_mode {
+			load_more_near_bottom(&library_client, filter, density)
+		}
 		ensure_covers(&library_client, &textures, display_page, player_cover, visible)
 		if right_clicked {
 			open_menu_at(
@@ -1113,6 +1120,10 @@ main :: proc() {
 					if menu.uri == detail_card_uri(library_client.detail) {
 						detail_pinned = settings_is_pinned(&settings, menu.uri)
 					}
+					order_dirty = true
+					settings_dirty = true
+				case .Pick_Sort:
+					settings.sort[filter] = menu.sorts[index]
 					order_dirty = true
 					settings_dirty = true
 				case .Open_In_Spotify:
@@ -1146,6 +1157,8 @@ main :: proc() {
 				begin_scrollbar_drag(&scrollbar_drag, "detail_rows", mouse_click.y)
 			} else if hit("sidebar_handle", mouse_click) {
 				resizing = true
+			} else if hit("sort_button", mouse_click) {
+				open_sort_menu(&menu, mouse_click, filter, settings.sort[filter])
 			} else {
 				handled := false
 				if hit("toolbar_back", mouse_click) || hit("toolbar_library", mouse_click) {
