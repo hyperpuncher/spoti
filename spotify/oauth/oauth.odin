@@ -72,7 +72,7 @@ begin :: proc(grant: Grant = PLAYBACK_GRANT) -> Flow {
 	encoded_scopes := net.percent_encode(grant.scopes)
 	defer delete(encoded_scopes)
 	address := fmt.aprintf(
-		"https://accounts.spotify.com/authorize?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&code_challenge_method=S256&code_challenge=%s&state=%s&show_dialog=true",
+		"https://accounts.spotify.com/authorize?response_type=code&client_id=%s&redirect_uri=%s&scope=%s&code_challenge_method=S256&code_challenge=%s&state=%s",
 		grant.client_id,
 		redirect,
 		encoded_scopes,
