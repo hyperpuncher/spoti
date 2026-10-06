@@ -505,7 +505,7 @@ main :: proc() {
 			wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
 		}
 		has_event := sdl.WaitEventTimeout(&event, wait_ms)
-		redraw := has_event || first_frame
+		redraw := has_event || first_frame || fx_animating
 		first_frame = false
 		if has_event {
 			for {

@@ -75,8 +75,8 @@ chip :: proc(label: string, id: u32, active: bool, d: f32) {
 // while held and springs back over a fast ease-out on release; the outer
 // hitbox never moves, so siblings never shift. Hover only tints, and
 // keyboard activation never animates.
-BUTTON_PRESS :: 0.85
-BUTTON_SPRING_MS :: 100.0
+BUTTON_PRESS :: 0.95
+BUTTON_SPRING_MS :: 70.0
 
 Button_Fx :: struct {
 	held:     bool, // pressed last frame; a clean release stamps released
