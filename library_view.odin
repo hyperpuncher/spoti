@@ -5,6 +5,7 @@ import "core:math"
 import "core:strings"
 import library "spotify/library"
 import clay "vendor/clay"
+import sdl "vendor:sdl3"
 
 Visible_Items :: struct {
 	first, last:   int,
@@ -127,6 +128,38 @@ list_spacer :: proc(height: f32) {
 	clay.UI()(
 	{layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(height)}}},
 	)
+}
+
+// Three green bars replace the track number on the current row. Heights
+// oscillate while audio plays and rest at fixed steps when paused.
+playing_bars :: proc(playing: bool, d: f32) {
+	if clay.UI()(
+	{
+		layout = {
+			sizing = {width = clay.SizingFixed(24 * d), height = clay.SizingFixed(16 * d)},
+			childAlignment = {x = .Center, y = .Bottom},
+			childGap = u16(3 * d),
+		},
+	},
+	) {
+		phase := f32(sdl.GetTicksNS()) / 1e9 * 7
+		for i in 0 ..< 3 {
+			height := 7 * d
+			if i == 1 {height = 11 * d}
+			if playing {
+				height = (4 + 9 * (0.5 + 0.5 * math.sin(phase + f32(i) * 2.1))) * d
+			}; if clay.UI()(
+			{
+				layout = {
+					sizing = {width = clay.SizingFixed(4 * d), height = clay.SizingFixed(height)},
+				},
+				backgroundColor = GREEN,
+				cornerRadius = clay.CornerRadiusAll(2 * d),
+			},
+			) {
+			}
+		}
+	}
 }
 
 card_row_height :: proc(card_width, text_height, d: f32) -> f32 {
@@ -346,6 +379,7 @@ loading_track_table :: proc(d: f32) {
 
 track_table :: proc(
 	detail: ^library.Detail,
+	view: View,
 	textures: ^Textures,
 	viewport_height, d: f32,
 ) -> (
@@ -416,7 +450,10 @@ track_table :: proc(
 				cornerRadius = clay.CornerRadiusAll(4 * d),
 			},
 			) {
-				if clay.UI()(
+				current := row.uri == view.current_uri && view.button != "play"
+				if current {
+					playing_bars(view.playing, d)
+				} else if clay.UI()(
 				{
 					layout = {
 						sizing = {width = clay.SizingFixed(24 * d)},
@@ -447,7 +484,7 @@ track_table :: proc(
 						clay.TextElementConfig {
 							fontId = 3,
 							fontSize = 15,
-							textColor = WHITE,
+							textColor = current ? GREEN : WHITE,
 							wrapMode = .None,
 						},
 					)
@@ -766,7 +803,7 @@ detail_page :: proc(
 				clay.Text(message, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
 			}
 		} else {
-			visible.tracks = track_table(detail, textures, viewport_height, d)
+			visible.tracks = track_table(detail, view, textures, viewport_height, d)
 		}
 	}
 }

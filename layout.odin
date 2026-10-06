@@ -46,6 +46,8 @@ View :: struct {
 	menu_count:    int,
 	menu_labels:   [2]string,
 	scroll_active: bool, // middle-click autoscroll anchor indicator
+	current_uri:   string, // borrowed selected track; matches a row uri while it owns playback
+	playing:       bool, // audio flowing this frame; freezes the row bars when false
 	scroll_x:      f32,
 	scroll_y:      f32,
 }

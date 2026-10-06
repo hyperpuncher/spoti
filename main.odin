@@ -757,7 +757,8 @@ main :: proc() {
 			displayed_ms = 0
 			stage = .Idle
 			if play_after_stop {
-				play_after_stop = false
+				// Cleared when the new worker starts, so the footer holds
+				// pause across the idle handoff frame instead of flickering.
 				space_pressed = true
 			}
 		}
@@ -850,7 +851,7 @@ main :: proc() {
 			redraw = true
 		}
 		if replay_pending && stage == .Ended && worker != nil && thread.is_done(worker) {
-			replay_pending = false
+			// Cleared on worker start like play_after_stop.
 			space_pressed = true
 			redraw = true
 		}
@@ -901,9 +902,14 @@ main :: proc() {
 			shown_ms = preview
 		}
 		button := "play"
-		if stage == .Playing {button = "pause"}
 		if stage == .Paused {button = "resume"}
-		if stage == .Signing_In || stage == .Buffering || stage == .Stopping {button = "wait"}
+		// Transitional stages keep the pause icon while a (re)start is in
+		// flight, so next/previous never flicker through the play triangle.
+		if stage == .Playing ||
+		   stage == .Signing_In ||
+		   stage == .Buffering ||
+		   (play_after_stop && (stage == .Stopping || stage == .Idle)) ||
+		   (replay_pending && stage == .Ended) {button = "pause"}
 		status := "Ready to play"
 		switch stage {
 		case .Signing_In:
@@ -962,6 +968,8 @@ main :: proc() {
 			scroll_active = autoscroll_container != "",
 			scroll_x      = autoscroll_anchor.x,
 			scroll_y      = autoscroll_anchor.y,
+			current_uri   = selected,
+			playing       = stage == .Playing,
 		}
 		width, height = ui.size(&state)
 		mouse_x, mouse_y: f32
@@ -1405,7 +1413,10 @@ main :: proc() {
 						4,
 						context.allocator,
 					)
-					if alloc_error != nil {stage = .Failed} else {
+					if alloc_error != nil {
+						play_after_stop, replay_pending = false, false
+						stage = .Failed
+					} else {
 						sync.atomic_store(&cancel, false)
 						closed = false
 						work = Login_Work {
@@ -1433,10 +1444,12 @@ main :: proc() {
 							delete(work.track_url)
 							session.close_source(&work.preloaded)
 							chan.destroy(queue)
+							play_after_stop, replay_pending = false, false
 							stage = .Failed
 						} else {
 							clear_audio_stream(&stream)
 							finished = false
+							play_after_stop, replay_pending = false, false
 							sent_frames, sample_rate, duration_ms = 0, 0, 0
 							displayed_ms = seek_ms
 							seek_ms = 0
