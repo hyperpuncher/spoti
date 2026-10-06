@@ -420,6 +420,7 @@ main :: proc() {
 		player_cover = strings.clone(settings.last_cover)
 	}
 	restore_pending := len(settings.last_collection) > 0
+	button_anims := make(map[string]Button_Fx)
 	defer {
 		if worker != nil {release_worker(worker, queue, &cancel, closed)}
 		if preload_worker != nil {
@@ -446,11 +447,13 @@ main :: proc() {
 		delete(input)
 		free_settings(&settings)
 		free_context_menu(&menu)
+		delete(button_anims)
 		if mpris_active {mpris.close()}
 	}
 	stage := Stage.Idle
 	finished := false
 	repeat, replay_pending, play_after_stop := false, false, false
+	fx_animating := false
 	shuffle, volume_dragging := false, false
 	volume: f32 = 0.5
 	seek_dragging, start_paused := false, false
@@ -489,6 +492,7 @@ main :: proc() {
 			if pending {wait_ms = 40; break}
 		}
 		if preload_worker != nil && stage != .Playing {wait_ms = 40}
+		if fx_animating {wait_ms = 0}
 		if first_frame {wait_ms = 0}
 		// If the wake event could not be registered, poll the bus instead.
 		if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
@@ -992,12 +996,17 @@ main :: proc() {
 			f32(ttf.GetFontHeight(ui.font_for_size(&state, 14 * density))) +
 			f32(ttf.GetFontHeight(ui.font_for_size(&state, 12 * density)))
 		t1 := sdl.GetTicksNS()
+		fx := Button_Fx_Ctx {
+			anims      = &button_anims,
+			mouse_down = .LEFT in buttons,
+		}
 		commands, visible := layout(
 			view,
 			&library_client,
 			&settings,
 			filter,
 			&textures,
+			&fx,
 			sidebar_width,
 			f32(width),
 			f32(height),
@@ -1005,6 +1014,7 @@ main :: proc() {
 			dt,
 			density,
 		)
+		fx_animating = fx.animating
 		if middle_clicked {
 			middle_clicked = false
 			for id in ([]string{"library_grid", "detail_rows"}) {

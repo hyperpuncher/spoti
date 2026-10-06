@@ -81,6 +81,11 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		"regression must exercise a clipped row overlapping next",
 	)
 	settings: Settings
+	anims := make(map[string]Button_Fx)
+	defer delete(anims)
+	fx := Button_Fx_Ctx {
+		anims = &anims,
+	}
 	for d in ([]f32{1, 1.5}) {
 		density = d
 		clay.ResetMeasureTextCache()
@@ -97,6 +102,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						&settings,
 						.Albums,
 						&textures,
+						&fx,
 						width,
 						1280 * d,
 						820 * d,
@@ -123,6 +129,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						&settings,
 						.Albums,
 						&textures,
+						&fx,
 						width,
 						1280 * d,
 						820 * d,
@@ -336,12 +343,18 @@ wheel_target_glides_to_rest :: proc(t: ^testing.T) {
 	d: f32 = 1
 	clay.SetLayoutDimensions({1280, 820})
 	clay.UpdateScrollContainers(false, {}, 0)
+	glide_anims := make(map[string]Button_Fx)
+	defer delete(glide_anims)
+	glide_fx := Button_Fx_Ctx {
+		anims = &glide_anims,
+	}
 	_, _ = layout(
 		{button = "pause"},
 		&client,
 		&settings,
 		.Playlists,
 		&textures,
+		&glide_fx,
 		360,
 		1280,
 		820,
@@ -371,4 +384,73 @@ wheel_target_glides_to_rest :: proc(t: ^testing.T) {
 	smooth_cancel("detail_rows", &smooth)
 	testing.expect(t, !smooth.active)
 	testing.expect_value(t, errors, 0)
+}
+
+@(test)
+button_press_scales_icon_and_release_springs_back :: proc(t: ^testing.T) {
+	memory := make([]u8, int(clay.MinMemorySize()))
+	defer delete(memory)
+	errors := 0
+	clay.Initialize(
+		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
+		{1280, 820},
+		{handler = layout_test_error, userData = &errors},
+	)
+	defer clay.SetCurrentContext(nil)
+	density: f32 = 1
+	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	anims := make(map[string]Button_Fx)
+	defer delete(anims)
+	fx := Button_Fx_Ctx {
+		anims = &anims,
+	}
+	fx_test_layout(&fx, 1)
+	next := clay.GetElementData(clay.ID("footer_next")).boundingBox
+	testing.expect(t, next.width > 0, "footer next must exist")
+	center := clay.Vector2{next.x + next.width / 2, next.y + next.height / 2}
+	// Hover without press reports hover at full size.
+	fx.mouse_down = false
+	clay.SetPointerState(center, false)
+	fx_test_layout(&fx, 1)
+	scale, over := button_fx(&fx, "footer_next")
+	testing.expect(t, over, "pointer over footer next must report hover")
+	testing.expect_value(t, scale, 1)
+	// Press shrinks instantly.
+	fx.mouse_down = true
+	clay.SetPointerState(center, true)
+	fx_test_layout(&fx, 1)
+	scale, over = button_fx(&fx, "footer_next")
+	testing.expect(t, over)
+	testing.expect_value(t, scale, BUTTON_PRESS)
+	// Release springs back instead of snapping.
+	fx.mouse_down = false
+	clay.SetPointerState(center, false)
+	scale, _ = button_fx(&fx, "footer_next")
+	testing.expect(t, scale > BUTTON_PRESS && scale <= 1, "release must ease back")
+	testing.expect_value(t, errors, 0)
+}
+
+fx_test_layout :: proc(fx: ^Button_Fx_Ctx, d: f32) {
+	clay.SetLayoutDimensions({1280, 820})
+	clay.UpdateScrollContainers(false, {}, 0)
+	client: library.Client
+	textures := Textures {
+		by_key = make(map[u64]^sdl.Texture),
+	}
+	defer {delete(textures.by_key); delete(textures.requested)}
+	settings: Settings
+	_, _ = layout(
+		{button = "pause"},
+		&client,
+		&settings,
+		.Playlists,
+		&textures,
+		fx,
+		360,
+		1280,
+		820,
+		26,
+		0,
+		d,
+	)
 }

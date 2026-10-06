@@ -2,6 +2,7 @@ package main
 
 import library "spotify/library"
 import clay "vendor/clay"
+import sdl "vendor:sdl3"
 
 BG :: clay.Color{18, 18, 18, 255}
 SIDEBAR :: clay.Color{24, 24, 24, 255}
@@ -11,6 +12,8 @@ HOVER :: clay.Color{52, 52, 52, 255}
 SELECTED :: clay.Color{36, 36, 36, 255}
 PLAYER :: clay.Color{12, 12, 12, 255}
 WHITE :: clay.Color{245, 245, 245, 255}
+FOOTER_HOVER :: clay.Color{225, 225, 225, 255}
+HERO_HOVER :: clay.Color{38, 224, 106, 255}
 MUTED :: clay.Color{165, 165, 165, 255}
 GREEN :: clay.Color{30, 215, 96, 255}
 
@@ -60,7 +63,7 @@ chip :: proc(label: string, id: u32, active: bool, d: f32) {
 			padding = clay.PaddingAll(u16(14 * d)),
 			childAlignment = {y = .Center},
 		},
-		backgroundColor = active ? WHITE : CARD,
+		backgroundColor = active ? WHITE : clay.PointerOver(clay.ID("chip", id)) ? HOVER : CARD,
 		cornerRadius = clay.CornerRadiusAll(16 * d),
 	},
 	) {
@@ -68,21 +71,84 @@ chip :: proc(label: string, id: u32, active: bool, d: f32) {
 	}
 }
 
-toolbar_button :: proc(id, icon: string, textures: ^Textures, tint: Icon_Tint, d: f32) {
+// Snappy press feedback for fixed-size buttons. The icon shrinks instantly
+// while held and springs back over a fast ease-out on release; the outer
+// hitbox never moves, so siblings never shift. Hover only tints, and
+// keyboard activation never animates.
+BUTTON_PRESS :: 0.85
+BUTTON_SPRING_MS :: 100.0
+
+Button_Fx :: struct {
+	held:     bool, // pressed last frame; a clean release stamps released
+	released: u64, // ticksns of release; 0 at rest
+}
+
+Button_Fx_Ctx :: struct {
+	anims:      ^map[string]Button_Fx,
+	mouse_down: bool,
+	animating:  bool, // a spring is mid-flight; main keeps frames coming
+}
+
+// Icon scale for a button id plus its hover state. Disabled buttons skip
+// the map entirely and only report hover for the cursor.
+button_fx :: proc(
+	ctx: ^Button_Fx_Ctx,
+	id: string,
+	enabled: bool = true,
+) -> (
+	scale: f32,
+	hovered: bool,
+) {
+	scale = 1
+	hovered = clay.PointerOver(clay.ID(id))
+	if !enabled {return scale, false}
+	fx := ctx.anims[id]
+	if hovered && ctx.mouse_down {
+		fx.held = true
+		scale = BUTTON_PRESS
+	} else {
+		if fx.held {
+			fx.held = false
+			fx.released = sdl.GetTicksNS()
+		}
+		if fx.released != 0 {
+			t := f32(sdl.GetTicksNS() - fx.released) / 1e9 * 1000 / BUTTON_SPRING_MS
+			if t >= 1 {
+				fx.released = 0
+			} else {
+				k := 1 - (1 - t) * (1 - t) * (1 - t)
+				scale = BUTTON_PRESS + (1 - BUTTON_PRESS) * k
+				ctx.animating = true
+			}
+		}
+	}
+	ctx.anims[id] = fx
+	return scale, hovered
+}
+
+toolbar_button :: proc(
+	id, icon: string,
+	textures: ^Textures,
+	tint: Icon_Tint,
+	fx: ^Button_Fx_Ctx,
+	d: f32,
+) {
+	scale, hovered := button_fx(fx, id)
 	if clay.UI_WithId(clay.ID(id))(
 	{
 		layout = {
 			sizing = {width = clay.SizingFixed(40 * d), height = clay.SizingFixed(40 * d)},
 			childAlignment = {x = .Center, y = .Center},
 		},
+		backgroundColor = hovered ? HOVER : clay.Color{},
 		cornerRadius = clay.CornerRadiusAll(20 * d),
 	},
 	) {
-		icon_element(textures, icon, tint, 20 * d)
+		icon_element(textures, icon, tint, 20 * d * scale)
 	}
 }
 
-top_bar :: proc(view: View, textures: ^Textures, d: f32) {
+top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 	if clay.UI()(
 	{
 		layout = {
@@ -94,8 +160,8 @@ top_bar :: proc(view: View, textures: ^Textures, d: f32) {
 		backgroundColor = BG,
 	},
 	) {
-		toolbar_button("toolbar_back", "chevron-left", textures, .Muted, d)
-		toolbar_button("toolbar_library", "library", textures, .Muted, d)
+		toolbar_button("toolbar_back", "chevron-left", textures, .Muted, fx, d)
+		toolbar_button("toolbar_library", "library", textures, .Muted, fx, d)
 		if clay.UI_WithId(clay.ID("track_input"))(
 		{
 			layout = {
@@ -119,21 +185,29 @@ top_bar :: proc(view: View, textures: ^Textures, d: f32) {
 	}
 }
 
-player_control :: proc(id, icon: string, tint: Icon_Tint, textures: ^Textures, d: f32) {
+player_control :: proc(
+	id, icon: string,
+	tint: Icon_Tint,
+	textures: ^Textures,
+	fx: ^Button_Fx_Ctx,
+	d: f32,
+) {
+	scale, hovered := button_fx(fx, id, tint != .Disabled)
 	if clay.UI_WithId(clay.ID(id))(
 	{
 		layout = {
 			sizing = {width = clay.SizingFixed(32 * d), height = clay.SizingFixed(32 * d)},
 			childAlignment = {x = .Center, y = .Center},
 		},
+		backgroundColor = hovered ? HOVER : clay.Color{},
 		cornerRadius = clay.CornerRadiusAll(16 * d),
 	},
 	) {
-		icon_element(textures, icon, tint, 18 * d)
+		icon_element(textures, icon, tint, 18 * d * scale)
 	}
 }
 
-player_bar :: proc(view: View, textures: ^Textures, d: f32) {
+player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 	if clay.UI()(
 	{
 		layout = {
@@ -207,9 +281,11 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 					"shuffle",
 					view.shuffle ? .Green : .Muted,
 					textures,
+					fx,
 					d,
 				)
-				player_control("footer_previous", "skip-back", .White, textures, d)
+				player_control("footer_previous", "skip-back", .White, textures, fx, d)
+				play_scale, play_over := button_fx(fx, "footer_play")
 				if clay.UI_WithId(clay.ID("footer_play"))(
 				{
 					layout = {
@@ -219,23 +295,36 @@ player_bar :: proc(view: View, textures: ^Textures, d: f32) {
 						},
 						childAlignment = {x = .Center, y = .Center},
 					},
-					backgroundColor = WHITE,
-					cornerRadius = clay.CornerRadiusAll(22 * d),
 				},
 				) {
-					icon_element(
-						textures,
-						view.button == "pause" ? "pause-filled" : "play-filled",
-						.Dark,
-						18 * d,
-					)
+					if clay.UI()(
+					{
+						layout = {
+							sizing = {
+								width = clay.SizingFixed(44 * d * play_scale),
+								height = clay.SizingFixed(44 * d * play_scale),
+							},
+							childAlignment = {x = .Center, y = .Center},
+						},
+						backgroundColor = play_over ? FOOTER_HOVER : WHITE,
+						cornerRadius = clay.CornerRadiusAll(22 * d * play_scale),
+					},
+					) {
+						icon_element(
+							textures,
+							view.button == "pause" ? "pause-filled" : "play-filled",
+							.Dark,
+							18 * d * play_scale,
+						)
+					}
 				}
-				player_control("footer_next", "skip-forward", .White, textures, d)
+				player_control("footer_next", "skip-forward", .White, textures, fx, d)
 				player_control(
 					"footer_repeat",
 					"repeat",
 					view.repeat ? .Green : .Muted,
 					textures,
+					fx,
 					d,
 				)
 			}
@@ -372,6 +461,7 @@ layout :: proc(
 	settings: ^Settings,
 	filter: library.Kind,
 	textures: ^Textures,
+	fx: ^Button_Fx_Ctx,
 	sidebar_width, viewport_width, viewport_height, card_text_height, dt, d: f32,
 ) -> (
 	clay.ClayArray(clay.RenderCommand),
@@ -388,7 +478,7 @@ layout :: proc(
 		backgroundColor = BG,
 	},
 	) {
-		top_bar(view, textures, d)
+		top_bar(view, textures, fx, d)
 		if clay.UI()(
 		{layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})}}},
 		) {
@@ -432,6 +522,7 @@ layout :: proc(
 				view,
 				client,
 				textures,
+				fx,
 				viewport_width - (sidebar_width + 6) * d,
 				viewport_height,
 				card_text_height,
@@ -439,7 +530,7 @@ layout :: proc(
 				&visible,
 			)
 		}
-		player_bar(view, textures, d)
+		player_bar(view, textures, fx, d)
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
 		context_menu(view, d)

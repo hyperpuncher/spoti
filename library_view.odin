@@ -601,6 +601,7 @@ detail_page :: proc(
 	view: View,
 	client: ^library.Client,
 	textures: ^Textures,
+	fx: ^Button_Fx_Ctx,
 	available_width, viewport_height, card_text_height, d: f32,
 	visible: ^Frame_Visible,
 ) {
@@ -711,6 +712,7 @@ detail_page :: proc(
 		) {
 			play_enabled := detail_play_enabled(client)
 			if detail.source != .Artist {
+				hero_scale, hero_over := button_fx(fx, "hero_play", play_enabled)
 				if clay.UI_WithId(clay.ID("hero_play"))(
 				{
 					layout = {
@@ -720,17 +722,35 @@ detail_page :: proc(
 						},
 						childAlignment = {x = .Center, y = .Center},
 					},
-					backgroundColor = play_enabled ? GREEN : CARD,
-					cornerRadius = clay.CornerRadiusAll(28 * d),
 				},
 				) {
-					icon_element(textures, "play-filled", play_enabled ? .Dark : .Disabled, 22 * d)
+					if clay.UI()(
+					{
+						layout = {
+							sizing = {
+								width = clay.SizingFixed(56 * d * hero_scale),
+								height = clay.SizingFixed(56 * d * hero_scale),
+							},
+							childAlignment = {x = .Center, y = .Center},
+						},
+						backgroundColor = play_enabled ? (hero_over ? HERO_HOVER : GREEN) : CARD,
+						cornerRadius = clay.CornerRadiusAll(28 * d * hero_scale),
+					},
+					) {
+						icon_element(
+							textures,
+							"play-filled",
+							play_enabled ? .Dark : .Disabled,
+							22 * d * hero_scale,
+						)
+					}
 				}
 				player_control(
 					"hero_shuffle",
 					"shuffle",
 					!play_enabled ? .Disabled : view.shuffle ? .Green : .Muted,
 					textures,
+					fx,
 					d,
 				)
 			}
@@ -740,6 +760,7 @@ detail_page :: proc(
 				view.pinned ? "pin-filled" : "pin-off",
 				client.detail_loading ? .Disabled : view.pinned ? .Green : .Muted,
 				textures,
+				fx,
 				d,
 			)
 			if clay.UI_WithId(clay.ID("spotify_link"))(
