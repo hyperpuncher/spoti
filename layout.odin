@@ -349,7 +349,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 					fx,
 					d,
 				)
-				player_control("footer_previous", "skip-back", .White, textures, fx, d)
+				player_control("footer_previous", "skip-back-filled", .White, textures, fx, d)
 				play_scale, play_over := button_fx(fx, "footer_play")
 				if clay.UI_WithId(clay.ID("footer_play"))(
 				{
@@ -383,7 +383,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 						)
 					}
 				}
-				player_control("footer_next", "skip-forward", .White, textures, fx, d)
+				player_control("footer_next", "skip-forward-filled", .White, textures, fx, d)
 				player_control(
 					"footer_repeat",
 					"repeat",

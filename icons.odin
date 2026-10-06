@@ -31,6 +31,8 @@ ICON_NAMES :: []string {
 	"repeat",
 	"skip-back",
 	"skip-forward",
+	"skip-back-filled",
+	"skip-forward-filled",
 	"heart",
 	"pin",
 	"pin-filled",
