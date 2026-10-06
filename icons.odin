@@ -7,6 +7,7 @@ import "core:os"
 import artwork "spotify/artwork"
 import library "spotify/library"
 import ui "ui"
+import sdl "vendor:sdl3"
 
 Icon_Tint :: enum {
 	White,
@@ -46,20 +47,39 @@ ICON_NAMES :: []string {
 	"list-sort-descending",
 }
 
-icon_tint_color :: proc(tint: Icon_Tint) -> (r, g, b: u8) {
+// Tint lives in the texture color mod, not the pixels, so a theme switch
+// recolors every icon without redecoding. White and Dark swap sides;
+// Muted deepens for contrast on white; the rest read on both.
+icon_tint_color :: proc(tint: Icon_Tint, dark: bool) -> (r, g, b: u8) {
 	switch tint {
 	case .White:
-		return 245, 245, 245
+		if dark {return 245, 245, 245}
+		return 32, 32, 32
 	case .Muted:
-		return 165, 165, 165
+		if dark {return 165, 165, 165}
+		return 120, 120, 120
 	case .Green:
 		return 30, 215, 96
 	case .Dark:
-		return 12, 12, 12
+		if dark {return 12, 12, 12}
+		return 245, 245, 245
 	case .Disabled:
 		return 90, 90, 90
 	}
 	return 245, 245, 245
+}
+
+ICON_TINTS :: [5]Icon_Tint{.White, .Muted, .Green, .Dark, .Disabled}
+
+retint_icons :: proc(textures: ^Textures, dark: bool) {
+	for name in ICON_NAMES {
+		for tint in ICON_TINTS {
+			texture := textures.by_key[icon_key(name, tint)]
+			if texture == nil {continue}
+			r, g, b := icon_tint_color(tint, dark)
+			_ = sdl.SetTextureColorMod(texture, r, g, b)
+		}
+	}
 }
 
 icon_key :: proc(name: string, tint: Icon_Tint) -> u64 {
@@ -69,7 +89,7 @@ icon_key :: proc(name: string, tint: Icon_Tint) -> u64 {
 
 // The artwork package is the only image decoder in the tree, so icons go
 // through the same decode path as covers.
-load_icons :: proc(state: ^ui.State, textures: ^Textures) {
+load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 	for name in ICON_NAMES {
 		path := fmt.aprintf("build/icons/%s.png", name)
 		bytes, read_error := os.read_entire_file_from_path(path, context.allocator)
@@ -78,18 +98,13 @@ load_icons :: proc(state: ^ui.State, textures: ^Textures) {
 		image, decoded := artwork.decode(bytes)
 		delete(bytes)
 		if !decoded {continue}
-		for tint in ([]Icon_Tint{.White, .Muted, .Green, .Dark, .Disabled}) {
-			r, g, b := icon_tint_color(tint)
-			tinted := make([]u8, len(image.pixels))
-			for i := 0; i + 3 < len(image.pixels); i += 4 {
-				tinted[i + 0] = u8(u32(image.pixels[i + 0]) * u32(r) / 255)
-				tinted[i + 1] = u8(u32(image.pixels[i + 1]) * u32(g) / 255)
-				tinted[i + 2] = u8(u32(image.pixels[i + 2]) * u32(b) / 255)
-				tinted[i + 3] = image.pixels[i + 3]
+		for tint in ICON_TINTS {
+			texture := ui.create_texture(state, image.pixels, image.width, image.height)
+			if texture != nil {
+				r, g, b := icon_tint_color(tint, dark)
+				_ = sdl.SetTextureColorMod(texture, r, g, b)
+				textures.by_key[icon_key(name, tint)] = texture
 			}
-			texture := ui.create_texture(state, tinted, image.width, image.height)
-			delete(tinted)
-			if texture != nil {textures.by_key[icon_key(name, tint)] = texture}
 		}
 		delete(image.pixels)
 	}

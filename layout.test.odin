@@ -455,3 +455,14 @@ fx_test_layout :: proc(fx: ^Button_Fx_Ctx, d: f32) {
 		d,
 	)
 }
+
+@(test)
+apply_theme_switches_palette_and_restores_dark :: proc(t: ^testing.T) {
+	testing.expect(t, LIGHT_THEME.bg != DARK_THEME.bg, "themes must differ")
+	apply_theme(false)
+	testing.expect(t, BG == LIGHT_THEME.bg, "light theme must apply")
+	testing.expect(t, WHITE == LIGHT_THEME.text, "text follows the theme")
+	apply_theme(true)
+	testing.expect(t, BG == DARK_THEME.bg, "dark theme must restore")
+	testing.expect(t, WHITE == DARK_THEME.text, "other tests render dark")
+}

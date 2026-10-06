@@ -4,18 +4,82 @@ import library "spotify/library"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
-BG :: clay.Color{18, 18, 18, 255}
-SIDEBAR :: clay.Color{24, 24, 24, 255}
-PANEL :: clay.Color{32, 32, 32, 255}
-CARD :: clay.Color{45, 45, 45, 255}
-HOVER :: clay.Color{52, 52, 52, 255}
-SELECTED :: clay.Color{36, 36, 36, 255}
-PLAYER :: clay.Color{12, 12, 12, 255}
-WHITE :: clay.Color{245, 245, 245, 255}
-FOOTER_HOVER :: clay.Color{225, 225, 225, 255}
-HERO_HOVER :: clay.Color{38, 224, 106, 255}
-MUTED :: clay.Color{165, 165, 165, 255}
-GREEN :: clay.Color{30, 215, 96, 255}
+// Active palette. Variables, not constants, so the app can follow the
+// system theme without touching every use site; apply_theme assigns them
+// all at once on startup and on SDL_EVENT_SYSTEM_THEME_CHANGED.
+BG := DARK_THEME.bg
+SIDEBAR := DARK_THEME.sidebar
+PANEL := DARK_THEME.panel
+CARD := DARK_THEME.card
+HOVER := DARK_THEME.hover
+SELECTED := DARK_THEME.selected
+PLAYER := DARK_THEME.player
+WHITE := DARK_THEME.text
+FOOTER_HOVER := DARK_THEME.footer_hover
+HERO_HOVER := DARK_THEME.hero_hover
+MUTED := DARK_THEME.muted
+GREEN := DARK_THEME.green
+
+Theme :: struct {
+	bg:           clay.Color,
+	sidebar:      clay.Color,
+	panel:        clay.Color,
+	card:         clay.Color,
+	hover:        clay.Color,
+	selected:     clay.Color,
+	player:       clay.Color,
+	text:         clay.Color,
+	footer_hover: clay.Color,
+	hero_hover:   clay.Color,
+	muted:        clay.Color,
+	green:        clay.Color,
+}
+
+DARK_THEME :: Theme {
+	bg           = {18, 18, 18, 255},
+	sidebar      = {24, 24, 24, 255},
+	panel        = {32, 32, 32, 255},
+	card         = {45, 45, 45, 255},
+	hover        = {52, 52, 52, 255},
+	selected     = {36, 36, 36, 255},
+	player       = {12, 12, 12, 255},
+	text         = {245, 245, 245, 255},
+	footer_hover = {225, 225, 225, 255},
+	hero_hover   = {38, 224, 106, 255},
+	muted        = {165, 165, 165, 255},
+	green        = {30, 215, 96, 255},
+}
+
+LIGHT_THEME :: Theme {
+	bg           = {255, 255, 255, 255},
+	sidebar      = {242, 242, 242, 255},
+	panel        = {233, 233, 233, 255},
+	card         = {229, 229, 229, 255},
+	hover        = {214, 214, 214, 255},
+	selected     = {226, 226, 226, 255},
+	player       = {247, 247, 247, 255},
+	text         = {28, 28, 28, 255},
+	footer_hover = {70, 70, 70, 255},
+	hero_hover   = {38, 224, 106, 255},
+	muted        = {112, 112, 112, 255},
+	green        = {30, 215, 96, 255},
+}
+
+apply_theme :: proc(dark: bool) {
+	theme := dark ? DARK_THEME : LIGHT_THEME
+	BG = theme.bg
+	SIDEBAR = theme.sidebar
+	PANEL = theme.panel
+	CARD = theme.card
+	HOVER = theme.hover
+	SELECTED = theme.selected
+	PLAYER = theme.player
+	WHITE = theme.text
+	FOOTER_HOVER = theme.footer_hover
+	HERO_HOVER = theme.hero_hover
+	MUTED = theme.muted
+	GREEN = theme.green
+}
 
 SIDEBAR_MIN :: 320
 SIDEBAR_MAX :: 640

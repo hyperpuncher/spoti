@@ -26,7 +26,7 @@ Textures :: struct {
 }
 
 // Scroll-edge fades baked once as dithered ramp strips, keyed by texture
-// address like covers and freed with them. Tinted panel-dark at upload.
+// address like covers and freed with them. Tinted sidebar at upload.
 load_fades :: proc(state: ^ui.State, textures: ^Textures) {
 	top := ui.make_fade_texture(state, false)
 	if top != nil {
@@ -39,6 +39,16 @@ load_fades :: proc(state: ^ui.State, textures: ^Textures) {
 		_ = sdl.SetTextureColorMod(bottom, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
 		textures.by_key[u64(uintptr(bottom))] = bottom
 		textures.fade_bottom = u64(uintptr(bottom))
+	}
+}
+
+// Recolors the baked fade strips after a theme switch; the ramp pixels
+// stay white and only the mod follows the sidebar.
+retint_fades :: proc(textures: ^Textures) {
+	for key in ([2]u64{textures.fade_top, textures.fade_bottom}) {
+		texture := textures.by_key[key]
+		if texture == nil {continue}
+		_ = sdl.SetTextureColorMod(texture, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
 	}
 }
 

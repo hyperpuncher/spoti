@@ -421,7 +421,7 @@ frame_done :: proc(state: ^State) {
 			f32(width) - f32(label_width) - 8 * density,
 			8 * density,
 			14 * density,
-			{190, 190, 190, 255},
+			{120, 120, 120, 255},
 			font_id = 1,
 		)
 	}

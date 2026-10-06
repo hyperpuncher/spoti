@@ -57,6 +57,15 @@ pointer_over :: proc(id: string, index: u32 = 0) -> bool {
 	return clay.PointerOver(clay.ID(id, index))
 }
 
+// Follows the desktop theme through SDL; unknown means dark, and
+// SPOTI_THEME forces light or dark for testing and user control.
+system_dark :: proc() -> bool {
+	value := os.get_env("SPOTI_THEME", context.temp_allocator)
+	if value == "light" {return false}
+	if value == "dark" {return true}
+	return sdl.GetSystemTheme() != .LIGHT
+}
+
 update_cursor :: proc(
 	state: ^ui.State,
 	client: ^library.Client,
@@ -380,7 +389,9 @@ main :: proc() {
 		by_key    = make(map[u64]^sdl.Texture),
 		requested = make(map[u64]Cover_Request_State),
 	}
-	load_icons(&state, &textures)
+	theme_dark := system_dark()
+	apply_theme(theme_dark)
+	load_icons(&state, &textures, theme_dark)
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
 	mpris_active := mpris.start(WAKE_EVENT != 0 ? wake_mpris : nil)
@@ -516,6 +527,15 @@ main :: proc() {
 				#partial switch event.type {
 				case .QUIT, .WINDOW_CLOSE_REQUESTED:
 					running = false
+				case .SYSTEM_THEME_CHANGED:
+					next_dark := system_dark()
+					if next_dark != theme_dark {
+						theme_dark = next_dark
+						apply_theme(theme_dark)
+						retint_icons(&textures, theme_dark)
+						retint_fades(&textures)
+						first_frame = true
+					}
 				case .MOUSE_BUTTON_UP:
 					if event.button.button == sdl.BUTTON_LEFT {
 						if resizing {
