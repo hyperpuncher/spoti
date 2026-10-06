@@ -69,6 +69,7 @@ Result :: struct {
 	ok:            bool,
 	liked:         bool, // Like; echoes the requested membership
 	auth:          Auth_Result, // Auth; why sign-in stopped
+	retry_after:   int, // Index; seconds the server asked us to wait
 }
 
 Cover_Request :: struct {
@@ -102,6 +103,8 @@ Client :: struct {
 	remaining_initial:     int,
 	last_http_status:      int,
 	failed:                bool,
+	page_at:               time.Time, // earliest time the next page request may go out
+	rate_limited:          u8, // consecutive 429s; drives the doubling backoff
 	search_query:          string, // applied query; owned
 	search_serial:         u64, // latest request; stale results are dropped
 	search_loading:        bool,
@@ -232,16 +235,25 @@ handle :: proc(
 	}
 	#partial switch request.kind {
 	case .Index:
+		retry_after: int
 		page, status, ok := fetch_index(
 			tokens.access,
 			request.list,
 			request.offset,
 			request.cursor,
 			reuse,
+			&retry_after,
 		)
 		send(
 			client,
-			Result{kind = .Index, list = request.list, page = page, status = status, ok = ok},
+			Result {
+				kind = .Index,
+				list = request.list,
+				page = page,
+				status = status,
+				ok = ok,
+				retry_after = retry_after,
+			},
 		)
 	case .Detail:
 		detail, status, ok := fetch_detail(
@@ -468,11 +480,29 @@ start :: proc(client: ^Client) -> bool {
 	return true
 }
 
+// Spotify answers request bursts with 429 on a rolling window, and every paged
+// read counts against it, so pages are spaced out. A rejected page waits for
+// the server's Retry-After or a doubling backoff instead of poisoning the
+// client, which would also stop cover loading and search.
+PAGE_INTERVAL :: 400 * time.Millisecond
+PAGE_RATE_LIMIT_BACKOFF :: 2 * time.Second
+PAGE_RETRY_BACKOFF :: 500 * time.Millisecond
+RATE_LIMIT_STEPS :: 4
+
+rate_limit_delay :: proc(client: ^Client, retry_after: int) -> time.Duration {
+	client.rate_limited = min(client.rate_limited + 1, RATE_LIMIT_STEPS)
+	if retry_after > 0 {return time.Duration(retry_after) * time.Second}
+	return PAGE_RATE_LIMIT_BACKOFF * time.Duration(1 << (client.rate_limited - 1))
+}
+
 more :: proc(client: ^Client, kind: Kind) {
 	if client.worker == nil || client.state != .Ready {return}
 	i := kind
 	page := &client.pages[i]
-	if !page.has_more || client.pending[i] {return}
+	// A page that never loaded keeps has_more false; ask again instead of
+	// treating the tab as finished.
+	if page.ready && !page.has_more {return}
+	if client.pending[i] || time.since(client.page_at) < 0 {return}
 	request := Request {
 		kind   = .Index,
 		list   = kind,
@@ -481,6 +511,7 @@ more :: proc(client: ^Client, kind: Kind) {
 	}
 	if queue_request(client, &request) {
 		client.pending[i] = true
+		client.page_at = time.time_add(time.now(), PAGE_INTERVAL)
 	}
 }
 
@@ -610,19 +641,17 @@ clear_detail :: proc(client: ^Client) {
 }
 
 more_rows :: proc(client: ^Client) -> bool {
-	if client.worker == nil || client.detail_loading || !client.detail.has_more {return false}
-	if len(client.detail.id) == 0 {return false}
+	if client.detail_loading || !client.detail.has_more {return false}
+	if len(client.detail.id) == 0 || time.since(client.page_at) < 0 {return false}
 	request := Request {
 		kind   = .More,
 		source = client.detail.source,
 		id     = strings.clone(client.detail.id),
 		offset = client.detail.next_offset,
 	}
-	if !chan.try_send(client.requests, request) {
-		delete(request.id)
-		return false
-	}
+	if !queue_request(client, &request) {return false}
 	client.detail_loading = true
+	client.page_at = time.time_add(time.now(), PAGE_INTERVAL)
 	return true
 }
 
@@ -695,9 +724,8 @@ apply :: proc(client: ^Client, result: Result) {
 	switch local.kind {
 	case .Index:
 		if !local.ok {
-			client.failed = true
+			client.pending[local.list] = false
 			client.last_http_status = local.status
-			client.state = local.status <= 0 ? .Missing_Client_ID : .Failed
 			diagnostic.result(
 				fmt.aprintf("index-%v", local.list, allocator = context.temp_allocator),
 				false,
@@ -706,10 +734,33 @@ apply :: proc(client: ^Client, result: Result) {
 				0,
 				false,
 			)
+			switch {
+			case local.status == 429:
+				delay := rate_limit_delay(client, local.retry_after)
+				client.page_at = time.time_add(time.now(), delay)
+				diagnostic.writef(
+					"library rate limited retry-after=%ds backoff-ms=%d",
+					local.retry_after,
+					int(delay / time.Millisecond),
+				)
+			case local.status >= 500 || local.status <= 0:
+				client.page_at = time.time_add(time.now(), PAGE_RETRY_BACKOFF)
+			case:
+				// An authorization problem (401, 403) stops the session until
+				// sign-in is fixed; everything else retries after the backoff.
+				client.failed = true
+				client.state = .Failed
+				return
+			}
+			// A failed initial load still counts as attempted, so the tab can
+			// leave the loading state and ask again later.
+			if client.remaining_initial > 0 {client.remaining_initial -= 1}
+			client.state = client.remaining_initial > 0 ? .Loading : .Ready
 			return
 		}
 		i := local.list
 		client.pending[i] = false
+		client.rate_limited = 0
 		if client.remaining_initial > 0 {client.remaining_initial -= 1}
 		destination := &client.pages[i]
 		message := fmt.aprintf(
@@ -794,11 +845,23 @@ apply :: proc(client: ^Client, result: Result) {
 		if local.source == client.detail.source && local.id == client.detail.id {
 			client.detail_loading = false
 			if !local.ok {
-				client.detail.more_failures += 1
-				if client.detail.more_failures >= 3 {client.detail.has_more = false}
+				if local.status == 429 {
+					client.page_at = time.time_add(
+						time.now(),
+						rate_limit_delay(client, local.retry_after),
+					)
+				} else if local.status >= 500 || local.status <= 0 {
+					client.page_at = time.time_add(time.now(), PAGE_RETRY_BACKOFF)
+				} else {
+					// Transient failures wait out the backoff instead of spending
+					// a retry and giving up on the rest of the page.
+					client.detail.more_failures += 1
+					if client.detail.more_failures >= 3 {client.detail.has_more = false}
+				}
 			}
 			if local.ok && client.detail.ready {
 				client.detail.more_failures = 0
+				client.rate_limited = 0
 				allocator := virtual.arena_allocator(&client.detail.arena)
 				if local.source == .Artist {
 					for release in local.releases {

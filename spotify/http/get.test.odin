@@ -23,6 +23,32 @@ post_form_rejects_invalid_addresses_and_empty_forms :: proc(t: ^testing.T) {
 }
 
 @(test)
+header_capture_reads_retry_after_and_resets_per_response :: proc(t: ^testing.T) {
+	retry_after := 7
+	info: Range_Info
+	capture := Header_Capture {
+		range       = &info,
+		retry_after = &retry_after,
+	}
+	feed_header(&capture, "HTTP/1.1 429 Too Many Requests\r\n")
+	testing.expect_value(t, retry_after, 0)
+	feed_header(&capture, "Retry-After: 121\r\n")
+	testing.expect_value(t, retry_after, 121)
+	feed_header(&capture, "Content-Range: bytes 0-15/1000\r\n")
+	testing.expect(t, info.valid && info.start == 0 && info.end == 15 && info.total == 1000)
+	// A new response clears both, and a malformed value leaves the reset one.
+	feed_header(&capture, "HTTP/1.1 200 OK\r\n")
+	testing.expect_value(t, retry_after, 0)
+	testing.expect(t, !info.valid)
+	feed_header(&capture, "Retry-After: soon\r\n")
+	testing.expect_value(t, retry_after, 0)
+}
+
+feed_header :: proc(capture: ^Header_Capture, line: string) {
+	_ = read_headers(raw_data(line), 1, len(line), capture)
+}
+
+@(test)
 response_buffer_rejects_overflow_and_excess_data :: proc(t: ^testing.T) {
 	buffer := Response_Buffer {
 		bytes = make([dynamic]u8),

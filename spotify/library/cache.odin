@@ -97,12 +97,19 @@ api_get :: proc(
 	access, address: string,
 	limit: int,
 	reuse: rawptr = nil,
+	retry_after: ^int = nil,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
 	ok: bool,
 ) {
-	return cached_get("api", address, {bearer = access, limit = limit}, API_TTL, reuse)
+	return cached_get(
+		"api",
+		address,
+		{bearer = access, limit = limit, retry_after = retry_after},
+		API_TTL,
+		reuse,
+	)
 }
 
 cover_get :: proc(

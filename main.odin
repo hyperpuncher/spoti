@@ -274,7 +274,8 @@ autoscroll_step :: proc(container: string, dy, dt, d: f32) -> bool {
 
 load_more_near_bottom :: proc(client: ^library.Client, filter: library.Kind, d: f32) {
 	page := &client.pages[filter]
-	if !page.has_more || client.pending[filter] {return}
+	// A page that never loaded still has to be asked for again.
+	if (page.ready && !page.has_more) || client.pending[filter] {return}
 	scroll := clay.GetScrollContainerData(clay.ID("library_grid"))
 	if !scroll.found || scroll.scrollPosition == nil {return}
 	remaining :=
@@ -1220,13 +1221,10 @@ main :: proc() {
 			display_page = &library_client.search_pages[search_kind]
 			display_kind = search_kind
 		}
-		// A reordered tab needs the whole collection: the API offers no
-		// server-side sort, so drain every page before ordering.
-		if !search_mode && settings.sort[filter] != .Library {
-			library.more(&library_client, filter)
-		} else if !search_mode {
-			load_more_near_bottom(&library_client, filter, density)
-		}
+		// Pages stream in as the grid nears the bottom; sorting applies to what
+		// is loaded, exactly like the reference client. Walking the whole
+		// collection would burn the dev-mode quota bucket on every launch.
+		if !search_mode {load_more_near_bottom(&library_client, filter, density)}
 		ensure_covers(&library_client, &textures, display_page, player_cover, visible)
 		if right_clicked {
 			open_menu_at(

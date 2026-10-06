@@ -5,6 +5,7 @@ import "core:strings"
 import "core:sync/chan"
 import "core:testing"
 import "core:thread"
+import "core:time"
 
 @(test)
 loaded_detail_retains_selected_card_cover :: proc(t: ^testing.T) {
@@ -220,4 +221,45 @@ failed_sign_in_offers_retry_through_state :: proc(t: ^testing.T) {
 	testing.expect_value(t, client.state, State.Missing_Client_ID)
 	// Retry is only meaningful for a completed failed attempt.
 	testing.expect(t, !restart(&client))
+}
+
+@(test)
+rate_limit_backoff_honors_retry_after_and_escalates :: proc(t: ^testing.T) {
+	client: Client
+	// The server's Retry-After wins, and any rejection advances the escalation.
+	testing.expect_value(t, rate_limit_delay(&client, 30), 30 * time.Second)
+	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF * 2)
+	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF * 4)
+	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF * 8)
+	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF * 8)
+	// A successful page clears the streak.
+	client.rate_limited = 0
+	testing.expect_value(t, rate_limit_delay(&client, 0), PAGE_RATE_LIMIT_BACKOFF)
+}
+
+@(test)
+transient_page_failure_keeps_the_session_usable :: proc(t: ^testing.T) {
+	client: Client
+	defer stop(&client)
+	client.state = .Ready
+	client.pages[.Albums].ready = true
+	client.pending[.Albums] = true
+
+	// A rate-limited page backs off but must not freeze covers or search,
+	// which both require a ready session.
+	apply(&client, Result{kind = .Index, list = .Albums, status = 429})
+	testing.expect_value(t, client.state, State.Ready)
+	testing.expect(t, !client.pending[.Albums] && !client.failed)
+	testing.expect(t, time.since(client.page_at) < 0)
+
+	// A failed first load still ends the loading state so the tab retries.
+	client.remaining_initial = 1
+	apply(&client, Result{kind = .Index, list = .Playlists, status = 503})
+	testing.expect_value(t, client.remaining_initial, 0)
+	testing.expect_value(t, client.state, State.Ready)
+
+	// Authorization failures still stop the session.
+	apply(&client, Result{kind = .Index, list = .Artists, status = 401})
+	testing.expect_value(t, client.state, State.Failed)
+	testing.expect(t, client.failed)
 }

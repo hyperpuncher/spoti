@@ -10,12 +10,13 @@ import "core:sync"
 import "core:time"
 
 Options :: struct {
-	bearer:     string, // empty for signed CDN URLs; never forward account tokens
-	range:      string, // optional HTTP byte range, e.g. "0-65535"
-	method:     string, // PUT or DELETE with an empty body; empty keeps GET/POST
-	limit:      int,
-	range_info: ^Range_Info, // optional validated Content-Range from a ranged GET
-	cancel:     ^bool, // optional worker cancellation, observed by curl during transfer
+	bearer:      string, // empty for signed CDN URLs; never forward account tokens
+	range:       string, // optional HTTP byte range, e.g. "0-65535"
+	method:      string, // PUT or DELETE with an empty body; empty keeps GET/POST
+	limit:       int,
+	range_info:  ^Range_Info, // optional validated Content-Range from a ranged GET
+	retry_after: ^int, // optional Retry-After seconds from a 429
+	cancel:      ^bool, // optional worker cancellation, observed by curl during transfer
 }
 
 Range_Info :: struct {
@@ -23,15 +24,32 @@ Range_Info :: struct {
 	valid:             bool,
 }
 
-read_range_header :: proc "c" (input: [^]u8, size, count: int, user: rawptr) -> int {
+// Header metadata one curl header callback can collect: range validation for
+// ranged CDN reads, and the wait a 429 asks for.
+Header_Capture :: struct {
+	range:       ^Range_Info,
+	retry_after: ^int,
+}
+
+read_headers :: proc "c" (input: [^]u8, size, count: int, user: rawptr) -> int {
 	context = runtime.default_context()
 	if size < 0 || count < 0 || count > 0 && size > 8192 / count {return 0}
 	length := size * count
-	info := (^Range_Info)(user)
+	capture := (^Header_Capture)(user)
 	line := strings.trim_space(string(input[:length]))
-	if strings.has_prefix(line, "HTTP/") {info^ = {}}
-	if len(line) >= 14 && strings.equal_fold(line[:14], "Content-Range:") {
-		info^ = parse_content_range(strings.trim_space(line[14:]))
+	if strings.has_prefix(line, "HTTP/") {
+		if capture.range != nil {capture.range^ = {}}
+		if capture.retry_after != nil {capture.retry_after^ = 0}
+		return length
+	}
+	if capture.range != nil && len(line) >= 14 && strings.equal_fold(line[:14], "Content-Range:") {
+		capture.range^ = parse_content_range(strings.trim_space(line[14:]))
+	} else if capture.retry_after != nil &&
+	   len(line) >= 12 &&
+	   strings.equal_fold(line[:12], "Retry-After:") {
+		if seconds, valid := range_number(strings.trim_space(line[12:])); valid {
+			capture.retry_after^ = seconds
+		}
 	}
 	return length
 }
@@ -222,10 +240,15 @@ request :: proc(
 		   easy_setopt(client, CURL_XFERINFOFUNCTION, transfer_progress) != 0 ||
 		   easy_setopt(client, CURL_XFERINFODATA, options.cancel) != 0 {return nil, 0, false}
 	}
-	if options.range_info != nil {
-		options.range_info^ = {}
-		if easy_setopt(client, CURL_HEADERFUNCTION, read_range_header) != 0 ||
-		   easy_setopt(client, CURL_HEADERDATA, options.range_info) != 0 {return nil, 0, false}
+	if options.range_info != nil || options.retry_after != nil {
+		if options.range_info != nil {options.range_info^ = {}}
+		if options.retry_after != nil {options.retry_after^ = 0}
+		capture := Header_Capture {
+			range       = options.range_info,
+			retry_after = options.retry_after,
+		}
+		if easy_setopt(client, CURL_HEADERFUNCTION, read_headers) != 0 ||
+		   easy_setopt(client, CURL_HEADERDATA, &capture) != 0 {return nil, 0, false}
 	}
 	if len(form) > 0 {
 		if easy_setopt(client, CURL_POSTFIELDSIZE, c.long(len(form))) != 0 ||
