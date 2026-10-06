@@ -205,25 +205,44 @@ joined_artists :: proc(artists: []Artist, allocator: runtime.Allocator) -> strin
 	return strings.to_string(builder)
 }
 
-// Shared entry builders for library pages and search results. Each skips
-// entries without a usable name, URI or cover.
+// Shared card builder for library and search grids. Each skips entries
+// without a usable name, URI or cover; track rows stay separate since an
+// imageless track still plays.
+append_card_entry :: proc(
+	items: ^[dynamic]Entry,
+	name, uri, image, subtitle: string,
+	total: int,
+	added_at: string,
+	allocator: runtime.Allocator,
+) {
+	if len(name) == 0 || len(uri) > 128 || image == "" {return}
+	append(
+		items,
+		Entry {
+			name = strings.clone(name, allocator),
+			uri = strings.clone(uri, allocator),
+			image = strings.clone(image, allocator),
+			subtitle = strings.clone(subtitle, allocator),
+			total = total,
+			added_at = strings.clone(added_at, allocator),
+		},
+	)
+}
+
 append_playlist_entry :: proc(
 	items: ^[dynamic]Entry,
 	row: Playlist_Ref,
 	allocator: runtime.Allocator,
 ) {
-	total := row.items.total
-	image := cover_url(row.images)
-	if len(row.name) == 0 || len(row.uri) > 128 || image == "" {return}
-	append(
+	append_card_entry(
 		items,
-		Entry {
-			name = strings.clone(row.name, allocator),
-			uri = strings.clone(row.uri, allocator),
-			image = strings.clone(image, allocator),
-			subtitle = strings.clone(row.owner.display_name, allocator),
-			total = total,
-		},
+		row.name,
+		row.uri,
+		cover_url(row.images),
+		row.owner.display_name,
+		row.items.total,
+		"",
+		allocator,
 	)
 }
 
@@ -241,35 +260,24 @@ append_saved_album :: proc(
 	allocator: runtime.Allocator,
 ) {
 	album := row.album
-	image := cover_url(album.images)
-	if len(album.name) == 0 || len(album.uri) > 128 || image == "" {return}
-	append(
+	append_card_entry(
 		items,
-		Entry {
-			name = strings.clone(album.name, allocator),
-			uri = strings.clone(album.uri, allocator),
-			image = strings.clone(image, allocator),
-			subtitle = joined_artists(album.artists, allocator),
-			total = album.total_tracks,
-			added_at = strings.clone(row.added_at, allocator),
-		},
+		album.name,
+		album.uri,
+		cover_url(album.images),
+		joined_artists(album.artists, context.temp_allocator),
+		album.total_tracks,
+		row.added_at,
+		allocator,
 	)
 }
 
 append_artist_entry :: proc(items: ^[dynamic]Entry, row: Artist, allocator: runtime.Allocator) {
-	if len(row.name) == 0 || len(row.id) == 0 {return}
+	if len(row.id) == 0 {return}
 	uri := row.uri
 	if len(uri) ==
 	   0 {uri = fmt.aprintf("spotify:artist:%s", row.id, allocator = context.temp_allocator)}
-	append(
-		items,
-		Entry {
-			name = strings.clone(row.name, allocator),
-			uri = strings.clone(uri, allocator),
-			image = strings.clone(cover_url(row.images), allocator),
-			subtitle = strings.clone("Artist", allocator),
-		},
-	)
+	append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", 0, "", allocator)
 }
 
 append_track_entry :: proc(
