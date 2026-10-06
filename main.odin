@@ -517,30 +517,36 @@ main :: proc() {
 		input_changed := false
 		event: sdl.Event
 		wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
-		// Playback renders at the display rate so the progress bar stays smooth,
-		// while the idle window sleeps until an event arrives.
-		if stage == .Playing {wait_ms = 0}
-		if autoscroll_moving {wait_ms = 0}
-		if grid_smooth.active || detail_smooth.active {wait_ms = 0}
-		if stage == .Signing_In ||
-		   stage == .Buffering ||
-		   stage == .Stopping ||
-		   (stage == .Ended && replay_pending) ||
-		   (stage == .Failed && worker != nil) {wait_ms = 40}
-		if library_client.state == .Authorizing ||
-		   library_client.state == .Loading ||
-		   library_client.detail_loading ||
-		   library_client.search_loading ||
-		   library_client.covers_pending > 0 {wait_ms = 40}
-		for pending in library_client.pending {
-			if pending {wait_ms = 40; break}
-		}
-		if preload_worker != nil && stage != .Playing {wait_ms = 40}
 		fades_animating :=
 			(textures.fade_top_alpha != 0 && textures.fade_top_alpha != 1) ||
 			(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1)
-		if fx_animating || fades_animating {wait_ms = 0}
-		if first_frame {wait_ms = 0}
+		// Anything animating renders at the display rate, so the idle poll
+		// below can never throttle a scroll glide or a button spring.
+		if stage == .Playing ||
+		   autoscroll_moving ||
+		   grid_smooth.active ||
+		   detail_smooth.active ||
+		   fx_animating ||
+		   fades_animating ||
+		   first_frame {
+			wait_ms = 0
+		} else {
+			// Idle work still polls for results so they appear promptly.
+			if stage == .Signing_In ||
+			   stage == .Buffering ||
+			   stage == .Stopping ||
+			   (stage == .Ended && replay_pending) ||
+			   (stage == .Failed && worker != nil) {wait_ms = 40}
+			if library_client.state == .Authorizing ||
+			   library_client.state == .Loading ||
+			   library_client.detail_loading ||
+			   library_client.search_loading ||
+			   library_client.covers_pending > 0 {wait_ms = 40}
+			for pending in library_client.pending {
+				if pending {wait_ms = 40; break}
+			}
+			if preload_worker != nil && stage != .Playing {wait_ms = 40}
+		}
 		// If the wake event could not be registered, poll the bus instead.
 		if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
 		if search_pending {
