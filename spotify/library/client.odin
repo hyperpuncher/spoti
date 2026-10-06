@@ -589,15 +589,17 @@ sync_library_membership :: proc(client: ^Client, source: Source, id: string, lik
 		for entry in page.items {if entry.uri == uri {return}}
 		if client.detail.source != source || client.detail.id != id {return}
 		detail := client.detail
-		append(
+		// The default order is Spotify's, which lists newest first, so a
+		// just-liked card goes back to the front where the heart was clicked.
+		inject_at(
 			&page.items,
+			0,
 			Entry {
 				name = strings.clone(detail.name, allocator),
 				uri = strings.clone(uri, allocator),
 				image = strings.clone(detail.image, allocator),
 				subtitle = strings.clone(detail.subtitle, allocator),
 				total = detail.total,
-				added_at = strings.clone(now_iso(context.temp_allocator), allocator),
 			},
 		)
 		page.total += 1
@@ -623,13 +625,6 @@ source_kind :: proc(source: Source) -> (kind: Kind, ok: bool) {
 		return .Playlists, false
 	}
 	return .Playlists, false
-}
-
-// Zulu stamp for just-liked cards.
-now_iso :: proc(allocator := context.allocator) -> string {
-	stamp, ok := time.time_to_rfc3339(time.now(), 0, false, allocator)
-	if !ok {return ""}
-	return stamp
 }
 
 clear_detail :: proc(client: ^Client) {

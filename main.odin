@@ -1285,7 +1285,7 @@ main :: proc() {
 			} else if hit("sidebar_handle", mouse_click) {
 				resizing = true
 			} else if hit("sort_button", mouse_click) {
-				open_sort_menu(&menu, mouse_click, filter, settings.sort[filter])
+				open_sort_menu(&menu, mouse_click, settings.sort[filter])
 			} else if hit("library_sign_in", mouse_click) {
 				_ = open_prompt_url(.Library)
 			} else if hit("library_retry", mouse_click) {

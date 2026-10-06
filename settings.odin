@@ -44,13 +44,6 @@ free_settings :: proc(settings: ^Settings) {
 	settings^ = {}
 }
 
-// Added sorts only where Spotify dates exist; hand-edited files fall back.
-normalize_sort :: proc(settings: ^Settings) {
-	for kind in library.Kind {
-		if !sort_supported(kind, settings.sort[kind]) {settings.sort[kind] = .Library}
-	}
-}
-
 settings_tab_name :: proc(kind: library.Kind) -> string {
 	#partial switch kind {
 	case .Albums:
@@ -72,27 +65,22 @@ settings_tab_kind :: proc(name: string) -> library.Kind {
 	}
 }
 
-// Card order per library tab. Recently added needs Spotify dates, which only
-// saved albums carry, so the other tabs offer played, name and library order.
+// Card order per library tab. Spotify's own order leads with the newest
+// additions on every tab; recently played uses local play history, so both
+// options cost nothing.
 Sort :: enum {
-	Added, // recently added first; missing dates last
+	Default, // what Spotify returns
 	Played, // recently played first; unplayed last
-	Name, // case-insensitive title order
-	Library, // Spotify's own order
 }
 
 SORT_NAMES := [Sort]string {
-	.Added   = "Recently added",
+	.Default = "Recently added",
 	.Played  = "Recently played",
-	.Name    = "Name",
-	.Library = "Library order",
 }
 
 SORT_SERIALS := [Sort]string {
-	.Added   = "added",
+	.Default = "default",
 	.Played  = "played",
-	.Name    = "name",
-	.Library = "library",
 }
 
 sort_name :: proc(sort: Sort) -> string {
@@ -103,16 +91,11 @@ sort_kind :: proc(name: string) -> (Sort, bool) {
 	for serial, index in SORT_SERIALS {
 		if name == serial {return Sort(index), true}
 	}
-	return .Library, false
+	return .Default, false
 }
 
 sort_serial :: proc(sort: Sort) -> string {
 	return SORT_SERIALS[sort]
-}
-
-sort_supported :: proc(kind: library.Kind, sort: Sort) -> bool {
-	if sort == .Added && kind != .Albums {return false}
-	return true
 }
 
 // Unknown or malformed lines fall back to defaults, so a corrupt settings file
@@ -123,8 +106,6 @@ parse_settings :: proc(data: string, allocator := context.allocator) -> Settings
 		volume        = DEFAULT_VOLUME,
 		tab           = .Playlists,
 	}
-	// Recently added is the default where Spotify dates exist (albums).
-	settings.sort[.Albums] = .Added
 	for line in strings.split_lines(data, context.temp_allocator) {
 		key, _, value := strings.partition(line, "=")
 		switch strings.trim_space(key) {
@@ -191,7 +172,6 @@ parse_settings :: proc(data: string, allocator := context.allocator) -> Settings
 			}
 		}
 	}
-	normalize_sort(&settings)
 	return settings
 }
 

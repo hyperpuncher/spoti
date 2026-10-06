@@ -12,7 +12,7 @@ track_page_addresses_request_only_row_fields :: proc(t: ^testing.T) {
 		t,
 		strings.has_suffix(
 			address,
-			"playlists/abc/items?limit=50&offset=50&fields=total,offset,next,items(added_at,item(uri,name,duration_ms,artists(name),album(images)))",
+			"playlists/abc/items?limit=50&offset=50&fields=total,offset,next,items(item(uri,name,duration_ms,artists(name),album(images)))",
 		),
 	)
 	liked, liked_ok := track_page_address(.Liked, "", 0)

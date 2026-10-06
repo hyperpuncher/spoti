@@ -69,18 +69,16 @@ open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 	menu.count = 1
 }
 
-// Library sort picker for a tab. Only date-backed tabs offer recently
-// added; the current sort carries a check. The tab itself comes from the
-// sidebar filter when an item is picked.
-open_sort_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, kind: library.Kind, current: Sort) {
-	options := [4]Sort{.Added, .Played, .Name, .Library}
+// Library sort picker for a tab. The current sort carries a check; the tab
+// itself comes from the sidebar filter when an item is picked.
+open_sort_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, current: Sort) {
+	options := [2]Sort{.Default, .Played}
 	free_context_menu(menu)
 	menu.open = true
 	menu.point = point
 	menu.track = -1
 	menu.selected = -1
 	for option in options {
-		if !sort_supported(kind, option) {continue}
 		index := menu.count
 		menu.items[index] = .Pick_Sort
 		menu.sorts[index] = option

@@ -282,13 +282,13 @@ track_page_address :: proc(
 	switch source {
 	case .Liked:
 		address = fmt.aprintf(
-			"https://api.spotify.com/v1/me/tracks?limit=50&offset=%d&fields=total,offset,next,items(added_at,track(%s))",
+			"https://api.spotify.com/v1/me/tracks?limit=50&offset=%d&fields=total,offset,next,items(track(%s))",
 			offset,
 			TRACK_FIELDS,
 		)
 	case .Playlist:
 		address = fmt.aprintf(
-			"https://api.spotify.com/v1/playlists/%s/items?limit=50&offset=%d&fields=total,offset,next,items(added_at,item(%s))",
+			"https://api.spotify.com/v1/playlists/%s/items?limit=50&offset=%d&fields=total,offset,next,items(item(%s))",
 			id,
 			offset,
 			TRACK_FIELDS,

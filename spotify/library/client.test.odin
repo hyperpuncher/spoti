@@ -186,12 +186,11 @@ like_toggle_syncs_sidebar_membership :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(client.pages[.Albums].items), 0)
 	testing.expect_value(t, client.pages[.Albums].total, 0)
 
-	// Like appends a card built from the open detail when it is current.
+	// Like prepends the card built from the open detail when it is current.
 	sync_library_membership(&client, .Album, "fresh", true)
 	testing.expect_value(t, len(client.pages[.Albums].items), 1)
 	testing.expect_value(t, client.pages[.Albums].items[0].uri, "spotify:album:fresh")
 	testing.expect_value(t, client.pages[.Albums].items[0].name, "Fresh Album")
-	testing.expect_value(t, len(client.pages[.Albums].items[0].added_at), 20)
 	testing.expect_value(t, client.pages[.Albums].total, 1)
 
 	// Repeating either direction is a no-op.

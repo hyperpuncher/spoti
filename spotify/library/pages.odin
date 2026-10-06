@@ -25,7 +25,6 @@ Entry :: struct {
 	image:    string, // cover URL; never a token or signed CDN URL
 	subtitle: string, // owner or artists
 	total:    int, // track count where Spotify reports one
-	added_at: string, // library addition date; only saved albums carry one
 }
 
 Page :: struct {
@@ -105,18 +104,15 @@ Playlist_Ref :: struct {
 }
 
 Saved_Track :: struct {
-	added_at: string,
-	track:    Track_Ref,
+	track: Track_Ref,
 }
 
 Playlist_Item :: struct {
-	added_at: string,
-	item:     Track_Ref,
+	item: Track_Ref,
 }
 
 Saved_Album :: struct {
-	added_at: string,
-	album:    Album_Ref,
+	album: Album_Ref,
 }
 
 Artist_Cursor :: struct {
@@ -212,7 +208,6 @@ append_card_entry :: proc(
 	items: ^[dynamic]Entry,
 	name, uri, image, subtitle: string,
 	total: int,
-	added_at: string,
 	allocator: runtime.Allocator,
 ) {
 	if len(name) == 0 || len(uri) > 128 || image == "" {return}
@@ -224,7 +219,6 @@ append_card_entry :: proc(
 			image = strings.clone(image, allocator),
 			subtitle = strings.clone(subtitle, allocator),
 			total = total,
-			added_at = strings.clone(added_at, allocator),
 		},
 	)
 }
@@ -241,7 +235,6 @@ append_playlist_entry :: proc(
 		cover_url(row.images),
 		row.owner.display_name,
 		row.items.total,
-		"",
 		allocator,
 	)
 }
@@ -267,7 +260,6 @@ append_saved_album :: proc(
 		cover_url(album.images),
 		joined_artists(album.artists, context.temp_allocator),
 		album.total_tracks,
-		row.added_at,
 		allocator,
 	)
 }
@@ -277,7 +269,7 @@ append_artist_entry :: proc(items: ^[dynamic]Entry, row: Artist, allocator: runt
 	uri := row.uri
 	if len(uri) ==
 	   0 {uri = fmt.aprintf("spotify:artist:%s", row.id, allocator = context.temp_allocator)}
-	append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", 0, "", allocator)
+	append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", 0, allocator)
 }
 
 append_track_entry :: proc(
