@@ -31,8 +31,8 @@ loaded_detail_retains_selected_card_cover :: proc(t: ^testing.T) {
 	incoming.image_small = strings.clone("https://i.scdn.co/image/small", allocator)
 	incoming.rows = make([dynamic]Track_Row, 0, 1, allocator)
 	append(&incoming.rows, clone_row(Track_Row{name = "First"}, allocator))
-	incoming.releases = make([dynamic]Entry, 0, 1, allocator)
-	append(&incoming.releases, clone_entry(Entry{name = "First release"}, allocator))
+	incoming.albums.items = make([dynamic]Entry, 0, 1, allocator)
+	append(&incoming.albums.items, clone_entry(Entry{name = "First release"}, allocator))
 	apply(
 		&client,
 		Result {
@@ -50,7 +50,11 @@ loaded_detail_retains_selected_card_cover :: proc(t: ^testing.T) {
 	testing.expect_value(t, client.detail.image, "https://i.scdn.co/image/large")
 	testing.expect_value(t, client.detail.image_small, "https://i.scdn.co/image/small")
 	testing.expect_value(t, client.detail.rows.allocator.data, rawptr(&client.detail.arena))
-	testing.expect_value(t, client.detail.releases.allocator.data, rawptr(&client.detail.arena))
+	testing.expect_value(
+		t,
+		client.detail.albums.items.allocator.data,
+		rawptr(&client.detail.arena),
+	)
 
 	more := Result {
 		kind   = .More,
@@ -85,12 +89,12 @@ loaded_detail_retains_selected_card_cover :: proc(t: ^testing.T) {
 
 	// Discography arrays must also grow through the moved detail's arena.
 	append(
-		&client.detail.releases,
+		&client.detail.albums.items,
 		clone_entry(Entry{name = "Second release"}, virtual.arena_allocator(&client.detail.arena)),
 	)
-	testing.expect_value(t, len(client.detail.releases), 2)
-	testing.expect_value(t, client.detail.releases[0].name, "First release")
-	testing.expect_value(t, client.detail.releases[1].name, "Second release")
+	testing.expect_value(t, len(client.detail.albums.items), 2)
+	testing.expect_value(t, client.detail.albums.items[0].name, "First release")
+	testing.expect_value(t, client.detail.albums.items[1].name, "Second release")
 }
 
 @(test)

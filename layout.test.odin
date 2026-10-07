@@ -58,12 +58,14 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		row.artists = "Artist"
 		row.duration_ms = 180_000
 	}
-	client.detail.releases = make([dynamic]library.Entry, 3000)
-	defer delete(client.detail.releases)
-	for &release in client.detail.releases {
+	client.detail.albums.items = make([dynamic]library.Entry, 3000)
+	defer delete(client.detail.albums.items)
+	for &release in client.detail.albums.items {
 		release.name = "Release"
 		release.subtitle = "2026"
 	}
+	client.detail.albums.total = 3000
+	client.detail.albums.has_more = true
 	textures := Textures {
 		by_key = make(map[u64]^sdl.Texture),
 	}
@@ -483,12 +485,13 @@ artist_discography_cards_stay_inside_their_padding :: proc(t: ^testing.T) {
 		id     = "artist",
 		name   = "Artist",
 	}
-	client.detail.releases = make([dynamic]library.Entry, 58)
-	defer delete(client.detail.releases)
-	for &release in client.detail.releases {
+	client.detail.albums.items = make([dynamic]library.Entry, 58)
+	defer delete(client.detail.albums.items)
+	for &release in client.detail.albums.items {
 		release.name = "Release with a fairly long name"
 		release.subtitle = "2026"
 	}
+	client.detail.albums.total = 58
 	textures := Textures {
 		by_key = make(map[u64]^sdl.Texture),
 	}

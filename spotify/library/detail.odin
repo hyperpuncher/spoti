@@ -51,12 +51,33 @@ Detail :: struct {
 	image_preview: string, // selected card cover, retained until hero texture is ready
 	total:         int,
 	rows:          [dynamic]Track_Row,
-	releases:      [dynamic]Entry,
+	albums:        Release_Group,
+	singles:       Release_Group,
 	next_offset:   int,
 	has_more:      bool,
 	rows_error:    int,
 	more_failures: int, // consecutive failed page fetches; the auto-chain stops at 3
 	generation:    uint, // a reopened page keeps its URI but never its generation
+}
+
+// One paged side of an artist page. Albums and singles page independently,
+// so each group keeps its own cursor instead of sharing one list.
+Release_Group :: struct {
+	items:       [dynamic]Entry,
+	total:       int,
+	next_offset: int,
+	has_more:    bool,
+}
+
+// The /albums group being paged, mirrored in request and result so the
+// merge lands in the right group.
+Album_Group :: enum {
+	Album,
+	Single,
+}
+
+album_group_param :: proc(group: Album_Group) -> string {
+	return group == .Single ? "single" : "album"
 }
 
 free_detail :: proc(detail: ^Detail) {
@@ -70,7 +91,8 @@ move_detail :: proc(destination, source: ^Detail) {
 	destination^ = source^
 	allocator := virtual.arena_allocator(&destination.arena)
 	destination.rows.allocator = allocator
-	destination.releases.allocator = allocator
+	destination.albums.items.allocator = allocator
+	destination.singles.items.allocator = allocator
 	source^ = {}
 }
 
@@ -190,16 +212,44 @@ fetch_detail :: proc(
 	}
 	detail.id = strings.clone(id, allocator)
 	if source == .Artist {
-		releases, total, next_offset, has_more, releases_status, releases_ok :=
-			fetch_artist_albums(access, id, 0, allocator, cache_only = cache_only)
-		if !releases_ok {
+		albums, albums_total, albums_next, albums_more, albums_status, albums_ok :=
+			fetch_artist_albums(access, id, 0, .Album, allocator, cache_only = cache_only)
+		if !albums_ok {
 			free_detail(&detail)
-			return {}, releases_status, false
+			return {}, albums_status, false
 		}
-		detail.releases = releases
-		detail.total = total
-		detail.next_offset = next_offset
-		detail.has_more = has_more
+		detail.albums = Release_Group {
+				items       = albums,
+				total       = albums_total,
+				next_offset = albums_next,
+				has_more    = albums_more,
+			}
+		// Singles ride along when they can; a failed second group must not
+		// fail the page. It keeps its cursor at zero with more set, so the
+		// scroll chain retries it instead of dropping the section.
+		singles, singles_total, singles_next, singles_more, _, singles_ok := fetch_artist_albums(
+			access,
+			id,
+			0,
+			.Single,
+			allocator,
+			cache_only = cache_only,
+		)
+		if singles_ok {
+			detail.singles = Release_Group {
+				items       = singles,
+				total       = singles_total,
+				next_offset = singles_next,
+				has_more    = singles_more,
+			}
+		} else {
+			detail.singles = Release_Group {
+				items = make([dynamic]Entry, 0, 0, allocator),
+			}
+			detail.singles.has_more = true
+		}
+		detail.total = albums_total + singles_total
+		detail.has_more = albums_more || detail.singles.has_more
 		return detail, 200, true
 	}
 	rows, total, next_offset, has_more, rows_status, rows_ok := fetch_track_page(
@@ -306,11 +356,12 @@ fetch_track_page :: proc(
 // comes back unusable, so select `item` here, not `track`.
 TRACK_FIELDS :: "uri,name,duration_ms,artists(uri,name),album(uri,name,images)"
 
-artist_albums_address :: proc(id: string, offset: int) -> string {
+artist_albums_address :: proc(id: string, offset: int, group: Album_Group) -> string {
 	return fmt.aprintf(
-		"https://api.spotify.com/v1/artists/%s/albums?limit=10&offset=%d",
+		"https://api.spotify.com/v1/artists/%s/albums?limit=10&offset=%d&include_groups=%s",
 		id,
 		offset,
+		album_group_param(group),
 	)
 }
 
@@ -454,6 +505,7 @@ parse_album_tracks :: proc(
 fetch_artist_albums :: proc(
 	access, id: string,
 	offset: int,
+	group: Album_Group,
 	allocator: runtime.Allocator,
 	reuse: rawptr = nil,
 	cache_only: bool = false,
@@ -466,7 +518,7 @@ fetch_artist_albums :: proc(
 	ok: bool,
 ) {
 	if !safe_id(id) || offset < 0 || offset > 1_000_000 {return}
-	address := artist_albums_address(id, offset)
+	address := artist_albums_address(id, offset, group)
 	defer delete(address)
 	body, body_status, fetched := api_get(
 		access,

@@ -41,6 +41,7 @@ Request :: struct {
 	kind:    Request_Kind,
 	list:    Kind,
 	offset:  int,
+	group:   Album_Group, // More; which artist section to page
 	cursor:  string, // Index; worker frees
 	source:  Source,
 	id:      string, // Detail, More; worker frees
@@ -56,6 +57,7 @@ Result :: struct {
 	list:          Kind,
 	page:          Page,
 	detail:        Detail,
+	group:         Album_Group, // More; which artist section the payload belongs to
 	rows:          [dynamic]Track_Row, // allocated in rows_arena
 	releases:      [dynamic]Entry, // allocated in rows_arena
 	rows_arena:    virtual.Arena,
@@ -342,8 +344,16 @@ handle :: proc(
 		}
 		allocator := virtual.arena_allocator(&aresult.rows_arena)
 		if request.source == .Artist {
+			aresult.group = request.group
 			aresult.releases, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
-				fetch_artist_albums(tokens.access, request.id, request.offset, allocator, reuse)
+				fetch_artist_albums(
+					tokens.access,
+					request.id,
+					request.offset,
+					request.group,
+					allocator,
+					reuse,
+				)
 		} else {
 			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
 				fetch_track_page(
@@ -613,7 +623,11 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 // helps. Pagination keeps its rows; only the first fill can show the table.
 detail_loading_visible :: proc(client: ^Client) -> bool {
 	if !client.detail_loading || time.since(client.detail_loading_at) < 0 {return false}
-	return len(client.detail.rows) == 0 && len(client.detail.releases) == 0
+	return(
+		len(client.detail.rows) == 0 &&
+		len(client.detail.albums.items) == 0 &&
+		len(client.detail.singles.items) == 0 \
+	)
 }
 
 // Queues a library membership flip for the hero heart. The worker answers
@@ -693,7 +707,9 @@ source_kind :: proc(source: Source) -> (kind: Kind, ok: bool) {
 detail_buffer_stash :: proc(client: ^Client) {
 	outgoing := &client.detail
 	if !outgoing.ready || outgoing.rows_error != 0 {return}
-	if len(outgoing.rows) == 0 && len(outgoing.releases) == 0 {return}
+	if len(outgoing.rows) == 0 &&
+	   len(outgoing.albums.items) == 0 &&
+	   len(outgoing.singles.items) == 0 {return}
 	free_detail(&client.prev_detail)
 	client.prev_detail = {}
 	move_detail(&client.prev_detail, outgoing)
@@ -704,7 +720,9 @@ detail_buffer_take :: proc(client: ^Client, source: Source, id: string, preview:
 	prev := &client.prev_detail
 	if !prev.ready || prev.source != source || prev.id != id {return false}
 	if prev.rows_error != 0 {return false}
-	if len(prev.rows) == 0 && len(prev.releases) == 0 {return false}
+	if len(prev.rows) == 0 &&
+	   len(prev.albums.items) == 0 &&
+	   len(prev.singles.items) == 0 {return false}
 	if time.since(client.prev_at) >= PAGE_TTL {return false}
 	if preview.total > 0 && prev.total > 0 && preview.total != prev.total {return false}
 	// Take first, then bank the outgoing page: the other order would free
@@ -737,10 +755,15 @@ clear_detail :: proc(client: ^Client) {
 
 // A page already on disk costs no quota, so cached pages chain back to
 // back while network pages keep their pacing between fetches.
-detail_page_fresh :: proc(source: Source, id: string, offset: int) -> bool {
+detail_page_fresh :: proc(
+	source: Source,
+	id: string,
+	offset: int,
+	group: Album_Group = .Album,
+) -> bool {
 	switch source {
 	case .Artist:
-		address := artist_albums_address(id, offset)
+		address := artist_albums_address(id, offset, group)
 		defer delete(address)
 		return cache_fresh("api", address, PAGE_TTL)
 	case .Liked, .Album:
@@ -765,13 +788,25 @@ detail_page_fresh :: proc(source: Source, id: string, offset: int) -> bool {
 more_rows :: proc(client: ^Client) -> bool {
 	if client.detail_loading || !client.detail.has_more {return false}
 	if len(client.detail.id) == 0 {return false}
-	fresh := detail_page_fresh(client.detail.source, client.detail.id, client.detail.next_offset)
+	// Artist sections page independently; albums drain before singles.
+	group := Album_Group.Album
+	offset := client.detail.next_offset
+	if client.detail.source == .Artist {
+		if client.detail.albums.has_more {
+			offset = client.detail.albums.next_offset
+		} else if client.detail.singles.has_more {
+			group = .Single
+			offset = client.detail.singles.next_offset
+		} else {return false}
+	}
+	fresh := detail_page_fresh(client.detail.source, client.detail.id, offset, group)
 	if !fresh && time.since(client.page_at) < 0 {return false}
 	request := Request {
 		kind   = .More,
 		source = client.detail.source,
 		id     = strings.clone(client.detail.id),
-		offset = client.detail.next_offset,
+		offset = offset,
+		group  = group,
 	}
 	if !queue_request(client, &request) {return false}
 	client.detail_loading = true
@@ -991,15 +1026,24 @@ apply :: proc(client: ^Client, result: Result) {
 				client.rate_limited = 0
 				allocator := virtual.arena_allocator(&client.detail.arena)
 				if local.source == .Artist {
+					group := &client.detail.albums
+					if local.group == .Single {group = &client.detail.singles}
+					group.items.allocator = allocator
 					for release in local.releases {
-						append(&client.detail.releases, clone_entry(release, allocator))
+						append(&group.items, clone_entry(release, allocator))
 					}
+					group.total = local.total
+					group.next_offset = local.next_offset
+					group.has_more = local.has_more
+					client.detail.total = client.detail.albums.total + client.detail.singles.total
+					client.detail.has_more =
+						client.detail.albums.has_more || client.detail.singles.has_more
 				} else {
 					for row in local.rows {append(&client.detail.rows, clone_row(row, allocator))}
+					client.detail.total = local.total
+					client.detail.next_offset = local.next_offset
+					client.detail.has_more = local.has_more
 				}
-				client.detail.total = local.total
-				client.detail.next_offset = local.next_offset
-				client.detail.has_more = local.has_more
 			}
 			diagnostic.result(
 				"more",

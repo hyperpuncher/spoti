@@ -34,9 +34,9 @@ artwork_budget_preserves_player_card_and_detail_priority :: proc(t: ^testing.T) 
 	client.detail.rows = make([dynamic]library.Track_Row)
 	defer delete(client.detail.rows)
 	append(&client.detail.rows, library.Track_Row{image = "row", image_small = "row-small"})
-	client.detail.releases = make([dynamic]library.Entry)
-	defer delete(client.detail.releases)
-	append(&client.detail.releases, library.Entry{image = "release"})
+	client.detail.albums.items = make([dynamic]library.Entry)
+	defer delete(client.detail.albums.items)
+	append(&client.detail.albums.items, library.Entry{image = "release"})
 	textures := Textures {
 		requested = make(map[u64]Cover_Request_State),
 	}

@@ -171,8 +171,48 @@ update_cursor :: proc(
 				return
 			}
 		}
+		for index in visible.singles.first ..< visible.singles.last {
+			if pointer_over("single_card", u32(index)) {
+				ui.set_cursor(state, .Pointer)
+				return
+			}
+		}
 	}
 	ui.set_cursor(state, .Default)
+}
+
+// One artist section's card clicks: opens the album page through the same
+// navigation recording as any card click. Indices past the loaded cards
+// are skeleton tails with no element to hit.
+open_release_card :: proc(
+	client: ^library.Client,
+	nav: ^Nav,
+	detail_scroll_armed: ^bool,
+	mouse_click: sdl.FPoint,
+	card_id: string,
+	items: []library.Entry,
+	first, last: int,
+) -> (
+	handled: bool,
+) {
+	for index in first ..< last {
+		if index >= len(items) {continue}
+		release := items[index]
+		if !hit_clipped(card_id, "detail_rows", mouse_click, u32(index)) {continue}
+		id := release.uri
+		if strings.has_prefix(id, "spotify:album:") {
+			id = id[len("spotify:album:"):]
+			if detail_already_open(client, release.uri) {
+				handled = true
+			} else {
+				nav_save_scroll(nav, detail_scroll_y())
+				detail_scroll_armed^ = false
+				handled = library.open_detail(client, .Album, id, release)
+			}
+		}
+		break
+	}
+	return
 }
 
 // Shared by card clicks and row/footer links: opens the entry page unless it
@@ -387,9 +427,14 @@ ensure_covers :: proc(
 				ensure_cover(client, textures, row.image, &budget)
 				ensure_cover(client, textures, row.image_small, &budget)
 			}
-			release_first := min(visible.releases.first, len(client.detail.releases))
-			release_last := min(visible.releases.last, len(client.detail.releases))
-			for release in client.detail.releases[release_first:release_last] {
+			album_first := min(visible.releases.first, len(client.detail.albums.items))
+			album_last := min(visible.releases.last, len(client.detail.albums.items))
+			for release in client.detail.albums.items[album_first:album_last] {
+				ensure_cover(client, textures, release.image, &budget)
+			}
+			single_first := min(visible.singles.first, len(client.detail.singles.items))
+			single_last := min(visible.singles.last, len(client.detail.singles.items))
+			for release in client.detail.singles.items[single_first:single_last] {
 				ensure_cover(client, textures, release.image, &budget)
 			}
 		}
@@ -1567,32 +1612,27 @@ main :: proc() {
 						open_spotify_detail(&library_client.detail)
 						handled = true
 					} else if library_client.detail.source == .Artist {
-						for index in visible.releases.first ..< visible.releases.last {
-							release := library_client.detail.releases[index]
-							if !hit_clipped(
-								"release_card",
-								"detail_rows",
+						handled =
+							open_release_card(
+								&library_client,
+								&nav,
+								&detail_scroll_armed,
 								mouse_click,
-								u32(index),
-							) {continue}
-							id := release.uri
-							if strings.has_prefix(id, "spotify:album:") {
-								id = id[len("spotify:album:"):]
-								if detail_already_open(&library_client, release.uri) {
-									handled = true
-								} else {
-									nav_save_scroll(&nav, detail_scroll_y())
-									detail_scroll_armed = false
-									handled = library.open_detail(
-										&library_client,
-										.Album,
-										id,
-										release,
-									)
-								}
-							}
-							break
-						}
+								"release_card",
+								library_client.detail.albums.items[:],
+								visible.releases.first,
+								visible.releases.last,
+							) ||
+							open_release_card(
+								&library_client,
+								&nav,
+								&detail_scroll_armed,
+								mouse_click,
+								"single_card",
+								library_client.detail.singles.items[:],
+								visible.singles.first,
+								visible.singles.last,
+							)
 					} else {
 						for index in visible.tracks.first ..< visible.tracks.last {
 							if !hit_clipped(

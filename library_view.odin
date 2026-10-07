@@ -14,8 +14,12 @@ Visible_Items :: struct {
 }
 
 Frame_Visible :: struct {
-	cards, tracks, releases: Visible_Items,
+	cards, tracks, releases, singles: Visible_Items,
 }
+
+// Clip slots are visible-relative per section, so the singles grid offsets
+// its truncation clips past anything the albums grid can hold.
+RELEASE_CLIP_STRIDE :: 64
 
 // Keep one extra row on either side. Spacers retain the complete scroll extent.
 visible_items :: proc(count, columns: int, stride, offset, height: f32) -> Visible_Items {
@@ -763,12 +767,11 @@ track_table :: proc(
 	return
 }
 
-artist_discography :: proc(
+artist_page :: proc(
 	detail: ^library.Detail,
 	textures: ^Textures,
 	available_width, viewport_height, card_text_height, dt, d: f32,
-) -> (
-	visible: Visible_Items,
+	visible: ^Frame_Visible,
 ) {
 	if clay.UI_WithId(clay.ID("detail_rows"))(
 	{
@@ -781,50 +784,49 @@ artist_discography :: proc(
 		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 	},
 	) {
-		if clay.UI_WithId(clay.ID("discography_title"))({}) {
-			clay.Text("Discography", clay.TextElementConfig{fontSize = 22, textColor = WHITE})
-		}
 		gap: f32 = 0
 		usable := max(280 * d, available_width - (40 + SCROLLBAR_OUTSET) * d)
 		columns := clamp(int((usable + gap) / (168 * d + gap)), 2, 4)
 		card_width := (usable - f32(columns - 1) * gap) / f32(columns)
 		row_height := card_row_height(card_width, card_text_height, d)
 		row_gap := f32(u16(8 * d))
-		heading := clay.GetElementData(clay.ID("discography_title"))
-		release_count := detail_item_count(len(detail.releases), detail.total, detail.has_more)
-		visible = scroll_items(
-			"detail_rows",
-			release_count,
+		leading: f32 = 0
+		leading = release_section(
+			&detail.albums,
+			"Albums",
+			"albums_title",
+			"release_card",
+			0,
+			textures,
 			columns,
-			row_height + row_gap,
+			card_width,
+			row_height,
+			row_gap,
+			usable,
 			viewport_height,
-			heading.boundingBox.height + row_gap,
+			leading,
+			dt,
+			d,
+			&visible.releases,
 		)
-		list_spacer(visible.before - row_gap)
-		for index := visible.first; index < visible.last; index += columns {
-			if clay.UI()(
-			{layout = {sizing = {height = clay.SizingFixed(row_height)}, childGap = u16(gap)}},
-			) {
-				for column in 0 ..< columns {
-					next := index + column
-					if next >= release_count {break}
-					if next < len(detail.releases) {
-						library_card(
-							textures,
-							&detail.releases[next],
-							u32(next),
-							card_width,
-							d,
-							"release_card",
-							clip_slot = u32(next - visible.first),
-						)
-					} else {
-						release_skeleton(card_width, row_height, d)
-					}
-				}
-			}
-		}
-		list_spacer(visible.after - row_gap)
+		leading = release_section(
+			&detail.singles,
+			"Singles and EPs",
+			"singles_title",
+			"single_card",
+			RELEASE_CLIP_STRIDE,
+			textures,
+			columns,
+			card_width,
+			row_height,
+			row_gap,
+			usable,
+			viewport_height,
+			leading,
+			dt,
+			d,
+			&visible.singles,
+		)
 		scroll_fades(
 			"detail_rows",
 			textures,
@@ -838,6 +840,70 @@ artist_discography :: proc(
 			d,
 		)
 	}
+}
+
+// One artist section: a title plus its virtualized card grid. Sections show
+// while they hold cards, report a total, or keep paging; a group still on
+// its first fetch renders one skeleton row so the title never sits alone.
+// Returns the content height above the next section's first row, so each
+// grid virtualizes against its own offset inside the shared container.
+release_section :: proc(
+	group: ^library.Release_Group,
+	title, title_id, card_id: string,
+	slot_base: u32,
+	textures: ^Textures,
+	columns: int,
+	card_width, row_height, row_gap, usable, viewport_height, leading, dt, d: f32,
+	visible: ^Visible_Items,
+) -> (
+	next_leading: f32,
+) {
+	next_leading = leading
+	if len(group.items) == 0 && group.total == 0 && !group.has_more {return}
+	if clay.UI_WithId(clay.ID(title_id))({}) {
+		clay.Text(title, clay.TextElementConfig{fontSize = 22, textColor = WHITE})
+	}
+	// Title heights come from the previous frame, like the old discography
+	// heading did; the window settles after one layout.
+	title_height := clay.GetElementData(clay.ID(title_id)).boundingBox.height
+	next_leading += title_height + row_gap
+	count := detail_item_count(len(group.items), group.total, group.has_more)
+	if count == 0 && group.has_more {count = columns}
+	visible^ = scroll_items(
+		"detail_rows",
+		count,
+		columns,
+		row_height + row_gap,
+		viewport_height,
+		next_leading,
+	)
+	list_spacer(visible.before - row_gap)
+	for index := visible.first; index < visible.last; index += columns {
+		if clay.UI()(
+		{layout = {sizing = {height = clay.SizingFixed(row_height)}, childGap = u16(0)}},
+		) {
+			for column in 0 ..< columns {
+				next := index + column
+				if next >= count {break}
+				if next < len(group.items) {
+					library_card(
+						textures,
+						&group.items[next],
+						u32(next),
+						card_width,
+						d,
+						card_id,
+						clip_slot = slot_base + u32(next - visible.first),
+					)
+				} else {
+					release_skeleton(card_width, row_height, d)
+				}
+			}
+		}
+	}
+	list_spacer(visible.after - row_gap)
+	rows := count == 0 ? 0 : (count + columns - 1) / columns
+	next_leading += f32(rows) * row_height + f32(max(rows - 1, 0)) * row_gap + row_gap
 	return
 }
 
@@ -1256,7 +1322,7 @@ detail_page :: proc(
 		if library.detail_loading_visible(client) {
 			loading_track_table(d)
 		} else if detail.source == .Artist {
-			visible.releases = artist_discography(
+			artist_page(
 				detail,
 				textures,
 				available_width,
@@ -1264,6 +1330,7 @@ detail_page :: proc(
 				card_text_height,
 				dt,
 				d,
+				visible,
 			)
 		} else if detail.source == .Playlist && detail.rows_error != 0 {
 			if clay.UI()(
