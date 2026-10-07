@@ -594,5 +594,8 @@ set_saved :: proc(
 	address := like_url(uri)
 	if len(address) == 0 {return 0, false}
 	defer delete(address)
-	return http.write(liked ? "PUT" : "DELETE", address, {bearer = access}, reuse)
+	status, ok = http.write(liked ? "PUT" : "DELETE", address, {bearer = access}, reuse)
+	// A completed exchange is not a save: a 403 or a 429 must not flip the
+	// heart while Spotify kept nothing.
+	return status, ok && status >= 200 && status < 300
 }
