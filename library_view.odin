@@ -489,6 +489,7 @@ track_table :: proc(
 	view: View,
 	textures: ^Textures,
 	available_width, viewport_height, d: f32,
+	ui_state: ^ui.State,
 ) -> (
 	visible: Visible_Items,
 ) {
@@ -570,6 +571,28 @@ track_table :: proc(
 				continue
 			}
 			row := &detail.rows[index]
+			// Each line is pre-shortened to its box: clay clips pixels but
+			// never draws an ellipsis itself. With no fonts (layout tests)
+			// everything below is the identity.
+			title_box := min(hero_text_width(ui_state, row.name, 15, 3), title_max)
+			title_text := hero_fit_text(
+				ui_state,
+				row.name,
+				title_box,
+				15,
+				3,
+				1,
+				context.temp_allocator,
+			)
+			artist_text := hero_fit_text(
+				ui_state,
+				row.artists,
+				max(0, row_text - title_box),
+				14,
+				0,
+				1,
+				context.temp_allocator,
+			)
 			hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
 			if clay.UI_WithId(clay.ID("track_row", u32(index)))(
 			{
@@ -613,7 +636,7 @@ track_table :: proc(
 				},
 				) {
 					clay.Text(
-						row.name,
+						title_text,
 						clay.TextElementConfig {
 							fontId = 3,
 							fontSize = 15,
@@ -632,7 +655,7 @@ track_table :: proc(
 				},
 				) {
 					clay.Text(
-						row.artists,
+						artist_text,
 						clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
 					)
 				}
@@ -740,7 +763,8 @@ HERO_TITLE_LINES :: 2
 HERO_TITLE_FONT :: 2
 
 hero_text_width :: proc(state: ^ui.State, text: string, size, font: u16) -> f32 {
-	if len(text) == 0 {return 0}
+	// Layout tests run without fonts; text keeps its full length there.
+	if state == nil || len(text) == 0 {return 0}
 	config := clay.TextElementConfig {
 		fontId   = font,
 		fontSize = size,
@@ -807,15 +831,20 @@ hero_fit_text :: proc(
 	allocator := context.allocator,
 ) -> string {
 	if state == nil || len(text) == 0 {return text}
-	if hero_wrapped_lines(state, text, size, font, width) <= lines {return text}
+	// A single line needs one measure, not a per-word walk.
+	if lines <= 1 {
+		if hero_text_width(state, text, size, font) <= width {return text}
+	} else if hero_wrapped_lines(state, text, size, font, width) <= lines {return text}
 	scratch := make([]u8, len(text) + len("…"), allocator)
 	lo, hi := 0, len(text)
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
 		copy(scratch, text[:mid])
 		copy(scratch[mid:], "…")
-		if hero_wrapped_lines(state, string(scratch[:mid + len("…")]), size, font, width) <=
-		   lines {
+		probe := string(scratch[:mid + len("…")])
+		ok :=
+			lines <= 1 ? hero_text_width(state, probe, size, font) <= width : hero_wrapped_lines(state, probe, size, font, width) <= lines
+		if ok {
 			lo = mid
 		} else {
 			hi = mid - 1
@@ -1156,6 +1185,7 @@ detail_page :: proc(
 				available_width,
 				viewport_height,
 				d,
+				ui_state,
 			)
 		}
 	}
