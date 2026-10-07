@@ -105,6 +105,8 @@ View :: struct {
 	shuffle:       bool,
 	volume:        f32,
 	input_active:  bool,
+	album_linked:  bool, // footer title opens the playing album
+	artist_linked: bool, // footer artist opens the playing artist
 	pinned:        bool,
 	sign_in:       bool, // a library browser approval is waiting for a click
 	can_back:      bool,
@@ -363,14 +365,30 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 				clip = {horizontal = true},
 			},
 			) {
-				clay.Text(
-					view.title,
-					clay.TextElementConfig{fontSize = 15, textColor = WHITE, wrapMode = .None},
-				)
-				clay.Text(
-					view.status,
-					clay.TextElementConfig{fontSize = 12, textColor = MUTED, wrapMode = .None},
-				)
+				// Hug boxes so exactly the text is clickable. The title is
+				// already white; the pointer alone marks it, while the
+				// artist brightens like every other quiet icon.
+				if clay.UI_WithId(clay.ID("footer_title"))(
+				{layout = {sizing = {width = clay.SizingFit({})}}},
+				) {
+					clay.Text(
+						view.title,
+						clay.TextElementConfig{fontSize = 15, textColor = WHITE, wrapMode = .None},
+					)
+				}
+				artist_over := view.artist_linked && clay.PointerOver(clay.ID("footer_artist"))
+				if clay.UI_WithId(clay.ID("footer_artist"))(
+				{layout = {sizing = {width = clay.SizingFit({})}}},
+				) {
+					clay.Text(
+						view.status,
+						clay.TextElementConfig {
+							fontSize = 12,
+							textColor = artist_over ? WHITE : MUTED,
+							wrapMode = .None,
+						},
+					)
+				}
 			}
 		}
 		if clay.UI()(

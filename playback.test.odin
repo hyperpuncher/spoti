@@ -122,3 +122,30 @@ shuffle_preserves_current_track_duplicates_and_original_order :: proc(t: ^testin
 	index = reorder_play_queue(items[:1], 0, true)
 	testing.expect_value(t, index, 0)
 }
+
+@(test)
+stamp_queue_album_fills_missing_links_without_freeing_temps :: proc(t: ^testing.T) {
+	detail := library.Detail {
+		source = .Album,
+		id     = "abc",
+		name   = "An Album",
+	}
+	items: [dynamic]Play_Item
+	append(&items, Play_Item{uri = strings.clone("spotify:track:1")})
+	append(&items, Play_Item{uri = strings.clone("spotify:track:2")})
+	defer {
+		for &item in items {
+			delete(item.uri)
+			delete(item.album)
+			delete(item.album_uri)
+		}
+		delete(items)
+	}
+	// Freeing the temp scratch URI used to abort the process here.
+	stamp_queue_album(&items, &detail)
+	stamp_queue_album(&items, &detail)
+	for item in items {
+		testing.expect_value(t, item.album, "An Album")
+		testing.expect_value(t, item.album_uri, "spotify:album:abc")
+	}
+}

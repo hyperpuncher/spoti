@@ -18,12 +18,16 @@ Source :: enum {
 }
 
 Track_Row :: struct {
-	uri:         string,
-	name:        string,
-	artists:     string,
-	duration_ms: int,
-	image:       string,
-	image_small: string,
+	uri:          string,
+	name:         string,
+	artists:      string,
+	first_artist: string, // first artist, for the page preview
+	artist_uri:   string, // first artist; empty when the source omits it
+	album:        string,
+	album_uri:    string, // empty for album pages, stamped from the detail
+	duration_ms:  int,
+	image:        string,
+	image_small:  string,
 }
 
 Detail :: struct {
@@ -270,7 +274,7 @@ fetch_track_page :: proc(
 // but a full track object per item costs most of every page's bytes.
 // Playlist items carry the object under `item`; `track` is deprecated and
 // comes back unusable, so select `item` here, not `track`.
-TRACK_FIELDS :: "uri,name,duration_ms,artists(name),album(images)"
+TRACK_FIELDS :: "uri,name,duration_ms,artists(uri,name),album(uri,name,images)"
 
 track_page_address :: proc(
 	source: Source,
@@ -296,7 +300,7 @@ track_page_address :: proc(
 		)
 	case .Album:
 		address = fmt.aprintf(
-			"https://api.spotify.com/v1/albums/%s/tracks?limit=50&offset=%d&fields=total,offset,next,items(uri,name,duration_ms,artists(name))",
+			"https://api.spotify.com/v1/albums/%s/tracks?limit=50&offset=%d&fields=total,offset,next,items(uri,name,duration_ms,artists(uri,name))",
 			id,
 			offset,
 		)
@@ -496,10 +500,19 @@ saved_track_rows :: proc(
 
 track_row :: proc(track: Track_Ref, allocator: runtime.Allocator) -> (row: Track_Row, ok: bool) {
 	if len(track.name) == 0 || len(track.uri) > 128 || track.duration_ms < 0 {return}
+	first_artist, artist_uri := "", ""
+	if len(track.artists) > 0 {
+		first_artist = strings.clone(track.artists[0].name, allocator)
+		artist_uri = strings.clone(track.artists[0].uri, allocator)
+	}
 	return {
 			uri = strings.clone(track.uri, allocator),
 			name = strings.clone(track.name, allocator),
 			artists = joined_artists(track.artists, allocator),
+			first_artist = first_artist,
+			artist_uri = artist_uri,
+			album = strings.clone(track.album.name, allocator),
+			album_uri = strings.clone(track.album.uri, allocator),
 			duration_ms = track.duration_ms,
 			image = strings.clone(cover_url(track.album.images), allocator),
 			image_small = strings.clone(cover_url_smallest(track.album.images), allocator),

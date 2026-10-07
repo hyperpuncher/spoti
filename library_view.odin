@@ -597,6 +597,11 @@ track_table :: proc(
 				1,
 				context.temp_allocator,
 			)
+			// Multi-artist rows link the first; sources that omit the URI
+			// leave plain text with no hover and no click.
+			artist_over :=
+				len(row.artist_uri) > 0 &&
+				clay.PointerOver(clay.ID("artist_clip", u32(index - visible.first)))
 			artist_text := hero_fit_text(
 				ui_state,
 				row.artists,
@@ -672,7 +677,11 @@ track_table :: proc(
 				) {
 					clay.Text(
 						artist_text,
-						clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
+						clay.TextElementConfig {
+							fontSize = 14,
+							textColor = artist_over ? WHITE : MUTED,
+							wrapMode = .None,
+						},
 					)
 				}
 				if clay.UI()(

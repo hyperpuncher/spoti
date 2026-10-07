@@ -24,16 +24,24 @@ Stage :: enum {
 }
 
 Play_Item :: struct {
-	uri:    string,
-	artist: string,
-	cover:  string,
-	order:  int,
+	uri:          string,
+	artist:       string, // joined display names
+	first_artist: string, // first artist, for the page preview
+	artist_uri:   string, // first artist; empty when the source omits it
+	album:        string,
+	album_uri:    string,
+	cover:        string,
+	order:        int,
 }
 
 free_play_queue :: proc(items: ^[dynamic]Play_Item) {
 	for item in items^ {
 		delete(item.uri)
 		delete(item.artist)
+		delete(item.first_artist)
+		delete(item.artist_uri)
+		delete(item.album)
+		delete(item.album_uri)
 		delete(item.cover)
 	}
 	delete(items^)
@@ -52,6 +60,10 @@ append_play_item :: proc(
 		Play_Item {
 			uri = strings.clone(row.uri),
 			artist = strings.clone(row.artists),
+			first_artist = strings.clone(row.first_artist),
+			artist_uri = strings.clone(row.artist_uri),
+			album = strings.clone(row.album),
+			album_uri = strings.clone(row.album_uri),
 			cover = strings.clone(cover),
 			order = order,
 		},
@@ -66,6 +78,26 @@ build_play_queue :: proc(
 	free_play_queue(items)
 	items^ = make([dynamic]Play_Item, 0, len(rows))
 	for row, index in rows {append_play_item(items, row, index, fallback_cover)}
+}
+
+// Builds the queue from the open detail. Album track objects carry no album
+// block, so those rows would leave the footer title unlinked; stamp them
+// from the open page while it is in scope.
+queue_detail_rows :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
+	build_play_queue(items, detail.rows[:], detail.image_small)
+	stamp_queue_album(items, detail)
+}
+
+// Idempotent, so paged-in tails stamp just their new rows.
+stamp_queue_album :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
+	if detail.source != .Album || len(detail.id) == 0 {return}
+	// Temp-scoped: only read while stamping, the queue keeps heap clones.
+	uri := fmt.aprintf("spotify:album:%s", detail.id, allocator = context.temp_allocator)
+	for &item in items {
+		if len(item.album_uri) > 0 {continue}
+		item.album_uri = strings.clone(uri)
+		item.album = strings.clone(detail.name)
+	}
 }
 
 // The live queue mirrors a detail page; later pages extend it in place.

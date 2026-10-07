@@ -99,6 +99,8 @@ update_cursor :: proc(
 	visible: Frame_Visible,
 	seek_enabled: bool,
 	search_mode: bool,
+	link_album: bool,
+	link_artist: bool,
 ) {
 	if seek_enabled && pointer_over("seek_slider") {ui.set_cursor(state, .Pointer); return}
 	if pointer_over("library_scrollbar") || pointer_over("detail_scrollbar") {
@@ -137,8 +139,22 @@ update_cursor :: proc(
 			return
 		}
 	}
+	if link_album && pointer_over("footer_title") {
+		ui.set_cursor(state, .Pointer)
+		return
+	}
+	if link_artist && pointer_over("footer_artist") {
+		ui.set_cursor(state, .Pointer)
+		return
+	}
 	if client.detail.ready {
 		for index in visible.tracks.first ..< visible.tracks.last {
+			if index < len(client.detail.rows) &&
+			   len(client.detail.rows[index].artist_uri) > 0 &&
+			   pointer_over("artist_clip", u32(index - visible.tracks.first)) {
+				ui.set_cursor(state, .Pointer)
+				return
+			}
 			if pointer_over("track_row", u32(index)) {
 				ui.set_cursor(state, .Pointer)
 				return
@@ -152,6 +168,31 @@ update_cursor :: proc(
 		}
 	}
 	ui.set_cursor(state, .Default)
+}
+
+// Shared by card clicks and row/footer links: opens the entry page unless it
+// is already open, and records the navigation like any card click. The
+// preview is only borrowed; the detail and history own their copies.
+open_entry_page :: proc(
+	client: ^library.Client,
+	nav: ^Nav,
+	app_state: ^State,
+	textures: ^Textures,
+	detail_pinned: ^bool,
+	filter: library.Kind,
+	search_mode: bool,
+	search_kind: library.Kind,
+	input: string,
+	entry: library.Entry,
+) -> bool {
+	if detail_already_open(client, entry.uri) {return true}
+	source, id, valid := parse_card_uri(entry.uri)
+	if !valid {return false}
+	if !library.open_detail(client, source, id, entry) {return false}
+	retry_failed_covers(textures)
+	detail_pinned^ = state_is_pinned(app_state, entry.uri)
+	nav_commit(nav, nav_capture(client, filter, search_mode, search_kind, input))
+	return true
 }
 
 open_spotify_detail :: proc(detail: ^library.Detail) {
@@ -826,6 +867,7 @@ main :: proc() {
 				library_client.detail.rows[len(play_queue):],
 				library_client.detail.image_small,
 			)
+			stamp_queue_album(&play_queue, &library_client.detail)
 			redraw = true
 		}
 		// Spread texture uploads across frames; draining a backlog at once
@@ -1091,9 +1133,16 @@ main :: proc() {
 		if input_active {shown_input = fmt.aprintf("%s|", shown_input, allocator = context.temp_allocator)}
 		times: [2][16]u8
 		retain_player_cover(&displayed_cover, player_cover, &textures)
+		// The footer links the playing collection: the title its album, the
+		// artist its artist. Search queues carry no URIs and stay silent.
+		queue_at := play_index >= 0 && play_index < len(play_queue)
+		link_album := queue_at && len(play_queue[play_index].album_uri) > 0
+		link_artist := queue_at && len(play_queue[play_index].artist_uri) > 0
 		view := View {
 			title         = shown_title,
 			status        = shown_status,
+			album_linked  = link_album,
+			artist_linked = link_artist,
 			button        = button,
 			progress      = progress,
 			elapsed       = duration_text(shown_ms, times[0][:]),
@@ -1196,7 +1245,16 @@ main :: proc() {
 			}
 		} else {autoscroll_moving = false}
 		t2 := sdl.GetTicksNS()
-		update_cursor(&state, &library_client, resizing, visible, seek_enabled, search_mode)
+		update_cursor(
+			&state,
+			&library_client,
+			resizing,
+			visible,
+			seek_enabled,
+			search_mode,
+			link_album,
+			link_artist,
+		)
 		_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
 		_ = sdl.RenderClear(state.renderer)
 		render(&commands, &state, &textures)
@@ -1264,11 +1322,7 @@ main :: proc() {
 					open_spotify_uri(menu.uri)
 				case .Play:
 					if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
-						build_play_queue(
-							&play_queue,
-							library_client.detail.rows[:],
-							library_client.detail.image_small,
-						)
+						queue_detail_rows(&play_queue, &library_client.detail)
 						stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
 						play_index =
 							shuffle ? reorder_play_queue(play_queue[:], menu.track, true) : menu.track
@@ -1375,26 +1429,19 @@ main :: proc() {
 								&artist,
 							)
 							handled = track_selected
-						} else if detail_already_open(&library_client, entry.uri) {
-							handled = true
 						} else {
-							source, id, valid := parse_card_uri(entry.uri)
-							if !valid {break}
-							handled = library.open_detail(&library_client, source, id, entry)
-							if handled {
-								retry_failed_covers(&textures)
-								detail_pinned = state_is_pinned(&app_state, entry.uri)
-								nav_commit(
-									&nav,
-									nav_capture(
-										&library_client,
-										filter,
-										search_mode,
-										search_kind,
-										input,
-									),
-								)
-							}
+							handled = open_entry_page(
+								&library_client,
+								&nav,
+								&app_state,
+								&textures,
+								&detail_pinned,
+								filter,
+								search_mode,
+								search_kind,
+								input,
+								entry,
+							)
 						}
 						break
 					}
@@ -1461,11 +1508,37 @@ main :: proc() {
 								mouse_click,
 								u32(index),
 							) {continue}
-							build_play_queue(
-								&play_queue,
-								library_client.detail.rows[:],
-								library_client.detail.image_small,
-							)
+							// A linked artist opens its page instead of playing
+							// the row. Slot-keyed like the layout clips.
+							if index < len(library_client.detail.rows) {
+								row := library_client.detail.rows[index]
+								if len(row.artist_uri) > 0 &&
+								   hit_clipped(
+									   "artist_clip",
+									   "detail_rows",
+									   mouse_click,
+									   u32(index - visible.tracks.first),
+								   ) {
+									preview := library.Entry {
+										name = row.first_artist,
+										uri  = row.artist_uri,
+									}
+									handled = open_entry_page(
+										&library_client,
+										&nav,
+										&app_state,
+										&textures,
+										&detail_pinned,
+										filter,
+										search_mode,
+										search_kind,
+										input,
+										preview,
+									)
+									break
+								}
+							}
+							queue_detail_rows(&play_queue, &library_client.detail)
 							stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
 							play_index =
 								shuffle ? reorder_play_queue(play_queue[:], index, true) : index
@@ -1591,11 +1664,7 @@ main :: proc() {
 		hero_start := hero_pressed && detail_play_enabled(&library_client)
 		restart_playback := track_selected || hero_start
 		if hero_start {
-			build_play_queue(
-				&play_queue,
-				library_client.detail.rows[:],
-				library_client.detail.image_small,
-			)
+			queue_detail_rows(&play_queue, &library_client.detail)
 			stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
 			play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
 			_ = select_play_item(play_queue[:], play_index, &selected, &player_cover, &artist)
@@ -1606,6 +1675,45 @@ main :: proc() {
 		track_delta := mpris_delta
 		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
 		if clicked && hit("footer_next", mouse_click) {track_delta = 1}
+		if clicked && link_album && hit("footer_title", mouse_click) {
+			item := play_queue[play_index]
+			preview := library.Entry {
+				name  = item.album,
+				uri   = item.album_uri,
+				image = item.cover,
+			}
+			_ = open_entry_page(
+				&library_client,
+				&nav,
+				&app_state,
+				&textures,
+				&detail_pinned,
+				filter,
+				search_mode,
+				search_kind,
+				input,
+				preview,
+			)
+		}
+		if clicked && link_artist && hit("footer_artist", mouse_click) {
+			item := play_queue[play_index]
+			preview := library.Entry {
+				name = item.first_artist,
+				uri  = item.artist_uri,
+			}
+			_ = open_entry_page(
+				&library_client,
+				&nav,
+				&app_state,
+				&textures,
+				&detail_pinned,
+				filter,
+				search_mode,
+				search_kind,
+				input,
+				preview,
+			)
+		}
 		if track_delta != 0 &&
 		   advance_play_item(
 			   play_queue[:],
