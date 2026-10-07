@@ -326,6 +326,8 @@ fetch_index :: proc(
 	cursor: string = "",
 	reuse: rawptr = nil,
 	retry_after: ^int = nil,
+	refresh: bool = false,
+	cache_only: bool = false,
 ) -> (
 	page: Page,
 	status: int,
@@ -359,7 +361,16 @@ fetch_index :: proc(
 	defer delete(address)
 	bytes: [dynamic]u8
 	fetched: bool
-	bytes, status, fetched = api_get(access, address, 512 * 1024, reuse, retry_after, PAGE_TTL)
+	bytes, status, fetched = api_get(
+		access,
+		address,
+		512 * 1024,
+		reuse,
+		retry_after,
+		PAGE_TTL,
+		refresh = refresh,
+		cache_only = cache_only,
+	)
 	if !fetched {return {}, status, false}
 	defer delete(bytes)
 	if status != 200 {return {}, status, false}

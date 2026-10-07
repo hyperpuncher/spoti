@@ -113,14 +113,19 @@ cached_get :: proc(
 	reuse: rawptr = nil,
 	stale: time.Duration = 0,
 	cache_only: bool = false,
+	refresh: bool = false,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
 	ok: bool,
 ) {
-	if cached, found := cache_read(prefix, address, ttl); found {
-		if prefix == "cover" {diagnostic.cover_cache_result(true)}
-		return cached, 200, true
+	// A refresh skips the TTL read and goes to the network; the fresh body
+	// still rewrites the cache, and stale still covers a failed fetch.
+	if !refresh {
+		if cached, hit := cache_read(prefix, address, ttl); hit {
+			if prefix == "cover" {diagnostic.cover_cache_result(true)}
+			return cached, 200, true
+		}
 	}
 	if prefix == "cover" {diagnostic.cover_cache_result(false)}
 	if cache_only {
@@ -150,6 +155,7 @@ api_get :: proc(
 	ttl: time.Duration = API_TTL,
 	stale: time.Duration = API_STALE,
 	cache_only: bool = false,
+	refresh: bool = false,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -163,6 +169,7 @@ api_get :: proc(
 		reuse,
 		stale,
 		cache_only,
+		refresh,
 	)
 }
 

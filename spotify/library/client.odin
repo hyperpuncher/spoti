@@ -38,16 +38,17 @@ Request_Kind :: enum {
 }
 
 Request :: struct {
-	kind:   Request_Kind,
-	list:   Kind,
-	offset: int,
-	cursor: string, // Index; worker frees
-	source: Source,
-	id:     string, // Detail, More; worker frees
-	query:  string, // Search; worker frees
-	serial: u64, // Search; echoes back so stale results are dropped
-	liked:  bool, // Like; the membership to set
-	saved:  bool, // Detail; the preview already knows the membership
+	kind:    Request_Kind,
+	list:    Kind,
+	offset:  int,
+	cursor:  string, // Index; worker frees
+	source:  Source,
+	id:      string, // Detail, More; worker frees
+	query:   string, // Search; worker frees
+	serial:  u64, // Search; echoes back so stale results are dropped
+	liked:   bool, // Like; the membership to set
+	saved:   bool, // Detail; the preview already knows the membership
+	refresh: bool, // Index; a revalidation that replaces the page
 }
 
 Result :: struct {
@@ -71,6 +72,7 @@ Result :: struct {
 	liked:         bool, // Like; echoes the requested membership
 	auth:          Auth_Result, // Auth; why sign-in stopped
 	retry_after:   int, // Index; seconds the server asked us to wait
+	refresh:       bool, // Index; a revalidation that replaces the page
 }
 
 Cover_Request :: struct {
@@ -248,6 +250,7 @@ handle :: proc(
 			request.cursor,
 			reuse,
 			&retry_after,
+			refresh = request.refresh,
 		)
 		send(
 			client,
@@ -258,6 +261,7 @@ handle :: proc(
 				status = status,
 				ok = ok,
 				retry_after = retry_after,
+				refresh = request.refresh,
 			},
 		)
 	case .Detail:
@@ -489,8 +493,16 @@ start :: proc(client: ^Client) -> bool {
 	client.state = .Authorizing
 	client.remaining_initial = 3
 	for kind in ([]Kind{Kind.Playlists, Kind.Albums, Kind.Artists}) {
+		// Paint the cache now so the first frame is never blank, then let
+		// the worker replace it with a fresh read behind the scenes.
+		if page, _, ok := fetch_index("", kind, cache_only = true); ok {
+			destination := &client.pages[kind]
+			free_page(destination)
+			destination^ = page
+			destination.items.allocator = virtual.arena_allocator(&destination.arena)
+		}
 		client.pending[kind] = true
-		_ = chan.send(client.requests, Request{kind = .Index, list = kind})
+		_ = chan.send(client.requests, Request{kind = .Index, list = kind, refresh = true})
 	}
 	return true
 }
@@ -811,7 +823,9 @@ apply :: proc(client: ^Client, result: Result) {
 		)
 		diagnostic.write(message)
 		delete(message)
-		if !destination.ready {
+		// A revalidation lands after the warm cache paint and replaces it;
+		// later pages still append.
+		if !destination.ready || local.refresh {
 			free_page(destination)
 			destination^ = local.page // arena ownership moves to the client
 			// Dynamic arrays retain an allocator pointing to the original arena
