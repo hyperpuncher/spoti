@@ -950,14 +950,16 @@ detail_page :: proc(
 					d,
 				)
 			}
-			hero_icon(
-				"hero_pin",
-				view.pinned ? "pin-filled" : "pin-off",
-				library.detail_loading_visible(client) ? .Disabled : view.pinned ? .Green : .Muted,
-				textures,
-				fx,
-				d,
-			)
+			if client.detail.source == .Playlist {
+				hero_icon(
+					"hero_pin",
+					view.pinned ? "pin-filled" : "pin-off",
+					library.detail_loading_visible(client) ? .Disabled : view.pinned ? .Green : .Muted,
+					textures,
+					fx,
+					d,
+				)
+			}
 			if client.detail.source != .Liked {
 				hero_icon(
 					"hero_copy_link",
