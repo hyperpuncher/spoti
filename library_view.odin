@@ -725,17 +725,18 @@ artist_discography :: proc(
 }
 
 // Hero title sizes, largest first. The title wraps onto two lines, steps
-// down until it fits them, and finally ellipsizes. Clay only wraps on
-// whitespace and offers no max-lines, so both the size and the cut have to
-// be picked up front by replaying its greedy word wrap with the same
-// measurer the layout itself uses.
+// down until it fits them, and finally ellipsizes; the metadata line below
+// it is a single ellipsized line. Clay only wraps on whitespace and offers
+// no max-lines, so sizes and cuts have to be picked up front by replaying
+// its greedy word wrap with the same measurer the layout itself uses.
 HERO_TITLE_SIZES := [?]u16{54, 44, 36, 30}
 HERO_TITLE_LINES :: 2
+HERO_TITLE_FONT :: 2
 
-hero_text_width :: proc(state: ^ui.State, text: string, size: u16) -> f32 {
+hero_text_width :: proc(state: ^ui.State, text: string, size, font: u16) -> f32 {
 	if len(text) == 0 {return 0}
 	config := clay.TextElementConfig {
-		fontId   = 2,
+		fontId   = font,
 		fontSize = size,
 	}
 	slice := clay.StringSlice {
@@ -748,16 +749,16 @@ hero_text_width :: proc(state: ^ui.State, text: string, size: u16) -> f32 {
 // How many lines Clay's greedy wrap produces for the text in a column of
 // the given width: words break on spaces, every non-final word carries its
 // trailing space, and a lone overlong word takes its own overflowing line.
-hero_wrapped_lines :: proc(state: ^ui.State, text: string, size: u16, width: f32) -> int {
+hero_wrapped_lines :: proc(state: ^ui.State, text: string, size, font: u16, width: f32) -> int {
 	if len(text) == 0 {return 1}
-	space := hero_text_width(state, " ", size)
+	space := hero_text_width(state, " ", size, font)
 	lines := 0
 	line := f32(0)
 	start := 0
 	for start < len(text) {
 		end := start
 		for end < len(text) && text[end] != ' ' {end += 1}
-		w := hero_text_width(state, text[start:end], size)
+		w := hero_text_width(state, text[start:end], size, font)
 		if end < len(text) {w += space}
 		if line == 0 && line + w > width {
 			lines += 1
@@ -780,40 +781,44 @@ hero_title_size :: proc(state: ^ui.State, name: string, width: f32) -> u16 {
 	// Layout tests run without fonts; they keep the default size.
 	if state == nil || len(name) == 0 {return HERO_TITLE_SIZES[0]}
 	for size in HERO_TITLE_SIZES {
-		if hero_wrapped_lines(state, name, size, width) <= HERO_TITLE_LINES {return size}
+		if hero_wrapped_lines(state, name, size, HERO_TITLE_FONT, width) <= HERO_TITLE_LINES {
+			return size
+		}
 	}
 	return HERO_TITLE_SIZES[len(HERO_TITLE_SIZES) - 1]
 }
 
-// Shortens the title with an ellipsis so it wraps onto two lines at the
-// given size. Returns the name itself when it already fits, otherwise a
-// copy from the allocator, which the caller must not free.
-hero_title_text :: proc(
+// Shortens the text with an ellipsis so it fits the width: a single line
+// when lines is 1, that many wrapped lines otherwise. Returns the text
+// itself when it already fits, otherwise a copy from the allocator, which
+// the caller must not free.
+hero_fit_text :: proc(
 	state: ^ui.State,
-	name: string,
+	text: string,
 	width: f32,
-	size: u16,
+	size, font: u16,
+	lines: int,
 	allocator := context.allocator,
 ) -> string {
-	if state == nil || len(name) == 0 {return name}
-	if hero_wrapped_lines(state, name, size, width) <= HERO_TITLE_LINES {return name}
-	scratch := make([]u8, len(name) + len("…"), allocator)
-	lo, hi := 0, len(name)
+	if state == nil || len(text) == 0 {return text}
+	if hero_wrapped_lines(state, text, size, font, width) <= lines {return text}
+	scratch := make([]u8, len(text) + len("…"), allocator)
+	lo, hi := 0, len(text)
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
-		copy(scratch, name[:mid])
+		copy(scratch, text[:mid])
 		copy(scratch[mid:], "…")
-		if hero_wrapped_lines(state, string(scratch[:mid + len("…")]), size, width) <=
-		   HERO_TITLE_LINES {
+		if hero_wrapped_lines(state, string(scratch[:mid + len("…")]), size, font, width) <=
+		   lines {
 			lo = mid
 		} else {
 			hi = mid - 1
 		}
 	}
 	// Never split a multi-byte rune; shrinking only ever keeps the fit.
-	for lo > 0 && (name[lo - 1] & 0xC0) == 0x80 {lo -= 1}
+	for lo > 0 && (text[lo - 1] & 0xC0) == 0x80 {lo -= 1}
 	if lo == 0 {return "…"}
-	copy(scratch, name[:lo])
+	copy(scratch, text[:lo])
 	copy(scratch[lo:], "…")
 	return string(scratch[:lo + len("…")])
 }
@@ -878,11 +883,13 @@ detail_page :: proc(
 		// line over floating-point summation order.
 		title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d - d)
 		title_size := hero_title_size(ui_state, detail.name, title_width)
-		title_text := hero_title_text(
+		title_text := hero_fit_text(
 			ui_state,
 			detail.name,
 			title_width,
 			title_size,
+			HERO_TITLE_FONT,
+			HERO_TITLE_LINES,
 			context.temp_allocator,
 		)
 		if clay.UI()(
@@ -989,7 +996,16 @@ detail_page :: proc(
 						allocator = context.temp_allocator,
 					)
 				}
-				clay.Text(metadata, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+				metadata_text := hero_fit_text(
+					ui_state,
+					metadata,
+					title_width,
+					14,
+					0,
+					1,
+					context.temp_allocator,
+				)
+				clay.Text(metadata_text, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
 			}
 		}
 		if clay.UI()(
