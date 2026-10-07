@@ -724,12 +724,7 @@ artist_discography :: proc(
 }
 
 detail_play_enabled :: proc(client: ^library.Client) -> bool {
-	return(
-		client.detail.ready &&
-		!client.detail_loading &&
-		client.detail.rows_error == 0 &&
-		len(client.detail.rows) > 0 \
-	)
+	return client.detail.ready && client.detail.rows_error == 0 && len(client.detail.rows) > 0
 }
 
 detail_page :: proc(
