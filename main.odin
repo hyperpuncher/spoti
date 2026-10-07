@@ -584,7 +584,9 @@ main :: proc() {
 		wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
 		fades_animating :=
 			(textures.fade_top_alpha != 0 && textures.fade_top_alpha != 1) ||
-			(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1)
+			(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1) ||
+			(textures.fade_detail_top_alpha != 0 && textures.fade_detail_top_alpha != 1) ||
+			(textures.fade_detail_bottom_alpha != 0 && textures.fade_detail_bottom_alpha != 1)
 		// Anything animating renders at the display rate, so the idle poll
 		// below can never throttle a scroll glide or a button spring.
 		if stage == .Playing ||

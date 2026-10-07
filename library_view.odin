@@ -150,7 +150,12 @@ approach_alpha :: proc(current, target, dt: f32) -> f32 {
 	return next
 }
 
-scroll_fades :: proc(id: string, textures: ^Textures, grid_width, dt, d: f32) {
+scroll_fades :: proc(
+	id: string,
+	textures: ^Textures,
+	top_alpha, bottom_alpha: ^f32,
+	x, width, dt, d: f32,
+) {
 	top_target, bottom_target: f32
 	data := clay.GetScrollContainerData(clay.ID(id))
 	if data.found && data.scrollPosition != nil {
@@ -159,28 +164,22 @@ scroll_fades :: proc(id: string, textures: ^Textures, grid_width, dt, d: f32) {
 		if pos < -1 {top_target = 1}
 		if data.contentDimensions.height + pos > height + 1 {bottom_target = 1}
 		fade_height := FADE_HEIGHT * d
-		fade_image(
-			textures,
-			textures.fade_top,
-			textures.fade_top_alpha,
-			grid_width,
-			fade_height,
-			0,
-		)
+		fade_image(textures, textures.fade_top, top_alpha^, x, width, fade_height, 0)
 		fade_image(
 			textures,
 			textures.fade_bottom,
-			textures.fade_bottom_alpha,
-			grid_width,
+			bottom_alpha^,
+			x,
+			width,
 			fade_height,
 			height - fade_height,
 		)
 	}
-	textures.fade_top_alpha = approach_alpha(textures.fade_top_alpha, top_target, dt)
-	textures.fade_bottom_alpha = approach_alpha(textures.fade_bottom_alpha, bottom_target, dt)
+	top_alpha^ = approach_alpha(top_alpha^, top_target, dt)
+	bottom_alpha^ = approach_alpha(bottom_alpha^, bottom_target, dt)
 }
 
-fade_image :: proc(textures: ^Textures, key: u64, alpha, width, height, y: f32) {
+fade_image :: proc(textures: ^Textures, key: u64, alpha, x, width, height, y: f32) {
 	texture := textures.by_key[key]
 	if texture == nil || alpha <= 0.005 {return}
 	sdl.SetTextureAlphaMod(texture, u8(alpha * 255))
@@ -189,7 +188,7 @@ fade_image :: proc(textures: ^Textures, key: u64, alpha, width, height, y: f32) 
 		layout = {sizing = {width = clay.SizingFixed(width), height = clay.SizingFixed(height)}},
 		image = {imageData = rawptr(uintptr(key))},
 		floating = {
-			offset = {0, y},
+			offset = {x, y},
 			zIndex = 1,
 			pointerCaptureMode = .Passthrough,
 			attachTo = .Parent,
@@ -463,7 +462,16 @@ sidebar :: proc(
 				}
 			}
 			list_spacer(visible.after)
-			scroll_fades("library_grid", textures, (width - 36) * d, dt, d)
+			scroll_fades(
+				"library_grid",
+				textures,
+				&textures.fade_top_alpha,
+				&textures.fade_bottom_alpha,
+				0,
+				(width - 36) * d,
+				dt,
+				d,
+			)
 		}
 	}
 	return
@@ -492,7 +500,7 @@ track_table :: proc(
 	detail: ^library.Detail,
 	view: View,
 	textures: ^Textures,
-	available_width, viewport_height, d: f32,
+	available_width, viewport_height, dt, d: f32,
 	ui_state: ^ui.State,
 ) -> (
 	visible: Visible_Items,
@@ -736,6 +744,16 @@ track_table :: proc(
 			}
 		}
 		list_spacer(visible.after - gap)
+		scroll_fades(
+			"detail_rows",
+			textures,
+			&textures.fade_detail_top_alpha,
+			&textures.fade_detail_bottom_alpha,
+			0,
+			available_width - SCROLLBAR_OUTSET * d,
+			dt,
+			d,
+		)
 	}
 	return
 }
@@ -743,7 +761,7 @@ track_table :: proc(
 artist_discography :: proc(
 	detail: ^library.Detail,
 	textures: ^Textures,
-	available_width, viewport_height, card_text_height, d: f32,
+	available_width, viewport_height, card_text_height, dt, d: f32,
 ) -> (
 	visible: Visible_Items,
 ) {
@@ -802,6 +820,16 @@ artist_discography :: proc(
 			}
 		}
 		list_spacer(visible.after - row_gap)
+		scroll_fades(
+			"detail_rows",
+			textures,
+			&textures.fade_detail_top_alpha,
+			&textures.fade_detail_bottom_alpha,
+			20 * d,
+			usable,
+			dt,
+			d,
+		)
 	}
 	return
 }
@@ -948,7 +976,7 @@ detail_page :: proc(
 	client: ^library.Client,
 	textures: ^Textures,
 	fx: ^Button_Fx_Ctx,
-	available_width, viewport_height, card_text_height, d: f32,
+	available_width, viewport_height, card_text_height, dt, d: f32,
 	ui_state: ^ui.State,
 	visible: ^Frame_Visible,
 ) {
@@ -1227,6 +1255,7 @@ detail_page :: proc(
 				available_width,
 				viewport_height,
 				card_text_height,
+				dt,
 				d,
 			)
 		} else if detail.source == .Playlist && detail.rows_error != 0 {
@@ -1265,6 +1294,7 @@ detail_page :: proc(
 				textures,
 				available_width,
 				viewport_height,
+				dt,
 				d,
 				ui_state,
 			)

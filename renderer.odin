@@ -17,12 +17,16 @@ Cover_Request_State :: struct {
 }
 
 Textures :: struct {
-	by_key:            map[u64]^sdl.Texture,
-	requested:         map[u64]Cover_Request_State,
-	fade_top:          u64,
-	fade_bottom:       u64,
-	fade_top_alpha:    f32,
-	fade_bottom_alpha: f32,
+	by_key:                   map[u64]^sdl.Texture,
+	requested:                map[u64]Cover_Request_State,
+	fade_top:                 u64,
+	fade_bottom:              u64,
+	fade_top_alpha:           f32,
+	fade_bottom_alpha:        f32,
+	// The detail list scrolls independently of the sidebar grid, so it
+	// eases its own pair instead of fighting over the shared one.
+	fade_detail_top_alpha:    f32,
+	fade_detail_bottom_alpha: f32,
 }
 
 // Scroll-edge fades baked once as dithered ramp strips, keyed by texture

@@ -742,6 +742,7 @@ layout :: proc(
 				viewport_width - (sidebar_width + 6) * d,
 				viewport_height,
 				card_text_height,
+				dt,
 				d,
 				ui_state,
 				&visible,
