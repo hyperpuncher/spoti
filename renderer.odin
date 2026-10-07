@@ -27,10 +27,15 @@ Textures :: struct {
 	// eases its own pair instead of fighting over the shared one.
 	fade_detail_top_alpha:    f32,
 	fade_detail_bottom_alpha: f32,
+	// The detail page sits on BG, not the sidebar, so its strips are
+	// baked with the page tint instead of reusing the sidebar pair.
+	fade_detail_top:          u64,
+	fade_detail_bottom:       u64,
 }
 
 // Scroll-edge fades baked once as dithered ramp strips, keyed by texture
-// address like covers and freed with them. Tinted sidebar at upload.
+// address like covers and freed with them. Tinted per surface at upload:
+// the sidebar pair follows SIDEBAR, the detail pair follows BG.
 load_fades :: proc(state: ^ui.State, textures: ^Textures) {
 	top := ui.make_fade_texture(state, false)
 	if top != nil {
@@ -44,15 +49,32 @@ load_fades :: proc(state: ^ui.State, textures: ^Textures) {
 		textures.by_key[u64(uintptr(bottom))] = bottom
 		textures.fade_bottom = u64(uintptr(bottom))
 	}
+	detail_top := ui.make_fade_texture(state, false)
+	if detail_top != nil {
+		_ = sdl.SetTextureColorMod(detail_top, u8(BG.r), u8(BG.g), u8(BG.b))
+		textures.by_key[u64(uintptr(detail_top))] = detail_top
+		textures.fade_detail_top = u64(uintptr(detail_top))
+	}
+	detail_bottom := ui.make_fade_texture(state, true)
+	if detail_bottom != nil {
+		_ = sdl.SetTextureColorMod(detail_bottom, u8(BG.r), u8(BG.g), u8(BG.b))
+		textures.by_key[u64(uintptr(detail_bottom))] = detail_bottom
+		textures.fade_detail_bottom = u64(uintptr(detail_bottom))
+	}
 }
 
 // Recolors the baked fade strips after a theme switch; the ramp pixels
-// stay white and only the mod follows the sidebar.
+// stay white and only the mods follow their surfaces.
 retint_fades :: proc(textures: ^Textures) {
 	for key in ([2]u64{textures.fade_top, textures.fade_bottom}) {
 		texture := textures.by_key[key]
 		if texture == nil {continue}
 		_ = sdl.SetTextureColorMod(texture, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
+	}
+	for key in ([2]u64{textures.fade_detail_top, textures.fade_detail_bottom}) {
+		texture := textures.by_key[key]
+		if texture == nil {continue}
+		_ = sdl.SetTextureColorMod(texture, u8(BG.r), u8(BG.g), u8(BG.b))
 	}
 }
 

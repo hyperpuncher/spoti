@@ -153,6 +153,7 @@ approach_alpha :: proc(current, target, dt: f32) -> f32 {
 scroll_fades :: proc(
 	id: string,
 	textures: ^Textures,
+	top_key, bottom_key: u64,
 	top_alpha, bottom_alpha: ^f32,
 	x, width, dt, d: f32,
 ) {
@@ -164,10 +165,10 @@ scroll_fades :: proc(
 		if pos < -1 {top_target = 1}
 		if data.contentDimensions.height + pos > height + 1 {bottom_target = 1}
 		fade_height := FADE_HEIGHT * d
-		fade_image(textures, textures.fade_top, top_alpha^, x, width, fade_height, 0)
+		fade_image(textures, top_key, top_alpha^, x, width, fade_height, 0)
 		fade_image(
 			textures,
-			textures.fade_bottom,
+			bottom_key,
 			bottom_alpha^,
 			x,
 			width,
@@ -465,6 +466,8 @@ sidebar :: proc(
 			scroll_fades(
 				"library_grid",
 				textures,
+				textures.fade_top,
+				textures.fade_bottom,
 				&textures.fade_top_alpha,
 				&textures.fade_bottom_alpha,
 				0,
@@ -747,6 +750,8 @@ track_table :: proc(
 		scroll_fades(
 			"detail_rows",
 			textures,
+			textures.fade_detail_top,
+			textures.fade_detail_bottom,
 			&textures.fade_detail_top_alpha,
 			&textures.fade_detail_bottom_alpha,
 			0,
@@ -823,6 +828,8 @@ artist_discography :: proc(
 		scroll_fades(
 			"detail_rows",
 			textures,
+			textures.fade_detail_top,
+			textures.fade_detail_bottom,
 			&textures.fade_detail_top_alpha,
 			&textures.fade_detail_bottom_alpha,
 			20 * d,
