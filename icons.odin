@@ -48,6 +48,7 @@ ICON_NAMES :: []string {
 	"circle-plus",
 	"circle-check",
 	"link",
+	"external-link",
 }
 
 // Tint lives in the texture color mod, not the pixels, so a theme switch

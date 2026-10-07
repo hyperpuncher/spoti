@@ -930,7 +930,7 @@ detail_page :: proc(
 						)
 					}
 				}
-				player_control(
+				hero_icon(
 					"hero_shuffle",
 					"shuffle",
 					!play_enabled ? .Disabled : view.shuffle ? .Green : .Muted,
@@ -941,7 +941,7 @@ detail_page :: proc(
 			}
 			if client.detail.source != .Liked {
 				like_disabled := library.detail_loading_visible(client) || client.like_pending
-				player_control(
+				hero_icon(
 					"hero_like",
 					client.detail.liked ? "circle-check" : "circle-plus",
 					like_disabled ? .Disabled : client.detail.liked ? .Green : .Muted,
@@ -950,7 +950,7 @@ detail_page :: proc(
 					d,
 				)
 			}
-			player_control(
+			hero_icon(
 				"hero_pin",
 				view.pinned ? "pin-filled" : "pin-off",
 				library.detail_loading_visible(client) ? .Disabled : view.pinned ? .Green : .Muted,
@@ -959,7 +959,7 @@ detail_page :: proc(
 				d,
 			)
 			if client.detail.source != .Liked {
-				player_control(
+				hero_icon(
 					"hero_copy_link",
 					"link",
 					library.detail_loading_visible(client) ? .Disabled : .Muted,
@@ -968,25 +968,14 @@ detail_page :: proc(
 					d,
 				)
 			}
-			if clay.UI_WithId(clay.ID("spotify_link"))(
-			{
-				layout = {
-					sizing = {width = clay.SizingFit({}), height = clay.SizingFixed(36 * d)},
-					padding = {left = u16(14 * d), right = u16(14 * d)},
-					childAlignment = {x = .Center, y = .Center},
-				},
-				backgroundColor = CARD,
-				cornerRadius = clay.CornerRadiusAll(18 * d),
-			},
-			) {
-				clay.Text(
-					"Open in Spotify",
-					clay.TextElementConfig {
-						fontSize = 13,
-						textColor = library.detail_loading_visible(client) ? MUTED : WHITE,
-					},
-				)
-			}
+			hero_icon(
+				"spotify_link",
+				"external-link",
+				library.detail_loading_visible(client) ? .Disabled : .Muted,
+				textures,
+				fx,
+				d,
+			)
 		}
 		if library.detail_loading_visible(client) {
 			loading_track_table(d)

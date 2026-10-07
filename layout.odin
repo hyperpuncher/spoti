@@ -292,6 +292,30 @@ player_control :: proc(
 	}
 }
 
+// Hero icon buttons never paint a background. Hover reads through a tint
+// shift and a small size bump instead, so the row stays visually quiet.
+hero_icon :: proc(
+	id, icon: string,
+	tint: Icon_Tint,
+	textures: ^Textures,
+	fx: ^Button_Fx_Ctx,
+	d: f32,
+) {
+	scale, hovered := button_fx(fx, id, tint != .Disabled)
+	active := hovered && tint == .Muted ? Icon_Tint.White : tint
+	size := 18 * d * scale * (hovered ? 1.15 : 1)
+	if clay.UI_WithId(clay.ID(id))(
+	{
+		layout = {
+			sizing = {width = clay.SizingFixed(32 * d), height = clay.SizingFixed(32 * d)},
+			childAlignment = {x = .Center, y = .Center},
+		},
+	},
+	) {
+		icon_element(textures, icon, active, size)
+	}
+}
+
 player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 	if clay.UI()(
 	{
