@@ -35,21 +35,6 @@ Play_Item :: struct {
 
 // Deep-copies row links (arena) onto the heap queue; empty stays nil so
 // plain text never pays for links.
-clone_artist_links :: proc(
-	links: []library.Artist_Link,
-	allocator := context.allocator,
-) -> []library.Artist_Link {
-	if len(links) == 0 {return nil}
-	out := make([]library.Artist_Link, len(links), allocator)
-	for link, index in links {
-		out[index] = library.Artist_Link {
-			name = strings.clone(link.name, allocator),
-			uri  = strings.clone(link.uri, allocator),
-		}
-	}
-	return out
-}
-
 free_artist_links :: proc(links: []library.Artist_Link) {
 	for link in links {
 		delete(link.name)
@@ -83,7 +68,7 @@ append_play_item :: proc(
 		Play_Item {
 			uri = strings.clone(row.uri),
 			artist = strings.clone(row.artists),
-			artist_links = clone_artist_links(row.artist_links),
+			artist_links = library.clone_artist_links(row.artist_links),
 			album = strings.clone(row.album),
 			album_uri = strings.clone(row.album_uri),
 			cover = strings.clone(cover),

@@ -79,10 +79,27 @@ clone_row :: proc(row: Track_Row, allocator: runtime.Allocator) -> Track_Row {
 		uri = strings.clone(row.uri, allocator),
 		name = strings.clone(row.name, allocator),
 		artists = strings.clone(row.artists, allocator),
+		artist_links = clone_artist_links(row.artist_links, allocator),
+		album = strings.clone(row.album, allocator),
+		album_uri = strings.clone(row.album_uri, allocator),
 		duration_ms = row.duration_ms,
 		image = strings.clone(row.image, allocator),
 		image_small = strings.clone(row.image_small, allocator),
 	}
+}
+
+// Deep-copies row links (arena) onto a new owner; empty stays nil so
+// plain text never pays for links.
+clone_artist_links :: proc(links: []Artist_Link, allocator := context.allocator) -> []Artist_Link {
+	if len(links) == 0 {return nil}
+	cloned := make([]Artist_Link, len(links), allocator)
+	for link, index in links {
+		cloned[index] = Artist_Link {
+			name = strings.clone(link.name, allocator),
+			uri  = strings.clone(link.uri, allocator),
+		}
+	}
+	return cloned
 }
 
 Raw_Artist :: struct {
