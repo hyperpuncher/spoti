@@ -530,7 +530,10 @@ track_table :: proc(
 			) {
 				clay.Text("#", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
 			}
-			if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {
+			// Same percent column as the rows below, so the artist label
+			// sits exactly over the artist column: Grow pairs would split
+			// their joint share instead of the whole base.
+			if clay.UI()({layout = {sizing = {width = clay.SizingPercent(0.5)}}}) {
 				clay.Text("TITLE", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
 			}
 			if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {
