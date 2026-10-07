@@ -26,20 +26,43 @@ Stage :: enum {
 Play_Item :: struct {
 	uri:          string,
 	artist:       string, // joined display names
-	first_artist: string, // first artist, for the page preview
-	artist_uri:   string, // first artist; empty when the source omits it
+	artist_links: []library.Artist_Link, // owned, in display order
 	album:        string,
 	album_uri:    string,
 	cover:        string,
 	order:        int,
 }
 
+// Deep-copies row links (arena) onto the heap queue; empty stays nil so
+// plain text never pays for links.
+clone_artist_links :: proc(
+	links: []library.Artist_Link,
+	allocator := context.allocator,
+) -> []library.Artist_Link {
+	if len(links) == 0 {return nil}
+	out := make([]library.Artist_Link, len(links), allocator)
+	for link, index in links {
+		out[index] = library.Artist_Link {
+			name = strings.clone(link.name, allocator),
+			uri  = strings.clone(link.uri, allocator),
+		}
+	}
+	return out
+}
+
+free_artist_links :: proc(links: []library.Artist_Link) {
+	for link in links {
+		delete(link.name)
+		delete(link.uri)
+	}
+	delete(links)
+}
+
 free_play_queue :: proc(items: ^[dynamic]Play_Item) {
 	for item in items^ {
 		delete(item.uri)
 		delete(item.artist)
-		delete(item.first_artist)
-		delete(item.artist_uri)
+		free_artist_links(item.artist_links)
 		delete(item.album)
 		delete(item.album_uri)
 		delete(item.cover)
@@ -60,8 +83,7 @@ append_play_item :: proc(
 		Play_Item {
 			uri = strings.clone(row.uri),
 			artist = strings.clone(row.artists),
-			first_artist = strings.clone(row.first_artist),
-			artist_uri = strings.clone(row.artist_uri),
+			artist_links = clone_artist_links(row.artist_links),
 			album = strings.clone(row.album),
 			album_uri = strings.clone(row.album_uri),
 			cover = strings.clone(cover),
@@ -86,6 +108,15 @@ build_play_queue :: proc(
 queue_detail_rows :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
 	build_play_queue(items, detail.rows[:], detail.image_small)
 	stamp_queue_album(items, detail)
+}
+
+// The footer's single artist link: the first artist with a page. Search
+// queues carry one link; detail rows carry them all.
+queue_first_artist :: proc(items: []Play_Item, index: int) -> (name, uri: string, ok: bool) {
+	if index < 0 || index >= len(items) {return "", "", false}
+	links := items[index].artist_links
+	if len(links) == 0 || len(links[0].uri) == 0 {return "", "", false}
+	return links[0].name, links[0].uri, true
 }
 
 // Idempotent, so paged-in tails stamp just their new rows.
@@ -123,11 +154,22 @@ build_play_queue_from_entries :: proc(items: ^[dynamic]Play_Item, entries: []lib
 	free_play_queue(items)
 	items^ = make([dynamic]Play_Item, 0, len(entries))
 	for entry, index in entries {
+		links: []library.Artist_Link
+		if len(entry.first_artist) > 0 || len(entry.artist_uri) > 0 {
+			links = make([]library.Artist_Link, 1)
+			links[0] = library.Artist_Link {
+				name = strings.clone(entry.first_artist),
+				uri  = strings.clone(entry.artist_uri),
+			}
+		}
 		append(
 			items,
 			Play_Item {
 				uri = strings.clone(entry.uri),
 				artist = strings.clone(entry.subtitle),
+				artist_links = links,
+				album = strings.clone(entry.album),
+				album_uri = strings.clone(entry.album_uri),
 				cover = strings.clone(entry.image),
 				order = index,
 			},

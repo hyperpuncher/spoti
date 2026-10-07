@@ -20,13 +20,17 @@ Kind :: enum {
 
 // One library card: a playlist, album or artist with its cover and metadata.
 Entry :: struct {
-	name:     string,
-	uri:      string,
-	image:    string, // cover URL; never a token or signed CDN URL
-	subtitle: string, // owner or artists
-	year:     string, // album release year, e.g. "2024"
-	saved:    bool, // came from a library tab, so membership needs no check
-	total:    int, // track count where Spotify reports one
+	name:         string,
+	uri:          string,
+	image:        string, // cover URL; never a token or signed CDN URL
+	subtitle:     string, // owner or artists
+	year:         string, // album release year, e.g. "2024"
+	saved:        bool, // came from a library tab, so membership needs no check
+	total:        int, // track count where Spotify reports one
+	album:        string, // track entries only, for the footer link
+	album_uri:    string, // track entries only, for the footer link
+	first_artist: string, // track entries only, for the footer link
+	artist_uri:   string, // track entries only, for the footer link
 }
 
 Page :: struct {
@@ -53,6 +57,10 @@ clone_entry :: proc(entry: Entry, allocator: runtime.Allocator) -> Entry {
 		year = strings.clone(entry.year, allocator),
 		saved = entry.saved,
 		total = entry.total,
+		album = strings.clone(entry.album, allocator),
+		album_uri = strings.clone(entry.album_uri, allocator),
+		first_artist = strings.clone(entry.first_artist, allocator),
+		artist_uri = strings.clone(entry.artist_uri, allocator),
 	}
 }
 
@@ -291,6 +299,11 @@ append_track_entry :: proc(
 	allocator: runtime.Allocator,
 ) {
 	if len(track.name) == 0 || len(track.uri) > 128 {return}
+	first_artist, artist_uri := "", ""
+	if len(track.artists) > 0 {
+		first_artist = strings.clone(track.artists[0].name, allocator)
+		artist_uri = strings.clone(track.artists[0].uri, allocator)
+	}
 	append(
 		items,
 		Entry {
@@ -298,6 +311,10 @@ append_track_entry :: proc(
 			uri = strings.clone(track.uri, allocator),
 			image = strings.clone(cover_url(track.album.images), allocator),
 			subtitle = joined_artists(track.artists, allocator),
+			album = strings.clone(track.album.name, allocator),
+			album_uri = strings.clone(track.album.uri, allocator),
+			first_artist = first_artist,
+			artist_uri = artist_uri,
 		},
 	)
 }

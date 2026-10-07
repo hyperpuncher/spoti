@@ -17,12 +17,18 @@ Source :: enum {
 	Artist,
 }
 
+// One link per artist: names render joined with separators, and each name
+// with a URI opens its own page. Sources that omit URIs render plain text.
+Artist_Link :: struct {
+	name: string,
+	uri:  string,
+}
+
 Track_Row :: struct {
 	uri:          string,
 	name:         string,
 	artists:      string,
-	first_artist: string, // first artist, for the page preview
-	artist_uri:   string, // first artist; empty when the source omits it
+	artist_links: []Artist_Link, // arena-owned, in display order
 	album:        string,
 	album_uri:    string, // empty for album pages, stamped from the detail
 	duration_ms:  int,
@@ -500,17 +506,18 @@ saved_track_rows :: proc(
 
 track_row :: proc(track: Track_Ref, allocator: runtime.Allocator) -> (row: Track_Row, ok: bool) {
 	if len(track.name) == 0 || len(track.uri) > 128 || track.duration_ms < 0 {return}
-	first_artist, artist_uri := "", ""
-	if len(track.artists) > 0 {
-		first_artist = strings.clone(track.artists[0].name, allocator)
-		artist_uri = strings.clone(track.artists[0].uri, allocator)
+	links := make([]Artist_Link, len(track.artists), allocator)
+	for artist, index in track.artists {
+		links[index] = Artist_Link {
+			name = strings.clone(artist.name, allocator),
+			uri  = strings.clone(artist.uri, allocator),
+		}
 	}
 	return {
 			uri = strings.clone(track.uri, allocator),
 			name = strings.clone(track.name, allocator),
 			artists = joined_artists(track.artists, allocator),
-			first_artist = first_artist,
-			artist_uri = artist_uri,
+			artist_links = links,
 			album = strings.clone(track.album.name, allocator),
 			album_uri = strings.clone(track.album.uri, allocator),
 			duration_ms = track.duration_ms,

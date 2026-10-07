@@ -60,6 +60,10 @@ nav_free_state :: proc(state: Nav_State) {
 	delete(state.detail.image)
 	delete(state.detail.subtitle)
 	delete(state.detail.year)
+	delete(state.detail.album)
+	delete(state.detail.album_uri)
+	delete(state.detail.first_artist)
+	delete(state.detail.artist_uri)
 }
 
 nav_drop_forward :: proc(nav: ^Nav) {

@@ -149,11 +149,16 @@ update_cursor :: proc(
 	}
 	if client.detail.ready {
 		for index in visible.tracks.first ..< visible.tracks.last {
-			if index < len(client.detail.rows) &&
-			   len(client.detail.rows[index].artist_uri) > 0 &&
-			   pointer_over("artist_clip", u32(index - visible.tracks.first)) {
-				ui.set_cursor(state, .Pointer)
-				return
+			if index < len(client.detail.rows) {
+				row := client.detail.rows[index]
+				slot := u32(index - visible.tracks.first)
+				for ai in 0 ..< min(len(row.artist_links), 64) {
+					if len(row.artist_links[ai].uri) == 0 {continue}
+					if pointer_over("artist_link", artist_link_id(slot, ai)) {
+						ui.set_cursor(state, .Pointer)
+						return
+					}
+				}
 			}
 			if pointer_over("track_row", u32(index)) {
 				ui.set_cursor(state, .Pointer)
@@ -1137,7 +1142,7 @@ main :: proc() {
 		// artist its artist. Search queues carry no URIs and stay silent.
 		queue_at := play_index >= 0 && play_index < len(play_queue)
 		link_album := queue_at && len(play_queue[play_index].album_uri) > 0
-		link_artist := queue_at && len(play_queue[play_index].artist_uri) > 0
+		first_name, first_uri, link_artist := queue_first_artist(play_queue[:], play_index)
 		view := View {
 			title         = shown_title,
 			status        = shown_status,
@@ -1508,20 +1513,23 @@ main :: proc() {
 								mouse_click,
 								u32(index),
 							) {continue}
-							// A linked artist opens its page instead of playing
-							// the row. Slot-keyed like the layout clips.
+							// A linked artist opens its own page instead of
+							// playing the row. Same compound IDs as the layout.
 							if index < len(library_client.detail.rows) {
 								row := library_client.detail.rows[index]
-								if len(row.artist_uri) > 0 &&
-								   hit_clipped(
-									   "artist_clip",
-									   "detail_rows",
-									   mouse_click,
-									   u32(index - visible.tracks.first),
-								   ) {
+								slot := u32(index - visible.tracks.first)
+								for ai in 0 ..< min(len(row.artist_links), 64) {
+									link := row.artist_links[ai]
+									if len(link.uri) == 0 {continue}
+									if !hit_clipped(
+										"artist_link",
+										"detail_rows",
+										mouse_click,
+										artist_link_id(slot, ai),
+									) {continue}
 									preview := library.Entry {
-										name = row.first_artist,
-										uri  = row.artist_uri,
+										name = link.name,
+										uri  = link.uri,
 									}
 									handled = open_entry_page(
 										&library_client,
@@ -1537,6 +1545,7 @@ main :: proc() {
 									)
 									break
 								}
+								if handled {break}
 							}
 							queue_detail_rows(&play_queue, &library_client.detail)
 							stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
@@ -1696,10 +1705,9 @@ main :: proc() {
 			)
 		}
 		if clicked && link_artist && hit("footer_artist", mouse_click) {
-			item := play_queue[play_index]
 			preview := library.Entry {
-				name = item.first_artist,
-				uri  = item.artist_uri,
+				name = first_name,
+				uri  = first_uri,
 			}
 			_ = open_entry_page(
 				&library_client,

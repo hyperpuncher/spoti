@@ -581,6 +581,7 @@ track_table :: proc(
 				continue
 			}
 			row := &detail.rows[index]
+			slot := u32(index - visible.first)
 			// Each line is pre-shortened to its box: clay clips pixels but
 			// never draws an ellipsis itself. With no fonts (layout tests)
 			// everything below is the identity.
@@ -597,20 +598,11 @@ track_table :: proc(
 				1,
 				context.temp_allocator,
 			)
-			// Multi-artist rows link the first; sources that omit the URI
-			// leave plain text with no hover and no click.
-			artist_over :=
-				len(row.artist_uri) > 0 &&
-				clay.PointerOver(clay.ID("artist_clip", u32(index - visible.first)))
-			artist_text := hero_fit_text(
-				ui_state,
-				row.artists,
-				max(0, row_text - title_box),
-				14,
-				0,
-				1,
-				context.temp_allocator,
-			)
+			// Boundary-fitted segments: whole artists that fit, then an
+			// ellipsis. A first artist that alone overflows truncates with
+			// one like before. Sources that omit URIs render plain text.
+			artist_box := max(0, row_text - title_box)
+			comma_w := hero_text_width(ui_state, ", ", 14, 0)
 			hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
 			if clay.UI_WithId(clay.ID("track_row", u32(index)))(
 			{
@@ -645,7 +637,7 @@ track_table :: proc(
 				// one gap, with the cap keeping a runaway title from eating
 				// the artist. Slot-keyed like card clips: one stable scroll
 				// entry per visible row instead of one per absolute index.
-				if clay.UI_WithId(clay.ID("row_clip", u32(index - visible.first)))(
+				if clay.UI_WithId(clay.ID("row_clip", slot))(
 				{
 					layout = {
 						sizing = {
@@ -666,7 +658,7 @@ track_table :: proc(
 						},
 					)
 				}
-				if clay.UI_WithId(clay.ID("artist_clip", u32(index - visible.first)))(
+				if clay.UI_WithId(clay.ID("artist_clip", slot))(
 				{
 					layout = {
 						sizing = {width = clay.SizingGrow({})},
@@ -675,14 +667,50 @@ track_table :: proc(
 					clip = {horizontal = true},
 				},
 				) {
-					clay.Text(
-						artist_text,
-						clay.TextElementConfig {
-							fontSize = 14,
-							textColor = artist_over ? WHITE : MUTED,
-							wrapMode = .None,
-						},
-					)
+					used := f32(0)
+					for ai in 0 ..< min(len(row.artist_links), 64) {
+						link := row.artist_links[ai]
+						linked := len(link.uri) > 0
+						separator := ai + 1 < len(row.artist_links) ? ", " : ""
+						need := hero_text_width(ui_state, link.name, 14, 0)
+						if separator != "" {need += comma_w}
+						if used + need > artist_box {
+							if ai == 0 {
+								fit := hero_fit_text(
+									ui_state,
+									link.name,
+									artist_box,
+									14,
+									0,
+									1,
+									context.temp_allocator,
+								)
+								artist_segment(slot, ai, fit, linked)
+							} else {
+								clay.Text(
+									"…",
+									clay.TextElementConfig {
+										fontSize = 14,
+										textColor = MUTED,
+										wrapMode = .None,
+									},
+								)
+							}
+							break
+						}
+						artist_segment(slot, ai, link.name, linked)
+						if separator != "" {
+							clay.Text(
+								separator,
+								clay.TextElementConfig {
+									fontSize = 14,
+									textColor = MUTED,
+									wrapMode = .None,
+								},
+							)
+						}
+						used += need
+					}
 				}
 				if clay.UI()(
 				{
@@ -881,6 +909,34 @@ hero_fit_text :: proc(
 	copy(scratch, text[:lo])
 	copy(scratch[lo:], "…")
 	return string(scratch[:lo + len("…")])
+}
+
+// Compound Clay index for one artist segment: the row slot owns the high
+// bits, the artist offset the low six. main.odin hits the same IDs.
+artist_link_id :: proc(slot: u32, ai: int) -> u32 {
+	return slot * 64 + u32(ai)
+}
+
+// One artist segment: a hug box when linked (hover brightens, clicks open
+// the page), plain text otherwise. The caller owns truncation.
+artist_segment :: proc(slot: u32, ai: int, name: string, linked: bool) {
+	if !linked {
+		clay.Text(name, clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None})
+		return
+	}
+	over := clay.PointerOver(clay.ID("artist_link", artist_link_id(slot, ai)))
+	if clay.UI_WithId(clay.ID("artist_link", artist_link_id(slot, ai)))(
+	{layout = {sizing = {width = clay.SizingFit({})}}},
+	) {
+		clay.Text(
+			name,
+			clay.TextElementConfig {
+				fontSize = 14,
+				textColor = over ? WHITE : MUTED,
+				wrapMode = .None,
+			},
+		)
+	}
 }
 
 detail_play_enabled :: proc(client: ^library.Client) -> bool {
