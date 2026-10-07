@@ -246,7 +246,14 @@ fetch_header :: proc(
 	defer delete(address)
 	bytes: [dynamic]u8
 	fetched: bool
-	bytes, status, fetched = api_get(access, address, 256 * 1024, reuse, cache_only = cache_only)
+	bytes, status, fetched = api_get(
+		access,
+		address,
+		256 * 1024,
+		reuse,
+		ttl = PAGE_TTL,
+		cache_only = cache_only,
+	)
 	if !fetched {return {}, status, false}
 	defer delete(bytes)
 	if status != 200 {return {}, status, false}
@@ -348,7 +355,14 @@ fetch_track_body :: proc(
 	address, addressed := track_page_address(source, id, offset)
 	if !addressed {return}
 	defer delete(address)
-	return api_get(access, address, 2 * 1024 * 1024, reuse, cache_only = cache_only)
+	return api_get(
+		access,
+		address,
+		2 * 1024 * 1024,
+		reuse,
+		ttl = PAGE_TTL,
+		cache_only = cache_only,
+	)
 }
 
 parse_saved_tracks :: proc(
@@ -455,6 +469,7 @@ fetch_artist_albums :: proc(
 		address,
 		512 * 1024,
 		reuse,
+		ttl = PAGE_TTL,
 		cache_only = cache_only,
 	)
 	if !fetched || body_status != 200 {delete(body); return {}, 0, 0, false, body_status, false}
