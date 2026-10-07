@@ -727,7 +727,8 @@ artist_discography :: proc(
 // Hero title sizes, largest first. The title wraps onto two lines, steps
 // down until it fits them, and finally ellipsizes. Clay only wraps on
 // whitespace and offers no max-lines, so both the size and the cut have to
-// be picked up front with the same measurer the layout itself uses.
+// be picked up front by replaying its greedy word wrap with the same
+// measurer the layout itself uses.
 HERO_TITLE_SIZES := [?]u16{54, 44, 36, 30}
 HERO_TITLE_LINES :: 2
 
@@ -744,18 +745,49 @@ hero_text_width :: proc(state: ^ui.State, text: string, size: u16) -> f32 {
 	return measure_text(slice, &config, state).width
 }
 
+// How many lines Clay's greedy wrap produces for the text in a column of
+// the given width: words break on spaces, every non-final word carries its
+// trailing space, and a lone overlong word takes its own overflowing line.
+hero_wrapped_lines :: proc(state: ^ui.State, text: string, size: u16, width: f32) -> int {
+	if len(text) == 0 {return 1}
+	space := hero_text_width(state, " ", size)
+	lines := 0
+	line := f32(0)
+	start := 0
+	for start < len(text) {
+		end := start
+		for end < len(text) && text[end] != ' ' {end += 1}
+		w := hero_text_width(state, text[start:end], size)
+		if end < len(text) {w += space}
+		if line == 0 && line + w > width {
+			lines += 1
+			start = end + 1
+			continue
+		}
+		if line + w > width {
+			lines += 1
+			line = 0
+			continue
+		}
+		line += w
+		start = end + 1
+	}
+	if line > 0 {lines += 1}
+	return lines
+}
+
 hero_title_size :: proc(state: ^ui.State, name: string, width: f32) -> u16 {
 	// Layout tests run without fonts; they keep the default size.
 	if state == nil || len(name) == 0 {return HERO_TITLE_SIZES[0]}
 	for size in HERO_TITLE_SIZES {
-		if hero_text_width(state, name, size) <= width * HERO_TITLE_LINES {return size}
+		if hero_wrapped_lines(state, name, size, width) <= HERO_TITLE_LINES {return size}
 	}
 	return HERO_TITLE_SIZES[len(HERO_TITLE_SIZES) - 1]
 }
 
-// Shortens the title with an ellipsis so it fits on two lines at the given
-// size. Returns the name itself when it already fits, otherwise a copy from
-// the allocator, which the caller must not free.
+// Shortens the title with an ellipsis so it wraps onto two lines at the
+// given size. Returns the name itself when it already fits, otherwise a
+// copy from the allocator, which the caller must not free.
 hero_title_text :: proc(
 	state: ^ui.State,
 	name: string,
@@ -763,23 +795,22 @@ hero_title_text :: proc(
 	size: u16,
 	allocator := context.allocator,
 ) -> string {
-	limit := width * HERO_TITLE_LINES
-	if state == nil || len(name) == 0 || hero_text_width(state, name, size) <= limit {
-		return name
-	}
+	if state == nil || len(name) == 0 {return name}
+	if hero_wrapped_lines(state, name, size, width) <= HERO_TITLE_LINES {return name}
 	scratch := make([]u8, len(name) + len("…"), allocator)
 	lo, hi := 0, len(name)
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
 		copy(scratch, name[:mid])
 		copy(scratch[mid:], "…")
-		if hero_text_width(state, string(scratch[:mid + len("…")]), size) <= limit {
+		if hero_wrapped_lines(state, string(scratch[:mid + len("…")]), size, width) <=
+		   HERO_TITLE_LINES {
 			lo = mid
 		} else {
 			hi = mid - 1
 		}
 	}
-	// Never split a multi-byte rune.
+	// Never split a multi-byte rune; shrinking only ever keeps the fit.
 	for lo > 0 && (name[lo - 1] & 0xC0) == 0x80 {lo -= 1}
 	if lo == 0 {return "…"}
 	copy(scratch, name[:lo])
@@ -843,7 +874,9 @@ detail_page :: proc(
 		// Spotify-style hero: substantial artwork and a strong, bold title.
 		// No panel behind it; the cover floats on the page with a soft shadow.
 		hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
-		title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d)
+		// A density unit of slack keeps knife-edge words from spilling a third
+		// line over floating-point summation order.
+		title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d - d)
 		title_size := hero_title_size(ui_state, detail.name, title_width)
 		title_text := hero_title_text(
 			ui_state,
