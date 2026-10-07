@@ -1,6 +1,7 @@
 package main
 
 import library "spotify/library"
+import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
@@ -645,6 +646,7 @@ layout :: proc(
 	textures: ^Textures,
 	fx: ^Button_Fx_Ctx,
 	sidebar_width, viewport_width, viewport_height, card_text_height, dt, d: f32,
+	ui_state: ^ui.State,
 ) -> (
 	clay.ClayArray(clay.RenderCommand),
 	Frame_Visible,
@@ -723,6 +725,7 @@ layout :: proc(
 				viewport_height,
 				card_text_height,
 				d,
+				ui_state,
 				&visible,
 			)
 		}

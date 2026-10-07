@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:math"
 import "core:strings"
 import library "spotify/library"
+import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
@@ -723,6 +724,30 @@ artist_discography :: proc(
 	return
 }
 
+// Hero title sizes, largest first. The title steps down until its unwrapped
+// width fits on two lines, so a long name shrinks instead of overflowing the
+// hero row on a narrow window. Clay only wraps on whitespace and offers no
+// max-lines, so the size has to be picked up front with the same measurer
+// the layout itself uses.
+HERO_TITLE_SIZES := [?]u16{54, 44, 36, 30}
+
+hero_title_size :: proc(state: ^ui.State, name: string, width: f32) -> u16 {
+	// Layout tests run without fonts; they keep the default size.
+	if state == nil || len(name) == 0 {return HERO_TITLE_SIZES[0]}
+	for size in HERO_TITLE_SIZES {
+		config := clay.TextElementConfig {
+			fontId   = 2,
+			fontSize = size,
+		}
+		slice := clay.StringSlice {
+			length = i32(len(name)),
+			chars  = raw_data(name),
+		}
+		if measure_text(slice, &config, state).width <= width * 2 {return size}
+	}
+	return HERO_TITLE_SIZES[len(HERO_TITLE_SIZES) - 1]
+}
+
 detail_play_enabled :: proc(client: ^library.Client) -> bool {
 	return client.detail.ready && client.detail.rows_error == 0 && len(client.detail.rows) > 0
 }
@@ -733,6 +758,7 @@ detail_page :: proc(
 	textures: ^Textures,
 	fx: ^Button_Fx_Ctx,
 	available_width, viewport_height, card_text_height, d: f32,
+	ui_state: ^ui.State,
 	visible: ^Frame_Visible,
 ) {
 	detail := &client.detail
@@ -778,6 +804,11 @@ detail_page :: proc(
 		// Spotify-style hero: substantial artwork and a strong, bold title.
 		// No panel behind it; the cover floats on the page with a soft shadow.
 		hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
+		title_size := hero_title_size(
+			ui_state,
+			detail.name,
+			max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d),
+		)
 		if clay.UI()(
 		{
 			layout = {
@@ -856,7 +887,7 @@ detail_page :: proc(
 				clay.Text(detail.label, clay.TextElementConfig{fontSize = 13, textColor = WHITE})
 				clay.Text(
 					detail.name,
-					clay.TextElementConfig{fontId = 2, fontSize = 54, textColor = WHITE},
+					clay.TextElementConfig{fontId = 2, fontSize = title_size, textColor = WHITE},
 				)
 				count_label := detail.source == .Artist ? "releases" : "songs"
 				base := detail.subtitle

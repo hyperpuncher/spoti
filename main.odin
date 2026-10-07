@@ -1160,6 +1160,7 @@ main :: proc() {
 			card_text_height,
 			dt,
 			density,
+			&state,
 		)
 		fx_animating = fx.animating
 		if middle_clicked {
