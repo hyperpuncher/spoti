@@ -1254,6 +1254,8 @@ main :: proc() {
 					app_state.sort[filter] = menu.sorts[index]
 					order_dirty = true
 					state_dirty = true
+				case .Copy_Link:
+					copy_spotify_uri(menu.uri)
 				case .Open_In_Spotify:
 					open_spotify_uri(menu.uri)
 				case .Play:

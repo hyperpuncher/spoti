@@ -9,6 +9,7 @@ import sdl "vendor:sdl3"
 
 Menu_Item :: enum {
 	Pin,
+	Copy_Link,
 	Open_In_Spotify,
 	Play,
 	Pick_Sort,
@@ -39,9 +40,11 @@ open_card_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, pinn
 	menu.uri = strings.clone(uri)
 	menu.items[0] = .Pin
 	menu.labels[0] = pinned ? "Unpin" : "Pin"
-	menu.items[1] = .Open_In_Spotify
-	menu.labels[1] = "Open in Spotify"
-	menu.count = 2
+	menu.items[1] = .Copy_Link
+	menu.labels[1] = "Copy link"
+	menu.items[2] = .Open_In_Spotify
+	menu.labels[2] = "Open in Spotify"
+	menu.count = 3
 }
 
 open_track_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, track: int, uri: string) {
@@ -52,9 +55,11 @@ open_track_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, track: int, uri:
 	menu.uri = strings.clone(uri)
 	menu.items[0] = .Play
 	menu.labels[0] = "Play"
-	menu.items[1] = .Open_In_Spotify
-	menu.labels[1] = "Open in Spotify"
-	menu.count = 2
+	menu.items[1] = .Copy_Link
+	menu.labels[1] = "Copy link"
+	menu.items[2] = .Open_In_Spotify
+	menu.labels[2] = "Open in Spotify"
+	menu.count = 3
 }
 
 // Search tracks play with a left click; the menu only links out.
@@ -64,9 +69,11 @@ open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 	menu.point = point
 	menu.track = -1
 	menu.uri = strings.clone(uri)
-	menu.items[0] = .Open_In_Spotify
-	menu.labels[0] = "Open in Spotify"
-	menu.count = 1
+	menu.items[0] = .Copy_Link
+	menu.labels[0] = "Copy link"
+	menu.items[1] = .Open_In_Spotify
+	menu.labels[1] = "Open in Spotify"
+	menu.count = 2
 }
 
 // Library sort picker for a tab. The current sort carries a check; the tab
@@ -157,8 +164,9 @@ open_menu_at :: proc(
 	menu.open = false
 }
 
-// Maps a Spotify URI to its web URL without ever logging it.
-open_spotify_uri :: proc(uri: string) {
+// Maps a Spotify URI to its web URL without ever logging it. Empty for a URI
+// that has no open.spotify.com page, like the Liked Songs collection.
+spotify_web_url :: proc(uri: string, allocator := context.allocator) -> string {
 	kind, id: string
 	switch {
 	case strings.has_prefix(uri, "spotify:playlist:"):
@@ -170,11 +178,27 @@ open_spotify_uri :: proc(uri: string) {
 	case strings.has_prefix(uri, "spotify:track:"):
 		kind, id = "track", uri[len("spotify:track:"):]
 	case:
-		return
+		return ""
 	}
-	address := fmt.aprintf("https://open.spotify.com/%s/%s", kind, id)
+	if len(id) == 0 {return ""}
+	return fmt.aprintf("https://open.spotify.com/%s/%s", kind, id, allocator = allocator)
+}
+
+open_spotify_uri :: proc(uri: string) {
+	address := spotify_web_url(uri)
+	if len(address) == 0 {return}
 	defer delete(address)
 	c_address := strings.clone_to_cstring(address)
 	defer delete(c_address)
 	_ = sdl.OpenURL(c_address)
+}
+
+// The link lives only in the clipboard; it is never written to the log.
+copy_spotify_uri :: proc(uri: string) {
+	address := spotify_web_url(uri)
+	if len(address) == 0 {return}
+	defer delete(address)
+	c_address := strings.clone_to_cstring(address)
+	defer delete(c_address)
+	_ = sdl.SetClipboardText(c_address)
 }
