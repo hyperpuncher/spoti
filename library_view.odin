@@ -488,7 +488,7 @@ track_table :: proc(
 	detail: ^library.Detail,
 	view: View,
 	textures: ^Textures,
-	viewport_height, d: f32,
+	available_width, viewport_height, d: f32,
 ) -> (
 	visible: Visible_Items,
 ) {
@@ -502,7 +502,8 @@ track_table :: proc(
 		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 	},
 	) {
-		// Header mirrors the row grid so each label sits over its column.
+		// Header labels sit over the number and duration slots; titles flow
+		// instead of columnating, so the artist follows each title at a gap.
 		if clay.UI()(
 		{
 			layout = {
@@ -549,6 +550,10 @@ track_table :: proc(
 				icon_element(textures, "clock", .Muted, 15 * d)
 			}
 		}
+		// Row padding (12/92), the number slot and the gaps come off the top;
+		// the title takes most of what is left, the artist the rest.
+		row_text := max(0, available_width - (SCROLLBAR_OUTSET + 182) * d)
+		title_max := row_text * 0.6
 		gap := f32(u16(2 * d))
 		visible = scroll_items(
 			"detail_rows",
@@ -594,13 +599,14 @@ track_table :: proc(
 						clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
 					)
 				}
-				// The title column grows so the artist and duration stay pinned
-				// to the right edge. Slot-keyed like card clips: one stable
-				// scroll entry per visible row instead of one per absolute index.
+				// The title hugs its text so the artist follows at exactly one
+				// gap on every row; the cap keeps a runaway title from eating
+				// the artist. Slot-keyed like card clips: one stable scroll
+				// entry per visible row instead of one per absolute index.
 				if clay.UI_WithId(clay.ID("row_clip", u32(index - visible.first)))(
 				{
 					layout = {
-						sizing = {width = clay.SizingGrow({})},
+						sizing = {width = clay.SizingFit({max = title_max})},
 						childAlignment = {y = .Center},
 					},
 					clip = {horizontal = true},
@@ -1143,7 +1149,14 @@ detail_page :: proc(
 				clay.Text(message, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
 			}
 		} else {
-			visible.tracks = track_table(detail, view, textures, viewport_height, d)
+			visible.tracks = track_table(
+				detail,
+				view,
+				textures,
+				available_width,
+				viewport_height,
+				d,
+			)
 		}
 	}
 }
