@@ -102,7 +102,7 @@ context_menu :: proc(view: View, textures: ^Textures, d: f32) {
 	{
 		layout = {
 			layoutDirection = .TopToBottom,
-			sizing = {width = clay.SizingFixed(190 * d), height = clay.SizingFit({})},
+			sizing = {width = clay.SizingFit({}), height = clay.SizingFit({})},
 			padding = clay.PaddingAll(u16(6 * d)),
 			childGap = u16(2 * d),
 		},
