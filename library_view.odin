@@ -724,28 +724,67 @@ artist_discography :: proc(
 	return
 }
 
-// Hero title sizes, largest first. The title steps down until its unwrapped
-// width fits on two lines, so a long name shrinks instead of overflowing the
-// hero row on a narrow window. Clay only wraps on whitespace and offers no
-// max-lines, so the size has to be picked up front with the same measurer
-// the layout itself uses.
+// Hero title sizes, largest first. The title wraps onto two lines, steps
+// down until it fits them, and finally ellipsizes. Clay only wraps on
+// whitespace and offers no max-lines, so both the size and the cut have to
+// be picked up front with the same measurer the layout itself uses.
 HERO_TITLE_SIZES := [?]u16{54, 44, 36, 30}
+HERO_TITLE_LINES :: 2
+
+hero_text_width :: proc(state: ^ui.State, text: string, size: u16) -> f32 {
+	if len(text) == 0 {return 0}
+	config := clay.TextElementConfig {
+		fontId   = 2,
+		fontSize = size,
+	}
+	slice := clay.StringSlice {
+		length = i32(len(text)),
+		chars  = raw_data(text),
+	}
+	return measure_text(slice, &config, state).width
+}
 
 hero_title_size :: proc(state: ^ui.State, name: string, width: f32) -> u16 {
 	// Layout tests run without fonts; they keep the default size.
 	if state == nil || len(name) == 0 {return HERO_TITLE_SIZES[0]}
 	for size in HERO_TITLE_SIZES {
-		config := clay.TextElementConfig {
-			fontId   = 2,
-			fontSize = size,
-		}
-		slice := clay.StringSlice {
-			length = i32(len(name)),
-			chars  = raw_data(name),
-		}
-		if measure_text(slice, &config, state).width <= width * 2 {return size}
+		if hero_text_width(state, name, size) <= width * HERO_TITLE_LINES {return size}
 	}
 	return HERO_TITLE_SIZES[len(HERO_TITLE_SIZES) - 1]
+}
+
+// Shortens the title with an ellipsis so it fits on two lines at the given
+// size. Returns the name itself when it already fits, otherwise a copy from
+// the allocator, which the caller must not free.
+hero_title_text :: proc(
+	state: ^ui.State,
+	name: string,
+	width: f32,
+	size: u16,
+	allocator := context.allocator,
+) -> string {
+	limit := width * HERO_TITLE_LINES
+	if state == nil || len(name) == 0 || hero_text_width(state, name, size) <= limit {
+		return name
+	}
+	scratch := make([]u8, len(name) + len("…"), allocator)
+	lo, hi := 0, len(name)
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		copy(scratch, name[:mid])
+		copy(scratch[mid:], "…")
+		if hero_text_width(state, string(scratch[:mid + len("…")]), size) <= limit {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	// Never split a multi-byte rune.
+	for lo > 0 && (name[lo - 1] & 0xC0) == 0x80 {lo -= 1}
+	if lo == 0 {return "…"}
+	copy(scratch, name[:lo])
+	copy(scratch[lo:], "…")
+	return string(scratch[:lo + len("…")])
 }
 
 detail_play_enabled :: proc(client: ^library.Client) -> bool {
@@ -804,10 +843,14 @@ detail_page :: proc(
 		// Spotify-style hero: substantial artwork and a strong, bold title.
 		// No panel behind it; the cover floats on the page with a soft shadow.
 		hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
-		title_size := hero_title_size(
+		title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d)
+		title_size := hero_title_size(ui_state, detail.name, title_width)
+		title_text := hero_title_text(
 			ui_state,
 			detail.name,
-			max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d),
+			title_width,
+			title_size,
+			context.temp_allocator,
 		)
 		if clay.UI()(
 		{
@@ -886,7 +929,7 @@ detail_page :: proc(
 			) {
 				clay.Text(detail.label, clay.TextElementConfig{fontSize = 13, textColor = WHITE})
 				clay.Text(
-					detail.name,
+					title_text,
 					clay.TextElementConfig{fontId = 2, fontSize = title_size, textColor = WHITE},
 				)
 				count_label := detail.source == .Artist ? "releases" : "songs"
