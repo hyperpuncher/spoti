@@ -559,17 +559,28 @@ like_url :: proc(uri: string, allocator := context.allocator) -> string {
 }
 
 // Reads through the shared worker handle but never the GET cache, so a
-// just-toggled collection reports its new state on reopen.
-fetch_saved :: proc(access: string, source: Source, id: string, reuse: rawptr = nil) -> bool {
+// just-toggled collection reports its new state on reopen. `known` is false
+// when the check itself failed, which must not read as "not saved".
+fetch_saved :: proc(
+	access: string,
+	source: Source,
+	id: string,
+	reuse: rawptr = nil,
+) -> (
+	liked: bool,
+	known: bool,
+) {
 	address := saved_check_url(source, id)
-	if len(address) == 0 {return false}
+	if len(address) == 0 {return false, false}
 	defer delete(address)
 	body, status, ok := http.get(address, {bearer = access, limit = 1024}, reuse)
 	defer delete(body)
-	if !ok || status != 200 {return false}
+	if !ok || status != 200 {return false, false}
 	flags: [dynamic]bool
-	if json.unmarshal(body[:], &flags, allocator = context.temp_allocator) != nil {return false}
-	return len(flags) > 0 && flags[0]
+	if json.unmarshal(body[:], &flags, allocator = context.temp_allocator) !=
+	   nil {return false, false}
+	if len(flags) == 0 {return false, false}
+	return flags[0], true
 }
 
 set_saved :: proc(

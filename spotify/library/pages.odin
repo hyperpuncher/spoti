@@ -25,6 +25,7 @@ Entry :: struct {
 	image:    string, // cover URL; never a token or signed CDN URL
 	subtitle: string, // owner or artists
 	year:     string, // album release year, e.g. "2024"
+	saved:    bool, // came from a library tab, so membership needs no check
 	total:    int, // track count where Spotify reports one
 }
 
@@ -50,6 +51,7 @@ clone_entry :: proc(entry: Entry, allocator: runtime.Allocator) -> Entry {
 		image = strings.clone(entry.image, allocator),
 		subtitle = strings.clone(entry.subtitle, allocator),
 		year = strings.clone(entry.year, allocator),
+		saved = entry.saved,
 		total = entry.total,
 	}
 }
@@ -363,7 +365,13 @@ parse_index :: proc(body: []u8, kind: Kind) -> (page: Page, ok: bool) {
 	case .Tracks:
 		ok = parse_tracks(body, &page, allocator)
 	}
-	if !ok {free_page(&page)}
+	if !ok {
+		free_page(&page)
+		return page, ok
+	}
+	// Every entry on a library tab is in the account library by definition,
+	// so the hero heart needs no /me/library/contains round trip.
+	for &entry in page.items {entry.saved = true}
 	return page, ok
 }
 

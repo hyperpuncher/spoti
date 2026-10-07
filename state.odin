@@ -29,6 +29,7 @@ State :: struct {
 	last_cover:      string, // track cover URL
 	last_collection: string, // spotify:<source>:<id> reopened on launch
 	last_name:       string, // collection name for the optimistic header
+	last_saved:      bool, // membership of that collection, for the hero heart
 }
 
 free_state :: proc(app_state: ^State) {
@@ -166,6 +167,8 @@ parse_state :: proc(data: string, allocator := context.allocator) -> State {
 				delete(app_state.last_collection)
 				app_state.last_collection = strings.clone(uri, allocator)
 			}
+		case "last_saved":
+			app_state.last_saved = strings.trim_space(value) == "1"
 		case "last_name":
 			if len(value) > 0 && len(value) < 256 {
 				delete(app_state.last_name)
@@ -206,6 +209,7 @@ format_state :: proc(app_state: ^State, allocator := context.allocator) -> strin
 	if len(app_state.last_collection) > 0 {
 		_ = fmt.sbprintf(&builder, "last_collection=%s\n", app_state.last_collection)
 	}
+	if app_state.last_saved {_ = fmt.sbprintf(&builder, "last_saved=1\n")}
 	if len(app_state.last_name) > 0 {
 		_ = fmt.sbprintf(&builder, "last_name=%s\n", app_state.last_name)
 	}

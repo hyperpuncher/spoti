@@ -47,6 +47,7 @@ Request :: struct {
 	query:  string, // Search; worker frees
 	serial: u64, // Search; echoes back so stale results are dropped
 	liked:  bool, // Like; the membership to set
+	saved:  bool, // Detail; the preview already knows the membership
 }
 
 Result :: struct {
@@ -105,6 +106,7 @@ Client :: struct {
 	last_http_status:      int,
 	failed:                bool,
 	page_at:               time.Time, // earliest time the next page request may go out
+	saved_at:              time.Time, // earliest time the next membership check may go out
 	rate_limited:          u8, // consecutive 429s; drives the doubling backoff
 	search_query:          string, // applied query; owned
 	search_serial:         u64, // latest request; stale results are dropped
@@ -283,7 +285,17 @@ handle :: proc(
 			}
 		}
 		if ok {
-			detail.liked = fetch_saved(tokens.access, request.source, request.id, reuse)
+			detail.liked = request.saved
+			if !request.saved && time.since(client.saved_at) >= 0 {
+				if liked, known := fetch_saved(tokens.access, request.source, request.id, reuse);
+				   known {
+					detail.liked = liked
+				} else {
+					// A failed check must not read as "not saved", and must not
+					// be repeated on every open.
+					client.saved_at = time.time_add(time.now(), SAVED_CHECK_BACKOFF)
+				}
+			}
 		}
 		send(
 			client,
@@ -490,6 +502,9 @@ start :: proc(client: ^Client) -> bool {
 PAGE_INTERVAL :: 400 * time.Millisecond
 PAGE_RATE_LIMIT_BACKOFF :: 2 * time.Second
 PAGE_RETRY_BACKOFF :: 500 * time.Millisecond
+// /me/library/contains shares a quota bucket with the album and artist tabs,
+// so a failed check backs off instead of firing on every page open.
+SAVED_CHECK_BACKOFF :: 5 * time.Minute
 RATE_LIMIT_STEPS :: 4
 // A placeholder only appears when a fetch is actually slow: a cached page
 // lands within a frame or two and must not flash "Loading tracks...".
@@ -527,6 +542,7 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 		kind   = .Detail,
 		source = source,
 		id     = strings.clone(id),
+		saved  = preview.saved,
 	}
 	if !queue_request(client, &request) {return false}
 	// Clone before releasing the current detail: discography cards can borrow
@@ -562,6 +578,7 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 			}
 		}
 	}
+	next.liked = preview.saved
 	next.generation = client.detail.generation + 1
 	request_id := strings.clone(id)
 	move_detail(&client.detail, &next)
@@ -624,6 +641,7 @@ sync_library_membership :: proc(client: ^Client, source: Source, id: string, lik
 				image = strings.clone(detail.image, allocator),
 				subtitle = strings.clone(detail.subtitle, allocator),
 				year = strings.clone(detail.year, allocator),
+				saved = true,
 				total = detail.total,
 			},
 		)

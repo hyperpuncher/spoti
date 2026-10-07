@@ -44,6 +44,7 @@ nav_capture :: proc(
 				image = detail.image,
 				subtitle = detail.subtitle,
 				year = detail.year,
+				saved = detail.liked,
 				total = detail.total,
 			},
 			context.allocator,

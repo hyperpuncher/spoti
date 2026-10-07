@@ -862,6 +862,7 @@ main :: proc() {
 						name  = app_state.last_name != "" ? app_state.last_name : app_state.last_title,
 						uri   = app_state.last_collection,
 						image = app_state.last_cover,
+						saved = app_state.last_saved,
 					}
 					if library.open_detail(&library_client, source, id, preview) {
 						detail_pinned = state_is_pinned(&app_state, app_state.last_collection)
@@ -1705,7 +1706,9 @@ main :: proc() {
 		   title != app_state.last_title ||
 		   artist != app_state.last_artist ||
 		   player_cover != app_state.last_cover ||
-		   (library_client.detail.ready && collection != app_state.last_collection) {
+		   (library_client.detail.ready &&
+				   (collection != app_state.last_collection ||
+						   app_state.last_saved != library_client.detail.liked)) {
 			replace_string(&app_state.last_track, selected)
 			replace_string(&app_state.last_title, title)
 			replace_string(&app_state.last_artist, artist)
@@ -1713,6 +1716,7 @@ main :: proc() {
 			if library_client.detail.ready {
 				replace_string(&app_state.last_collection, collection)
 				replace_string(&app_state.last_name, library_client.detail.name)
+				app_state.last_saved = library_client.detail.liked
 			}
 			state_dirty = true
 		}
