@@ -958,6 +958,16 @@ detail_page :: proc(
 				fx,
 				d,
 			)
+			if client.detail.source != .Liked {
+				player_control(
+					"hero_copy_link",
+					"link",
+					library.detail_loading_visible(client) ? .Disabled : .Muted,
+					textures,
+					fx,
+					d,
+				)
+			}
 			if clay.UI_WithId(clay.ID("spotify_link"))(
 			{
 				layout = {

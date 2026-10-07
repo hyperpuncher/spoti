@@ -113,8 +113,9 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Text)
 		return
 	}
-	for id in ([]string{"toolbar_back", "toolbar_library", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "autoscroll"}) {
+	for id in ([]string{"toolbar_back", "toolbar_library", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "hero_copy_link", "autoscroll"}) {
 		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
+		if id == "hero_copy_link" && library.detail_loading_visible(client) {continue}
 		if id == "spotify_link" && client.detail_loading {continue}
 		if pointer_over(id) {
 			ui.set_cursor(state, .Pointer)
@@ -1416,6 +1417,10 @@ main :: proc() {
 						)
 						order_dirty = true
 						state_dirty = true
+						handled = true
+					} else if hit("hero_copy_link", mouse_click) &&
+					   !library.detail_loading_visible(&library_client) {
+						copy_spotify_uri(detail_card_uri(library_client.detail))
 						handled = true
 					} else if hit("spotify_link", mouse_click) && !library_client.detail_loading {
 						open_spotify_detail(&library_client.detail)
