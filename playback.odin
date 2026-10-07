@@ -112,13 +112,6 @@ queue_detail_rows :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
 
 // The footer's single artist link: the first artist with a page. Search
 // queues carry one link; detail rows carry them all.
-queue_first_artist :: proc(items: []Play_Item, index: int) -> (name, uri: string, ok: bool) {
-	if index < 0 || index >= len(items) {return "", "", false}
-	links := items[index].artist_links
-	if len(links) == 0 || len(links[0].uri) == 0 {return "", "", false}
-	return links[0].name, links[0].uri, true
-}
-
 // Idempotent, so paged-in tails stamp just their new rows.
 stamp_queue_album :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
 	if detail.source != .Album || len(detail.id) == 0 {return}

@@ -1141,9 +1141,25 @@ main :: proc() {
 		retain_player_cover(&displayed_cover, player_cover, &textures)
 		// The footer links the playing collection: the title its album, the
 		// artist its artist. Search queues carry no URIs and stay silent.
+		// The live queue is the truth, even when it links nothing; the
+		// persisted record only serves the queue-less resumed footer.
 		queue_at := play_index >= 0 && play_index < len(play_queue)
-		link_album := queue_at && len(play_queue[play_index].album_uri) > 0
-		first_name, first_uri, link_artist := queue_first_artist(play_queue[:], play_index)
+		foot_album, foot_album_uri := "", ""
+		foot_first, foot_first_uri := "", ""
+		if queue_at {
+			item := play_queue[play_index]
+			foot_album, foot_album_uri = item.album, item.album_uri
+			if len(item.artist_links) > 0 {
+				foot_first, foot_first_uri = item.artist_links[0].name, item.artist_links[0].uri
+			}
+		} else {
+			foot_album, foot_album_uri =
+				app_state.last_played.album, app_state.last_played.album_uri
+			foot_first, foot_first_uri =
+				app_state.last_played.first_artist, app_state.last_played.artist_uri
+		}
+		link_album := len(foot_album_uri) > 0
+		link_artist := len(foot_first_uri) > 0
 		view := View {
 			title         = shown_title,
 			status        = shown_status,
@@ -1685,43 +1701,55 @@ main :: proc() {
 		track_delta := mpris_delta
 		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
 		if clicked && hit("footer_next", mouse_click) {track_delta = 1}
-		if clicked && link_album && hit("footer_title", mouse_click) {
-			item := play_queue[play_index]
-			preview := library.Entry {
-				name  = item.album,
-				uri   = item.album_uri,
-				image = item.cover,
+		if clicked && hit("footer_title", mouse_click) {
+			if !link_album {
+				// Lengths only: URIs never reach the log.
+				diagnostic.writef("footer title dead queue=%v items=%d", queue_at, len(play_queue))
+			} else {
+				preview := library.Entry {
+					name  = foot_album,
+					uri   = foot_album_uri,
+					image = player_cover,
+				}
+				_ = open_entry_page(
+					&library_client,
+					&nav,
+					&app_state,
+					&textures,
+					&detail_pinned,
+					filter,
+					search_mode,
+					search_kind,
+					input,
+					preview,
+				)
 			}
-			_ = open_entry_page(
-				&library_client,
-				&nav,
-				&app_state,
-				&textures,
-				&detail_pinned,
-				filter,
-				search_mode,
-				search_kind,
-				input,
-				preview,
-			)
 		}
-		if clicked && link_artist && hit("footer_artist", mouse_click) {
-			preview := library.Entry {
-				name = first_name,
-				uri  = first_uri,
+		if clicked && hit("footer_artist", mouse_click) {
+			if !link_artist {
+				diagnostic.writef(
+					"footer artist dead queue=%v items=%d",
+					queue_at,
+					len(play_queue),
+				)
+			} else {
+				preview := library.Entry {
+					name = foot_first,
+					uri  = foot_first_uri,
+				}
+				_ = open_entry_page(
+					&library_client,
+					&nav,
+					&app_state,
+					&textures,
+					&detail_pinned,
+					filter,
+					search_mode,
+					search_kind,
+					input,
+					preview,
+				)
 			}
-			_ = open_entry_page(
-				&library_client,
-				&nav,
-				&app_state,
-				&textures,
-				&detail_pinned,
-				filter,
-				search_mode,
-				search_kind,
-				input,
-				preview,
-			)
 		}
 		if track_delta != 0 &&
 		   advance_play_item(
@@ -1847,6 +1875,25 @@ main :: proc() {
 				app_state.last_saved = library_client.detail.liked
 			}
 			state_dirty = true
+		}
+		// Links persist only from a live queue item, never blanked by its
+		// absence: the resumed footer keeps linking until a new track lands.
+		if queue_at {
+			item := play_queue[play_index]
+			item_first, item_first_uri := "", ""
+			if len(item.artist_links) > 0 {
+				item_first, item_first_uri = item.artist_links[0].name, item.artist_links[0].uri
+			}
+			if item.album != played_state.album ||
+			   item.album_uri != played_state.album_uri ||
+			   item_first != played_state.first_artist ||
+			   item_first_uri != played_state.artist_uri {
+				replace_string(&played_state.album, item.album)
+				replace_string(&played_state.album_uri, item.album_uri)
+				replace_string(&played_state.first_artist, item_first)
+				replace_string(&played_state.artist_uri, item_first_uri)
+				state_dirty = true
+			}
 		}
 		if state_dirty {
 			state_dirty = false
