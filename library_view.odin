@@ -17,6 +17,11 @@ Frame_Visible :: struct {
 	cards, tracks, releases, singles: Visible_Items,
 }
 
+// Release cards stop growing past a readable cover; wider windows gain
+// columns instead of billboards.
+RELEASE_CARD_MAX :: 200
+RELEASE_CARD_COLUMNS :: 8
+
 // Clip slots are visible-relative per section, so the singles grid offsets
 // its truncation clips past anything the albums grid can hold.
 RELEASE_CLIP_STRIDE :: 64
@@ -784,10 +789,9 @@ artist_page :: proc(
 		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 	},
 	) {
-		gap: f32 = 0
 		usable := max(280 * d, available_width - (40 + SCROLLBAR_OUTSET) * d)
-		columns := clamp(int((usable + gap) / (168 * d + gap)), 2, 4)
-		card_width := (usable - f32(columns - 1) * gap) / f32(columns)
+		columns := clamp(int(usable / (168 * d)), 2, RELEASE_CARD_COLUMNS)
+		card_width := min(usable / f32(columns), RELEASE_CARD_MAX * d)
 		row_height := card_row_height(card_width, card_text_height, d)
 		row_gap := f32(u16(8 * d))
 		leading: f32 = 0
