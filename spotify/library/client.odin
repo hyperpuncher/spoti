@@ -90,6 +90,8 @@ Client :: struct {
 	pages:                 [Kind]Page,
 	pending:               [Kind]bool,
 	detail:                Detail,
+	prev_detail:           Detail, // last page left, with its rows; instant back-nav
+	prev_at:               time.Time,
 	detail_loading:        bool,
 	detail_loading_at:     time.Time,
 	detail_error:          int,
@@ -550,6 +552,9 @@ more :: proc(client: ^Client, kind: Kind) {
 
 open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry) -> bool {
 	if len(id) == 0 {return false}
+	// A page left minutes ago reopens with its rows in place: no request,
+	// no paging chain, and the banked scroll offset applies at once.
+	if detail_buffer_take(client, source, id, preview) {return true}
 	request := Request {
 		kind   = .Detail,
 		source = source,
@@ -593,6 +598,7 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	next.liked = preview.saved
 	next.generation = client.detail.generation + 1
 	request_id := strings.clone(id)
+	detail_buffer_stash(client)
 	move_detail(&client.detail, &next)
 	delete(client.detail_request_id)
 	client.detail_request_id = request_id
@@ -682,7 +688,46 @@ source_kind :: proc(source: Source) -> (kind: Kind, ok: bool) {
 	return .Playlists, false
 }
 
+// The page being left keeps its rows for the trip back: playlist to
+// artist and back replays zero requests while the buffer stays fresh.
+detail_buffer_stash :: proc(client: ^Client) {
+	outgoing := &client.detail
+	if !outgoing.ready || outgoing.rows_error != 0 {return}
+	if len(outgoing.rows) == 0 && len(outgoing.releases) == 0 {return}
+	free_detail(&client.prev_detail)
+	client.prev_detail = {}
+	move_detail(&client.prev_detail, outgoing)
+	client.prev_at = time.now()
+}
+
+detail_buffer_take :: proc(client: ^Client, source: Source, id: string, preview: Entry) -> bool {
+	prev := &client.prev_detail
+	if !prev.ready || prev.source != source || prev.id != id {return false}
+	if prev.rows_error != 0 {return false}
+	if len(prev.rows) == 0 && len(prev.releases) == 0 {return false}
+	if time.since(client.prev_at) >= PAGE_TTL {return false}
+	if preview.total > 0 && prev.total > 0 && preview.total != prev.total {return false}
+	// Take first, then bank the outgoing page: the other order would free
+	// the buffered rows while stashing over them and break ping-pong trips.
+	outgoing := client.detail
+	client.detail = {}
+	move_detail(&client.detail, prev)
+	move_detail(prev, &outgoing)
+	client.prev_at = time.now()
+	allocator := virtual.arena_allocator(&client.detail.arena)
+	client.detail.liked = preview.saved
+	client.detail.image_preview = strings.clone(preview.image, allocator)
+	client.detail.generation += 1
+	delete(client.detail_request_id)
+	client.detail_request_id = strings.clone(id)
+	client.detail_request_source = source
+	client.detail_loading = false
+	client.detail_error = 0
+	return true
+}
+
 clear_detail :: proc(client: ^Client) {
+	detail_buffer_stash(client)
 	free_detail(&client.detail)
 	delete(client.detail_request_id)
 	client.detail_request_id = ""
@@ -690,9 +735,38 @@ clear_detail :: proc(client: ^Client) {
 	client.detail_error = 0
 }
 
+// A page already on disk costs no quota, so cached pages chain back to
+// back while network pages keep their pacing between fetches.
+detail_page_fresh :: proc(source: Source, id: string, offset: int) -> bool {
+	switch source {
+	case .Artist:
+		address := artist_albums_address(id, offset)
+		defer delete(address)
+		return cache_fresh("api", address, PAGE_TTL)
+	case .Liked, .Album:
+		address, ok := track_page_address(source, id, offset)
+		if !ok {return false}
+		defer delete(address)
+		return cache_fresh("api", address, PAGE_TTL)
+	case .Playlist:
+		address, ok := track_page_address(.Playlist, id, offset)
+		if !ok {return false}
+		defer delete(address)
+		if cache_fresh("api", address, PAGE_TTL) {return true}
+		window_key := playlist_cache_key("ap-playlist-window", id, offset)
+		defer delete(window_key)
+		meta_key := playlist_cache_key("ap-playlist-meta", id, offset)
+		defer delete(meta_key)
+		return cache_fresh("api", window_key, PAGE_TTL) && cache_fresh("api", meta_key, PAGE_TTL)
+	}
+	return false
+}
+
 more_rows :: proc(client: ^Client) -> bool {
 	if client.detail_loading || !client.detail.has_more {return false}
-	if len(client.detail.id) == 0 || time.since(client.page_at) < 0 {return false}
+	if len(client.detail.id) == 0 {return false}
+	fresh := detail_page_fresh(client.detail.source, client.detail.id, client.detail.next_offset)
+	if !fresh && time.since(client.page_at) < 0 {return false}
 	request := Request {
 		kind   = .More,
 		source = client.detail.source,
@@ -702,7 +776,7 @@ more_rows :: proc(client: ^Client) -> bool {
 	if !queue_request(client, &request) {return false}
 	client.detail_loading = true
 	client.detail_loading_at = time.time_add(time.now(), DETAIL_LOADING_DELAY)
-	client.page_at = time.time_add(time.now(), PAGE_INTERVAL)
+	if !fresh {client.page_at = time.time_add(time.now(), PAGE_INTERVAL)}
 	return true
 }
 
@@ -997,6 +1071,7 @@ stop :: proc(client: ^Client) {
 	stop_workers(client)
 	for &page in client.pages {free_page(&page)}
 	free_detail(&client.detail)
+	free_detail(&client.prev_detail)
 	delete(client.detail_request_id)
 	free_search_pages(&client.search_pages)
 	delete(client.search_query)

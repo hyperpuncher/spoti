@@ -306,6 +306,14 @@ fetch_track_page :: proc(
 // comes back unusable, so select `item` here, not `track`.
 TRACK_FIELDS :: "uri,name,duration_ms,artists(uri,name),album(uri,name,images)"
 
+artist_albums_address :: proc(id: string, offset: int) -> string {
+	return fmt.aprintf(
+		"https://api.spotify.com/v1/artists/%s/albums?limit=10&offset=%d",
+		id,
+		offset,
+	)
+}
+
 track_page_address :: proc(
 	source: Source,
 	id: string,
@@ -458,11 +466,7 @@ fetch_artist_albums :: proc(
 	ok: bool,
 ) {
 	if !safe_id(id) || offset < 0 || offset > 1_000_000 {return}
-	address := fmt.aprintf(
-		"https://api.spotify.com/v1/artists/%s/albums?limit=10&offset=%d",
-		id,
-		offset,
-	)
+	address := artist_albums_address(id, offset)
 	defer delete(address)
 	body, body_status, fetched := api_get(
 		access,

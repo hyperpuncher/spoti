@@ -76,6 +76,18 @@ cache_write :: proc(prefix: string, address: string, body: []u8) {
 	_ = os.rename(temp, path)
 }
 
+// Mtime check without reading: lets paging skip its quota pacing for
+// bodies already on disk instead of spacing out cache hits.
+cache_fresh :: proc(prefix: string, address: string, ttl: time.Duration) -> bool {
+	path, has_path := cache_path(prefix, address)
+	if !has_path {return false}
+	defer delete(path)
+	written, time_error := os.modification_time_by_path(path)
+	if time_error != nil {return false}
+	if ttl <= 0 {return true}
+	return time.since(written) <= ttl
+}
+
 // Invalid decoded covers must not remain in the immutable-image cache.
 cache_remove :: proc(prefix, address: string) {
 	path, ok := cache_path(prefix, address)

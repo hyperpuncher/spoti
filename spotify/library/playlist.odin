@@ -4,6 +4,7 @@
 // values, cloned into the caller's response arena, leave the worker.
 package library
 
+import diagnostic "../../diagnostic"
 import ap "../ap"
 import http "../http"
 import track "../track"
@@ -11,6 +12,7 @@ import "base:runtime"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:strings"
+import "core:time"
 
 PLAYLIST_PAGE_SIZE :: 50
 PLAYLIST_INVALID_RESPONSE :: -2
@@ -35,6 +37,16 @@ fetch_playlist_rows :: proc(
 ) {
 	if len(id) != 22 || offset < 0 || offset > 1_000_000 {return}
 	if _, valid := track.parse_id(id); !valid {return}
+	// AP rows cache exactly like Web API bodies: a fresh pair parses
+	// straight off disk, a failed fetch falls back to the stale pair.
+	if cached_rows, cached_total, cached_next, cached_more, cached := read_playlist_cache(
+		id,
+		offset,
+		allocator,
+		PAGE_TTL,
+	); cached {
+		return cached_rows, cached_total, cached_next, cached_more, 200, true
+	}
 	address := fmt.aprintf(
 		"https://spclient.wg.spotify.com/playlist/v2/playlist/%s?decorate=revision,length,attributes,owner&from=%d&length=%d",
 		id,
@@ -44,7 +56,18 @@ fetch_playlist_rows :: proc(
 	defer delete(address)
 	body, code, fetched := http.get(address, {bearer = access, limit = 512 * 1024}, reuse)
 	defer delete(body)
-	if !fetched || code != 200 {return nil, 0, 0, false, code, false}
+	if !fetched || code != 200 {
+		if cached_rows, cached_total, cached_next, cached_more, cached := read_playlist_cache(
+			id,
+			offset,
+			allocator,
+			API_STALE,
+		); cached {
+			diagnostic.writef("playlist reused stale rows offset=%d", offset)
+			return cached_rows, cached_total, cached_next, cached_more, 200, true
+		}
+		return nil, 0, 0, false, code, false
+	}
 	window, valid := parse_playlist_window(body[:], offset)
 	if !valid {return nil, 0, 0, false, PLAYLIST_INVALID_RESPONSE, false}
 	request := playlist_metadata_request(window.uris)
@@ -59,10 +82,63 @@ fetch_playlist_rows :: proc(
 		reuse,
 	)
 	defer delete(metadata)
-	if !received || metadata_code != 200 {return nil, 0, 0, false, metadata_code, false}
+	if !received || metadata_code != 200 {
+		if cached_rows, cached_total, cached_next, cached_more, cached := read_playlist_cache(
+			id,
+			offset,
+			allocator,
+			API_STALE,
+		); cached {
+			diagnostic.writef("playlist reused stale rows offset=%d", offset)
+			return cached_rows, cached_total, cached_next, cached_more, 200, true
+		}
+		return nil, 0, 0, false, metadata_code, false
+	}
 	rows, valid = parse_playlist_metadata(metadata[:], window.uris, allocator)
 	if !valid {return nil, 0, 0, false, PLAYLIST_INVALID_RESPONSE, false}
+	write_playlist_cache(id, offset, body[:], metadata[:])
 	return rows, window.total, window.next_offset, window.next_offset < window.total, 200, true
+}
+
+playlist_cache_key :: proc(prefix, id: string, offset: int) -> string {
+	return fmt.aprintf("%s:%s:%d", prefix, id, offset)
+}
+
+read_playlist_cache :: proc(
+	id: string,
+	offset: int,
+	allocator: runtime.Allocator,
+	ttl: time.Duration,
+) -> (
+	rows: [dynamic]Track_Row,
+	total, next_offset: int,
+	has_more: bool,
+	ok: bool,
+) {
+	window_key := playlist_cache_key("ap-playlist-window", id, offset)
+	defer delete(window_key)
+	window_body, window_hit := cache_read("api", window_key, ttl)
+	if !window_hit {return}
+	defer delete(window_body)
+	meta_key := playlist_cache_key("ap-playlist-meta", id, offset)
+	defer delete(meta_key)
+	meta_body, meta_hit := cache_read("api", meta_key, ttl)
+	if !meta_hit {return}
+	defer delete(meta_body)
+	window, valid := parse_playlist_window(window_body[:], offset)
+	if !valid {return {}, 0, 0, false, false}
+	parsed, parsed_ok := parse_playlist_metadata(meta_body[:], window.uris, allocator)
+	if !parsed_ok {return {}, 0, 0, false, false}
+	return parsed, window.total, window.next_offset, window.next_offset < window.total, true
+}
+
+write_playlist_cache :: proc(id: string, offset: int, window, metadata: []u8) {
+	window_key := playlist_cache_key("ap-playlist-window", id, offset)
+	defer delete(window_key)
+	meta_key := playlist_cache_key("ap-playlist-meta", id, offset)
+	defer delete(meta_key)
+	cache_write("api", window_key, window)
+	cache_write("api", meta_key, metadata)
 }
 
 parse_playlist_window :: proc(body: []u8, offset: int) -> (window: Playlist_Window, ok: bool) {

@@ -230,3 +230,90 @@ transient_page_failure_keeps_the_session_usable :: proc(t: ^testing.T) {
 	testing.expect_value(t, client.state, State.Failed)
 	testing.expect(t, client.failed)
 }
+
+@(test)
+detail_buffer_replays_last_page_without_requests :: proc(t: ^testing.T) {
+	client: Client
+	defer {
+		free_detail(&client.detail)
+		free_detail(&client.prev_detail)
+		delete(client.detail_request_id)
+	}
+	make_rows := proc(id, name: string, total: int) -> Detail {
+		detail: Detail
+		if virtual.arena_init_growing(&detail.arena) != nil {return {}}
+		allocator := virtual.arena_allocator(&detail.arena)
+		detail.ready = true
+		detail.source = .Playlist
+		detail.id = strings.clone(id, allocator)
+		detail.name = strings.clone(name, allocator)
+		detail.total = total
+		detail.rows = make([dynamic]Track_Row, 0, 2, allocator)
+		append(
+			&detail.rows,
+			clone_row(Track_Row{name = strings.clone("one", allocator)}, allocator),
+		)
+		append(
+			&detail.rows,
+			clone_row(Track_Row{name = strings.clone("two", allocator)}, allocator),
+		)
+		return detail
+	}
+	client.detail = make_rows("p", "Playlist P", 100)
+	client.detail.generation = 7
+	detail_buffer_stash(&client)
+	testing.expect(t, len(client.detail.rows) == 0)
+	testing.expect_value(t, len(client.prev_detail.rows), 2)
+
+	// Leaving for another page and coming back restores the buffered rows.
+	client.detail = make_rows("q", "Playlist Q", 40)
+	for &row, i in client.detail.rows {row.name = i == 0 ? "three" : "four"}
+	testing.expect(
+		t,
+		detail_buffer_take(
+			&client,
+			.Playlist,
+			"p",
+			Entry{uri = "spotify:playlist:p", total = 100},
+		),
+	)
+	testing.expect_value(t, len(client.detail.rows), 2)
+	testing.expect_value(t, client.detail.rows[0].name, "one")
+	testing.expect_value(t, client.detail.generation, 8)
+	testing.expect_value(t, client.detail_request_id, "p")
+	testing.expect(t, !client.detail_loading)
+	// Ping-pong: the outgoing page is banked for the trip back.
+	testing.expect_value(t, len(client.prev_detail.rows), 2)
+	testing.expect_value(t, client.prev_detail.id, "q")
+
+	// Unknown pages, stale buffers and changed totals fall through.
+	testing.expect(
+		t,
+		!detail_buffer_take(&client, .Playlist, "zzz", Entry{uri = "spotify:playlist:zzz"}),
+	)
+	client.prev_at = time.time_add(time.now(), -(PAGE_TTL + time.Minute))
+	testing.expect(
+		t,
+		!detail_buffer_take(
+			&client,
+			.Playlist,
+			"q",
+			Entry{uri = "spotify:playlist:q", total = 40},
+		),
+	)
+	client.prev_at = time.now()
+	testing.expect(
+		t,
+		!detail_buffer_take(
+			&client,
+			.Playlist,
+			"q",
+			Entry{uri = "spotify:playlist:q", total = 41},
+		),
+	)
+	testing.expect(
+		t,
+		detail_buffer_take(&client, .Playlist, "q", Entry{uri = "spotify:playlist:q", total = 40}),
+	)
+	testing.expect_value(t, client.detail.rows[0].name, "three")
+}
