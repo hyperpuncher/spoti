@@ -47,3 +47,16 @@ spotify_link_decodes_to_binary_id :: proc(t: ^testing.T) {
 	_, ok = parse_id("https://example.com/track/1TifAMm1r1MascYZ5xGiQk")
 	testing.expect(t, !ok)
 }
+
+@(test)
+binary_id_encodes_back_to_base62 :: proc(t: ^testing.T) {
+	raw, ok := parse_id("1TifAMm1r1MascYZ5xGiQk")
+	testing.expect(t, ok)
+	encoded := base62_id(raw)
+	testing.expect_value(t, encoded, "1TifAMm1r1MascYZ5xGiQk")
+	delete(encoded)
+
+	zero := base62_id({})
+	testing.expect_value(t, zero, "0000000000000000000000")
+	delete(zero)
+}

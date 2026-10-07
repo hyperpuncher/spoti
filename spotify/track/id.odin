@@ -39,3 +39,20 @@ hex_id :: proc(id: [16]u8) -> string {
 	for b in id {value = value << 8 | u128(b)}
 	return fmt.aprintf("%032x", value)
 }
+
+BASE62_ALPHABET :: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// Raw bytes back to the 22-char base-62 Spotify ID, zero-padded like the
+// dashboard shows. Artist and album GIDs from AP metadata become playable
+// URIs through this; unknown bytes never appear in a URI.
+base62_id :: proc(raw: [16]u8, allocator := context.allocator) -> string {
+	value: u128
+	for b in raw {value = value << 8 | u128(b)}
+	alphabet := BASE62_ALPHABET
+	digits: [22]u8
+	for i := 21; i >= 0; i -= 1 {
+		digits[i] = alphabet[int(value % 62)]
+		value /= 62
+	}
+	return strings.clone(string(digits[:]), allocator)
+}

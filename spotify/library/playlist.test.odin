@@ -112,3 +112,43 @@ web_playlist_header_reads_track_total :: proc(t: ^testing.T) {
 	testing.expect_value(t, header.items.total, 1512)
 	testing.expect_value(t, header.owner.display_name, "hyper_puncher")
 }
+
+@(test)
+internal_playlist_row_links_artists_and_albums :: proc(t: ^testing.T) {
+	track_gid: [16]u8
+	track_gid[15] = 1
+	artist_gid: [16]u8
+	artist_gid[15] = 2
+	album_gid: [16]u8
+	album_gid[15] = 3
+	artist := make([dynamic]u8)
+	defer delete(artist)
+	ap.put_bytes(&artist, 1, artist_gid[:])
+	ap.put_bytes(&artist, 2, transmute([]u8)string("Art A"))
+	album := make([dynamic]u8)
+	defer delete(album)
+	ap.put_bytes(&album, 1, album_gid[:])
+	ap.put_bytes(&album, 2, transmute([]u8)string("Album A"))
+	track := make([dynamic]u8)
+	defer delete(track)
+	ap.put_bytes(&track, 1, track_gid[:])
+	ap.put_bytes(&track, 2, transmute([]u8)string("Song A"))
+	ap.put_bytes(&track, 4, artist[:])
+	ap.put_bytes(&track, 3, album[:])
+	ap.put_number(&track, 7, 2000)
+
+	arena: virtual.Arena
+	if virtual.arena_init_growing(&arena) != nil {testing.fail_now(t, "arena")}
+	defer virtual.arena_destroy(&arena)
+	row, ok := playlist_track_row(
+		track[:],
+		"spotify:track:0000000000000000000001",
+		virtual.arena_allocator(&arena),
+	)
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, row.album, "Album A")
+	testing.expect_value(t, row.album_uri, "spotify:album:0000000000000000000003")
+	if !testing.expect(t, len(row.artist_links) == 1) {return}
+	testing.expect_value(t, row.artist_links[0].name, "Art A")
+	testing.expect_value(t, row.artist_links[0].uri, "spotify:artist:0000000000000000000002")
+}

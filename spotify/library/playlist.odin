@@ -212,6 +212,7 @@ playlist_track_row :: proc(
 	}
 	artists := make([dynamic]Artist, context.temp_allocator)
 	images := make([dynamic]Image, context.temp_allocator)
+	album_name, album_uri := "", ""
 	pos := 0
 	for pos < len(body) {
 		field, wire, bytes, _, field_valid := ap.next_field(body, &pos)
@@ -221,12 +222,39 @@ playlist_track_row :: proc(
 			if wire != 2 || len(artists) >= 128 {return}
 			artist_name, _, artist_valid := ap.get_bytes(bytes, 2)
 			if !artist_valid {return}
-			if len(artist_name) > 0 {append(&artists, Artist{name = string(artist_name)})}
+			// The GID is best-effort: a nameless link beats a dropped row.
+			artist_uri := ""
+			if artist_gid, _, artist_gid_valid := ap.get_bytes(bytes, 1);
+			   artist_gid_valid && len(artist_gid) == 16 {
+				raw: [16]u8
+				copy(raw[:], artist_gid)
+				id := track.base62_id(raw, context.temp_allocator)
+				artist_uri = fmt.aprintf(
+					"spotify:artist:%s",
+					id,
+					allocator = context.temp_allocator,
+				)
+			}
+			if len(artist_name) > 0 {
+				append(&artists, Artist{name = string(artist_name), uri = artist_uri})
+			}
 		case 3:
 			if wire != 2 || !playlist_album_images(bytes, &images) {return}
+			if album_gid, _, album_gid_valid := ap.get_bytes(bytes, 1);
+			   album_gid_valid && len(album_gid) == 16 {
+				raw: [16]u8
+				copy(raw[:], album_gid)
+				id := track.base62_id(raw, context.temp_allocator)
+				album_uri = fmt.aprintf("spotify:album:%s", id, allocator = context.temp_allocator)
+			}
+			if album_title, _, album_title_valid := ap.get_bytes(bytes, 2);
+			   album_title_valid && len(album_title) > 0 {
+				album_name = string(album_title)
+			}
 		}
 	}
 	ref.artists, ref.album.images = artists[:], images[:]
+	ref.album.name, ref.album.uri = album_name, album_uri
 	return track_row(ref, allocator)
 }
 
