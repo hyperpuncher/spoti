@@ -1,20 +1,35 @@
-// Persisted app state: preferences (window chrome, tab, sort) and session
-// state (pins, recents, resume). Only UI state is stored, never credentials,
-// tokens or signed URLs. Playlist URIs are the user's own pins and play
-// history.
+// Persisted app state as one JSON document: preferences (window chrome, tab,
+// sort) and session state (pins, recents, resume). Only UI state is stored,
+// never credentials, tokens or signed URLs. Playlist URIs are the user's
+// own pins and play history. Enum names keep the file readable and stable
+// across reorder; a corrupt file falls back to defaults, so it can never
+// stop the app from opening.
 package main
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
-import "core:strconv"
 import "core:strings"
 import library "spotify/library"
 
 DEFAULT_SIDEBAR_WIDTH :: f32(360)
 DEFAULT_VOLUME :: f32(0.5)
-STATE_FILE :: "state"
+STATE_FILE :: "state.json"
 MAX_PINNED :: 32
 MAX_RECENT :: 60
+
+// Everything the footer resumes: display strings plus both links. Future
+// resume data lands inside this object instead of new top-level keys.
+Last_Played :: struct {
+	track:        string, // spotify:track:<id>
+	title:        string,
+	artist:       string, // joined display names
+	cover:        string,
+	album:        string,
+	album_uri:    string, // spotify:album:<id>
+	first_artist: string,
+	artist_uri:   string, // spotify:artist:<id>
+}
 
 State :: struct {
 	sidebar_width:   f32,
@@ -23,10 +38,7 @@ State :: struct {
 	sort:            [library.Kind]Sort, // per-tab card order
 	pinned:          [dynamic]string, // pin order; drawn first
 	recent:          [dynamic]string, // most recently played first
-	last_track:      string, // last played track URI, resumed on launch
-	last_title:      string, // track title for the footer
-	last_artist:     string, // track artists for the footer
-	last_cover:      string, // track cover URL
+	last_played:     Last_Played, // footer resume
 	last_collection: string, // spotify:<source>:<id> reopened on launch
 	last_name:       string, // collection name for the optimistic header
 	last_saved:      bool, // membership of that collection, for the hero heart
@@ -37,34 +49,17 @@ free_state :: proc(app_state: ^State) {
 	for uri in app_state.recent {delete(uri)}
 	delete(app_state.pinned)
 	delete(app_state.recent)
-	delete(app_state.last_track)
-	delete(app_state.last_title)
-	delete(app_state.last_artist)
-	delete(app_state.last_cover)
+	delete(app_state.last_played.track)
+	delete(app_state.last_played.title)
+	delete(app_state.last_played.artist)
+	delete(app_state.last_played.cover)
+	delete(app_state.last_played.album)
+	delete(app_state.last_played.album_uri)
+	delete(app_state.last_played.first_artist)
+	delete(app_state.last_played.artist_uri)
 	delete(app_state.last_collection)
 	delete(app_state.last_name)
 	app_state^ = {}
-}
-
-state_tab_name :: proc(kind: library.Kind) -> string {
-	#partial switch kind {
-	case .Albums:
-		return "albums"
-	case .Artists:
-		return "artists"
-	}
-	return "playlists"
-}
-
-state_tab_kind :: proc(name: string) -> library.Kind {
-	switch name {
-	case "albums":
-		return .Albums
-	case "artists":
-		return .Artists
-	case:
-		return .Playlists
-	}
 }
 
 // Card order per library tab. Spotify's own order leads with the newest
@@ -80,140 +75,89 @@ SORT_NAMES := [Sort]string {
 	.Played  = "Recently played",
 }
 
-SORT_SERIALS := [Sort]string {
-	.Default = "default",
-	.Played  = "played",
-}
-
 sort_name :: proc(sort: Sort) -> string {
 	return SORT_NAMES[sort]
 }
 
-sort_kind :: proc(name: string) -> (Sort, bool) {
-	for serial, index in SORT_SERIALS {
-		if name == serial {return Sort(index), true}
-	}
-	return .Default, false
-}
-
-sort_serial :: proc(sort: Sort) -> string {
-	return SORT_SERIALS[sort]
-}
-
-// Unknown or malformed lines fall back to defaults, so a corrupt state file
-// can never stop the app from opening.
 parse_state :: proc(data: string, allocator := context.allocator) -> State {
-	app_state := State {
-		sidebar_width = DEFAULT_SIDEBAR_WIDTH,
-		volume        = DEFAULT_VOLUME,
-		tab           = .Playlists,
+	// Defaults first, so missing keys behave like the old absent lines.
+	loaded := default_state()
+	if json.unmarshal_string(data, &loaded, allocator = allocator) != nil {
+		free_state(&loaded)
+		return default_state()
 	}
-	for line in strings.split_lines(data, context.temp_allocator) {
-		key, _, value := strings.partition(line, "=")
-		switch strings.trim_space(key) {
-		case "sidebar_width":
-			if width, ok := strconv.parse_f32(strings.trim_space(value)); ok {
-				app_state.sidebar_width = clamp(width, SIDEBAR_MIN, SIDEBAR_MAX)
-			}
-		case "tab":
-			app_state.tab = state_tab_kind(strings.trim_space(value))
-		case "volume":
-			if gain, ok := strconv.parse_f32(strings.trim_space(value)); ok {
-				app_state.volume = clamp(gain, 0, 1)
-			}
-		case "sort_playlists", "sort_albums", "sort_artists":
-			tab := state_tab_kind(strings.trim_space(key)[len("sort_"):])
-			if value, ok := sort_kind(strings.trim_space(value)); ok {
-				app_state.sort[tab] = value
-			}
-		case "pin":
-			uri := strings.trim_space(value)
-			if len(uri) > 0 && len(app_state.pinned) < MAX_PINNED {
-				append(&app_state.pinned, strings.clone(uri, allocator))
-			}
-		case "recent":
-			uri := strings.trim_space(value)
-			if len(uri) > 0 && len(app_state.recent) < MAX_RECENT {
-				append(&app_state.recent, strings.clone(uri, allocator))
-			}
-		case "last_track":
-			uri := strings.trim_space(value)
-			if strings.has_prefix(uri, "spotify:track:") && len(uri) < 128 {
-				delete(app_state.last_track)
-				app_state.last_track = strings.clone(uri, allocator)
-			}
-		case "last_title":
-			if len(value) > 0 && len(value) < 256 {
-				delete(app_state.last_title)
-				app_state.last_title = strings.clone(value, allocator)
-			}
-		case "last_artist":
-			if len(value) > 0 && len(value) < 256 {
-				delete(app_state.last_artist)
-				app_state.last_artist = strings.clone(value, allocator)
-			}
-		case "last_cover":
-			uri := strings.trim_space(value)
-			if strings.has_prefix(uri, "https://") && len(uri) <= 512 {
-				delete(app_state.last_cover)
-				app_state.last_cover = strings.clone(uri, allocator)
-			}
-		case "last_collection":
-			uri := strings.trim_space(value)
-			if (strings.has_prefix(uri, "spotify:playlist:") ||
-				   strings.has_prefix(uri, "spotify:album:") ||
-				   strings.has_prefix(uri, "spotify:artist:")) &&
-			   len(uri) < 128 {
-				delete(app_state.last_collection)
-				app_state.last_collection = strings.clone(uri, allocator)
-			}
-		case "last_saved":
-			app_state.last_saved = strings.trim_space(value) == "1"
-		case "last_name":
-			if len(value) > 0 && len(value) < 256 {
-				delete(app_state.last_name)
-				app_state.last_name = strings.clone(value, allocator)
-			}
+	sanitize_state(&loaded)
+	return loaded
+}
+
+// The file is our own output, but clamps and prefix checks keep a
+// hand-edited or truncated file from breaking layout, playback or calls.
+// Unknown enum names already decode as their zero values, which match the
+// historical defaults.
+sanitize_state :: proc(app_state: ^State) {
+	app_state.sidebar_width = clamp(app_state.sidebar_width, SIDEBAR_MIN, SIDEBAR_MAX)
+	app_state.volume = clamp(app_state.volume, 0, 1)
+	prune_strings(&app_state.pinned, MAX_PINNED)
+	prune_strings(&app_state.recent, MAX_RECENT)
+	clear_unless_uri(
+		&app_state.last_collection,
+		"spotify:playlist:",
+		"spotify:album:",
+		"spotify:artist:",
+	)
+	cap_string(&app_state.last_name, 256)
+	played := &app_state.last_played
+	clear_unless_uri(&played.track, "spotify:track:")
+	cap_string(&played.title, 256)
+	cap_string(&played.artist, 256)
+	if !(strings.has_prefix(played.cover, "https://") && len(played.cover) <= 512) {
+		delete(played.cover)
+		played.cover = ""
+	}
+	cap_string(&played.album, 256)
+	clear_unless_uri(&played.album_uri, "spotify:album:")
+	cap_string(&played.first_artist, 256)
+	clear_unless_uri(&played.artist_uri, "spotify:artist:")
+}
+
+// Blanks an owned string that outgrows its bound.
+cap_string :: proc(value: ^string, cap: int) {
+	if len(value^) >= cap {
+		delete(value^)
+		value^ = ""
+	}
+}
+
+// Blanks an owned URI unless it carries one of the expected prefixes.
+clear_unless_uri :: proc(uri: ^string, prefixes: ..string) {
+	if len(uri^) == 0 {return}
+	if len(uri^) < 128 {
+		for prefix in prefixes {
+			if strings.has_prefix(uri^, prefix) {return}
 		}
 	}
-	return app_state
+	delete(uri^)
+	uri^ = ""
+}
+
+// Drops empties and caps the length, keeping the surviving order.
+prune_strings :: proc(list: ^[dynamic]string, cap: int) {
+	kept := 0
+	for i in 0 ..< len(list) {
+		if len(list[i]) == 0 || kept >= cap {
+			delete(list[i])
+			continue
+		}
+		list[kept] = list[i]
+		kept += 1
+	}
+	resize(list, kept)
 }
 
 format_state :: proc(app_state: ^State, allocator := context.allocator) -> string {
-	builder: strings.Builder
-	strings.builder_init(&builder, allocator)
-	_ = fmt.sbprintf(
-		&builder,
-		"sidebar_width=%v\ntab=%s\nvolume=%v\nsort_playlists=%s\nsort_albums=%s\nsort_artists=%s\n",
-		app_state.sidebar_width,
-		state_tab_name(app_state.tab),
-		app_state.volume,
-		sort_serial(app_state.sort[.Playlists]),
-		sort_serial(app_state.sort[.Albums]),
-		sort_serial(app_state.sort[.Artists]),
-	)
-	for uri in app_state.pinned {_ = fmt.sbprintf(&builder, "pin=%s\n", uri)}
-	for uri in app_state.recent {_ = fmt.sbprintf(&builder, "recent=%s\n", uri)}
-	if len(app_state.last_track) > 0 {
-		_ = fmt.sbprintf(&builder, "last_track=%s\n", app_state.last_track)
-	}
-	if len(app_state.last_title) > 0 {
-		_ = fmt.sbprintf(&builder, "last_title=%s\n", app_state.last_title)
-	}
-	if len(app_state.last_artist) > 0 {
-		_ = fmt.sbprintf(&builder, "last_artist=%s\n", app_state.last_artist)
-	}
-	if len(app_state.last_cover) > 0 {
-		_ = fmt.sbprintf(&builder, "last_cover=%s\n", app_state.last_cover)
-	}
-	if len(app_state.last_collection) > 0 {
-		_ = fmt.sbprintf(&builder, "last_collection=%s\n", app_state.last_collection)
-	}
-	if app_state.last_saved {_ = fmt.sbprintf(&builder, "last_saved=1\n")}
-	if len(app_state.last_name) > 0 {
-		_ = fmt.sbprintf(&builder, "last_name=%s\n", app_state.last_name)
-	}
-	return strings.to_string(builder)
+	data, err := json.marshal(app_state^, {pretty = true, use_enum_names = true}, allocator)
+	if err != nil {return ""}
+	return string(data)
 }
 
 state_is_pinned :: proc(app_state: ^State, uri: string) -> bool {
@@ -279,12 +223,16 @@ state_path :: proc() -> (path: string, ok: bool) {
 	return fmt.aprintf("%s/%s", dir, STATE_FILE), true
 }
 
+default_state :: proc() -> State {
+	return State{sidebar_width = DEFAULT_SIDEBAR_WIDTH, volume = DEFAULT_VOLUME, tab = .Playlists}
+}
+
 load_state :: proc() -> State {
 	path, ok := state_path()
-	if !ok {return {sidebar_width = DEFAULT_SIDEBAR_WIDTH, tab = .Playlists}}
+	if !ok {return default_state()}
 	defer delete(path)
 	data, read_error := os.read_entire_file(path, context.temp_allocator)
-	if read_error != nil {return {sidebar_width = DEFAULT_SIDEBAR_WIDTH, tab = .Playlists}}
+	if read_error != nil {return default_state()}
 	return parse_state(string(data))
 }
 
@@ -294,5 +242,13 @@ save_state :: proc(app_state: ^State) {
 	defer delete(path)
 	data := format_state(app_state)
 	defer delete(data)
-	_ = os.write_entire_file(path, transmute([]u8)data)
+	if len(data) == 0 {return}
+	// A crash mid-write must not leave a truncated file behind.
+	tmp := fmt.aprintf("%s.tmp", path)
+	defer delete(tmp)
+	if os.write_entire_file(tmp, transmute([]u8)data) == nil {
+		os.rename(tmp, path)
+	} else {
+		os.remove(tmp)
+	}
 }

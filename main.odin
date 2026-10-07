@@ -496,21 +496,22 @@ main :: proc() {
 	stage_n := 0
 	// Resume the last played track and reopen its collection. The footer
 	// shows it without starting playback; pressing play resumes it.
-	if len(app_state.last_track) > 0 {
+	played := app_state.last_played
+	if len(played.track) > 0 {
 		delete(selected)
-		selected = strings.clone(app_state.last_track)
+		selected = strings.clone(played.track)
 	}
-	if len(app_state.last_title) > 0 {
+	if len(played.title) > 0 {
 		delete(title)
-		title = strings.clone(app_state.last_title)
+		title = strings.clone(played.title)
 	}
-	if len(app_state.last_artist) > 0 {
+	if len(played.artist) > 0 {
 		delete(artist)
-		artist = strings.clone(app_state.last_artist)
+		artist = strings.clone(played.artist)
 	}
-	if len(app_state.last_cover) > 0 {
+	if len(played.cover) > 0 {
 		delete(player_cover)
-		player_cover = strings.clone(app_state.last_cover)
+		player_cover = strings.clone(played.cover)
 	}
 	restore_pending := len(app_state.last_collection) > 0
 	button_anims := make(map[string]Button_Fx)
@@ -909,9 +910,9 @@ main :: proc() {
 				source, id, valid := parse_card_uri(app_state.last_collection)
 				if valid {
 					preview := library.Entry {
-						name  = app_state.last_name != "" ? app_state.last_name : app_state.last_title,
+						name  = app_state.last_name != "" ? app_state.last_name : app_state.last_played.title,
 						uri   = app_state.last_collection,
-						image = app_state.last_cover,
+						image = app_state.last_played.cover,
 						saved = app_state.last_saved,
 					}
 					if library.open_detail(&library_client, source, id, preview) {
@@ -1828,17 +1829,18 @@ main :: proc() {
 		if library_client.detail.ready {
 			collection = detail_card_uri(library_client.detail)
 		}
-		if selected != app_state.last_track ||
-		   title != app_state.last_title ||
-		   artist != app_state.last_artist ||
-		   player_cover != app_state.last_cover ||
+		played_state := &app_state.last_played
+		if selected != played_state.track ||
+		   title != played_state.title ||
+		   artist != played_state.artist ||
+		   player_cover != played_state.cover ||
 		   (library_client.detail.ready &&
 				   (collection != app_state.last_collection ||
 						   app_state.last_saved != library_client.detail.liked)) {
-			replace_string(&app_state.last_track, selected)
-			replace_string(&app_state.last_title, title)
-			replace_string(&app_state.last_artist, artist)
-			replace_string(&app_state.last_cover, player_cover)
+			replace_string(&played_state.track, selected)
+			replace_string(&played_state.title, title)
+			replace_string(&played_state.artist, artist)
+			replace_string(&played_state.cover, player_cover)
 			if library_client.detail.ready {
 				replace_string(&app_state.last_collection, collection)
 				replace_string(&app_state.last_name, library_client.detail.name)
