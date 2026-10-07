@@ -461,3 +461,104 @@ apply_theme_switches_palette_and_restores_dark :: proc(t: ^testing.T) {
 	testing.expect(t, BG == DARK_THEME.bg, "dark theme must restore")
 	testing.expect(t, WHITE == DARK_THEME.text, "other tests render dark")
 }
+
+@(test)
+artist_discography_cards_stay_inside_their_padding :: proc(t: ^testing.T) {
+	memory := make([]u8, int(clay.MinMemorySize()))
+	defer delete(memory)
+	errors := 0
+	clay.Initialize(
+		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
+		{1280, 820},
+		{handler = layout_test_error, userData = &errors},
+	)
+	defer clay.SetCurrentContext(nil)
+	density: f32 = 1
+	clay.SetMeasureTextFunction(layout_test_measure, &density)
+
+	client: library.Client
+	client.detail = library.Detail {
+		ready  = true,
+		source = .Artist,
+		id     = "artist",
+		name   = "Artist",
+	}
+	client.detail.releases = make([dynamic]library.Entry, 58)
+	defer delete(client.detail.releases)
+	for &release in client.detail.releases {
+		release.name = "Release with a fairly long name"
+		release.subtitle = "2026"
+	}
+	textures := Textures {
+		by_key = make(map[u64]^sdl.Texture),
+	}
+	defer {
+		delete(textures.by_key)
+		delete(textures.requested)
+	}
+	app_state: State
+	anims := make(map[string]Button_Fx)
+	defer delete(anims)
+	fx := Button_Fx_Ctx {
+		anims = &anims,
+	}
+	density = 1.2
+	clay.SetLayoutDimensions({1881, 1069})
+	// Three settles: the first frame still spans the scrollbar outset.
+	for _ in 0 ..< 3 {
+		clay.UpdateScrollContainers(false, {}, 0)
+		_, _ = layout(
+			{button = "pause"},
+			&client,
+			&app_state,
+			.Albums,
+			&textures,
+			&fx,
+			SIDEBAR_MAX,
+			1881,
+			1069,
+			26 * 1.2,
+			0,
+			1.2,
+			nil,
+		)
+	}
+	_, visible := layout(
+		{button = "pause"},
+		&client,
+		&app_state,
+		.Albums,
+		&textures,
+		&fx,
+		SIDEBAR_MAX,
+		1881,
+		1069,
+		26 * 1.2,
+		0,
+		1.2,
+		nil,
+	)
+	testing.expect_value(t, errors, 0)
+	rows := clay.GetElementData(clay.ID("detail_rows"))
+	if !testing.expect(t, rows.found) {return}
+	edge := rows.boundingBox.x + rows.boundingBox.width
+	// The detail root reserves the scrollbar outset, so the grid must end
+	// before it instead of stretching underneath the thumb.
+	testing.expect(
+		t,
+		math.abs(edge - (1881 - SCROLLBAR_OUTSET * 1.2)) < 1,
+		"the discography must respect the scrollbar outset",
+	)
+	right := f32(0)
+	for index in visible.releases.first ..< visible.releases.last {
+		card := clay.GetElementData(clay.ID("release_card", u32(index)))
+		if !testing.expect(t, card.found) {continue}
+		right = max(right, card.boundingBox.x + card.boundingBox.width)
+	}
+	inset := edge - right
+	testing.expect(
+		t,
+		inset >= 20 * 1.2 - 1 && inset <= (20 + SCROLLBAR_OUTSET) * 1.2 + 1,
+		"the last release card must keep the page side padding",
+	)
+}

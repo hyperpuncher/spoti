@@ -762,7 +762,7 @@ artist_discography :: proc(
 			clay.Text("Discography", clay.TextElementConfig{fontSize = 22, textColor = WHITE})
 		}
 		gap: f32 = 0
-		usable := max(280 * d, available_width - 40 * d)
+		usable := max(280 * d, available_width - (40 + SCROLLBAR_OUTSET) * d)
 		columns := clamp(int((usable + gap) / (168 * d + gap)), 2, 4)
 		card_width := (usable - f32(columns - 1) * gap) / f32(columns)
 		row_height := card_row_height(card_width, card_text_height, d)
