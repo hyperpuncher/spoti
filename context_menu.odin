@@ -30,6 +30,8 @@ Context_Menu :: struct {
 free_context_menu :: proc(menu: ^Context_Menu) {
 	delete(menu.uri)
 	menu^ = {}
+	// Only the sort picker marks a row; the others must not draw a check.
+	menu.selected = -1
 }
 
 open_card_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, pinned: bool) {
@@ -84,7 +86,6 @@ open_sort_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, current: Sort) {
 	menu.open = true
 	menu.point = point
 	menu.track = -1
-	menu.selected = -1
 	for option in options {
 		index := menu.count
 		menu.items[index] = .Pick_Sort
@@ -110,6 +111,9 @@ context_menu :: proc(view: View, textures: ^Textures, d: f32) {
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
 	) {
+		// Only the sort picker marks a row, so only it reserves the gutter;
+		// every other menu fits its labels exactly.
+		reserve := view.menu_selected >= 0 && view.menu_selected < view.menu_count
 		for index in 0 ..< view.menu_count {
 			hovered := clay.PointerOver(clay.ID("menu_item", u32(index)))
 			if clay.UI_WithId(clay.ID("menu_item", u32(index)))(
@@ -126,7 +130,9 @@ context_menu :: proc(view: View, textures: ^Textures, d: f32) {
 			) {
 				if index == view.menu_selected {
 					icon_element(textures, "check", .White, 14 * d)
-				} else if clay.UI()({layout = {sizing = {width = clay.SizingFixed(14 * d)}}}) {}
+				} else if reserve {
+					if clay.UI()({layout = {sizing = {width = clay.SizingFixed(14 * d)}}}) {}
+				}
 				clay.Text(
 					view.menu_labels[index],
 					clay.TextElementConfig{fontSize = 14, textColor = WHITE},
