@@ -184,6 +184,7 @@ open_entry_page :: proc(
 	app_state: ^State,
 	textures: ^Textures,
 	detail_pinned: ^bool,
+	scroll_armed: ^bool,
 	filter: library.Kind,
 	search_mode: bool,
 	search_kind: library.Kind,
@@ -193,6 +194,8 @@ open_entry_page :: proc(
 	if detail_already_open(client, entry.uri) {return true}
 	source, id, valid := parse_card_uri(entry.uri)
 	if !valid {return false}
+	nav_save_scroll(nav, detail_scroll_y())
+	scroll_armed^ = false
 	if !library.open_detail(client, source, id, entry) {return false}
 	retry_failed_covers(textures)
 	detail_pinned^ = state_is_pinned(app_state, entry.uri)
@@ -240,6 +243,13 @@ Smooth :: struct {
 
 smooth_for :: proc(container: string, grid, detail: ^Smooth) -> ^Smooth {
 	return container == "library_grid" ? grid : detail
+}
+
+// Live detail_rows offset for history saves; zero when the page is closed.
+detail_scroll_y :: proc() -> f32 {
+	data := clay.GetScrollContainerData(clay.ID("detail_rows"))
+	if !data.found || data.scrollPosition == nil {return 0}
+	return data.scrollPosition.y
 }
 
 scroll_wheel :: proc(id: string, amount, d: f32, smooth: ^Smooth) -> bool {
@@ -487,6 +497,8 @@ main :: proc() {
 	menu: Context_Menu
 	resizing := false
 	scrollbar_drag: Scrollbar_Drag
+	detail_scroll_target: f32
+	detail_scroll_armed := false
 	autoscroll_container := ""
 	autoscroll_anchor := sdl.FPoint{}
 	autoscroll_moving := false
@@ -698,6 +710,7 @@ main :: proc() {
 								search_pending = false
 								if library.search(&library_client, input) {
 									search_mode = true
+									nav_save_scroll(&nav, detail_scroll_y())
 									nav_record_search(
 										&nav,
 										&library_client,
@@ -779,6 +792,9 @@ main :: proc() {
 		if nav_back_pressed || nav_forward_pressed {
 			state: Nav_State
 			moved := false
+			// The container vanishes while the next page loads, so the
+			// offset is banked before leaving and restored after.
+			nav_save_scroll(&nav, detail_scroll_y())
 			if nav_back_pressed {
 				nav_back_pressed = false
 				state, moved = nav_back(&nav)
@@ -798,6 +814,12 @@ main :: proc() {
 					&input,
 					&detail_pinned,
 				)
+				if len(state.detail.uri) == 0 {
+					detail_scroll_armed = false
+				} else {
+					detail_scroll_target = state.detail_scroll
+					detail_scroll_armed = true
+				}
 				redraw = true
 			}
 		}
@@ -826,6 +848,7 @@ main :: proc() {
 			search_pending = false
 			if library.search(&library_client, input) {
 				search_mode = true
+				nav_save_scroll(&nav, detail_scroll_y())
 				nav_record_search(&nav, &library_client, filter, search_kind, input)
 			}
 		}
@@ -1208,6 +1231,7 @@ main :: proc() {
 		wheel_used := scroll_wheel("library_grid", wheel.y, density, &grid_smooth)
 		if !wheel_used {
 			wheel_used = scroll_wheel("detail_rows", wheel.y, density, &detail_smooth)
+			if wheel_used {detail_scroll_armed = false}
 		}
 		clay.UpdateScrollContainers(false, {}, dt)
 		card_text_height :=
@@ -1234,6 +1258,27 @@ main :: proc() {
 			&state,
 		)
 		fx_animating = fx.animating
+		// A banked history offset rides the growing content down as pages
+		// stream in, then snaps in once reached or fully loaded. Any direct
+		// scroll input cancels it so it never fights the user.
+		if detail_scroll_armed && library_client.detail.ready {
+			scroll_data := clay.GetScrollContainerData(clay.ID("detail_rows"))
+			if scroll_data.found && scroll_data.scrollPosition != nil {
+				viewport := scroll_data.scrollContainerDimensions.height
+				content := scroll_data.contentDimensions.height
+				loaded := !library_client.detail_loading && !library_client.detail.has_more
+				if viewport > 0 && content > viewport {
+					pos := clamp(detail_scroll_target, viewport - content, 0)
+					scroll_data.scrollPosition.y = pos
+					detail_smooth.target = pos
+					detail_smooth.active = false
+					if pos == detail_scroll_target || loaded {detail_scroll_armed = false}
+					redraw = true
+				} else if loaded || content <= viewport {
+					detail_scroll_armed = false
+				}
+			}
+		}
 		if middle_clicked {
 			middle_clicked = false
 			for id in ([]string{"library_grid", "detail_rows"}) {
@@ -1243,6 +1288,7 @@ main :: proc() {
 				   data.contentDimensions.height > data.scrollContainerDimensions.height {
 					autoscroll_container = id
 					autoscroll_anchor = middle_click
+					if id == "detail_rows" {detail_scroll_armed = false}
 					break
 				}
 			}
@@ -1364,6 +1410,7 @@ main :: proc() {
 			if hit("library_scrollbar", mouse_click) {
 				begin_scrollbar_drag(&scrollbar_drag, "library_grid", mouse_click.y)
 			} else if hit("detail_scrollbar", mouse_click) {
+				detail_scroll_armed = false
 				begin_scrollbar_drag(&scrollbar_drag, "detail_rows", mouse_click.y)
 			} else if hit("sidebar_handle", mouse_click) {
 				resizing = true
@@ -1392,6 +1439,7 @@ main :: proc() {
 							if hit_index("chip", mouse_click, u32(index)) {
 								if search_kind != search_tabs[index] {
 									search_kind = search_tabs[index]
+									nav_save_scroll(&nav, detail_scroll_y())
 									nav_commit(
 										&nav,
 										nav_capture(
@@ -1415,6 +1463,7 @@ main :: proc() {
 									filter = library_tabs[index]
 									app_state.tab = filter
 									state_dirty = true
+									nav_save_scroll(&nav, detail_scroll_y())
 									nav_commit(
 										&nav,
 										nav_capture(
@@ -1458,6 +1507,7 @@ main :: proc() {
 								&app_state,
 								&textures,
 								&detail_pinned,
+								&detail_scroll_armed,
 								filter,
 								search_mode,
 								search_kind,
@@ -1512,6 +1562,8 @@ main :: proc() {
 								if detail_already_open(&library_client, release.uri) {
 									handled = true
 								} else {
+									nav_save_scroll(&nav, detail_scroll_y())
+									detail_scroll_armed = false
 									handled = library.open_detail(
 										&library_client,
 										.Album,
@@ -1554,6 +1606,7 @@ main :: proc() {
 										&app_state,
 										&textures,
 										&detail_pinned,
+										&detail_scroll_armed,
 										filter,
 										search_mode,
 										search_kind,
@@ -1717,6 +1770,7 @@ main :: proc() {
 					&app_state,
 					&textures,
 					&detail_pinned,
+					&detail_scroll_armed,
 					filter,
 					search_mode,
 					search_kind,
@@ -1743,6 +1797,7 @@ main :: proc() {
 					&app_state,
 					&textures,
 					&detail_pinned,
+					&detail_scroll_armed,
 					filter,
 					search_mode,
 					search_kind,

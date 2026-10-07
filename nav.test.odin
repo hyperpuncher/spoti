@@ -100,3 +100,20 @@ nav_bounds_history_and_clones_captured_strings :: proc(t: ^testing.T) {
 	testing.expect(t, state.searching && state.search_kind == .Tracks)
 	testing.expect_value(t, state.filter, library.Kind.Albums)
 }
+
+@(test)
+nav_saves_and_restores_detail_scroll :: proc(t: ^testing.T) {
+	nav: Nav
+	defer nav_free_all(&nav)
+	nav_save_scroll(&nav, -500)
+	nav_commit(&nav, nav_state("playlist"))
+	nav_save_scroll(&nav, -1497)
+	nav_commit(&nav, nav_state("artist"))
+	_, _ = nav_back(&nav)
+	testing.expect_value(t, nav.states[nav.index].detail_scroll, -1497)
+	// Leaving again banks the live offset into the entry left behind.
+	nav_save_scroll(&nav, -200)
+	state, _ := nav_forward(&nav)
+	testing.expect_value(t, state.detail_scroll, 0)
+	testing.expect_value(t, nav.states[nav.index - 1].detail_scroll, -200)
+}

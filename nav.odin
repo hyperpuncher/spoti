@@ -10,11 +10,12 @@ import library "spotify/library"
 NAV_LIMIT :: 64
 
 Nav_State :: struct {
-	filter:      library.Kind,
-	searching:   bool,
-	search_kind: library.Kind,
-	input:       string, // owned search text
-	detail:      library.Entry, // owned preview; uri is empty when no page is open
+	filter:        library.Kind,
+	searching:     bool,
+	search_kind:   library.Kind,
+	input:         string, // owned search text
+	detail:        library.Entry, // owned preview; uri is empty when no page is open
+	detail_scroll: f32, // detail_rows y offset, restored on back/forward
 }
 
 Nav :: struct {
@@ -70,6 +71,14 @@ nav_drop_forward :: proc(nav: ^Nav) {
 	for len(nav.states) > nav.index + 1 {
 		nav_free_state(pop(&nav.states))
 	}
+}
+
+// Records the live detail scroll into the entry being left, so back and
+// forward return to the same row instead of the top. The caller passes the
+// queried offset; quarantining the Clay read keeps this unit-testable.
+nav_save_scroll :: proc(nav: ^Nav, y: f32) {
+	if nav.index < 0 || nav.index >= len(nav.states) {return}
+	nav.states[nav.index].detail_scroll = y
 }
 
 // Records the state after a navigation.
