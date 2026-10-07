@@ -484,6 +484,10 @@ loading_track_table :: proc(d: f32) {
 	}
 }
 
+// Row text budget where the track table switches from flowing rows to
+// header-aligned columns.
+ROW_COLUMN_BREAK :: 600
+
 track_table :: proc(
 	detail: ^library.Detail,
 	view: View,
@@ -503,8 +507,8 @@ track_table :: proc(
 		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 	},
 	) {
-		// Header labels sit over the number and duration slots; titles flow
-		// instead of columnating, so the artist follows each title at a gap.
+		// Header labels sit over the number and duration slots, and over the
+		// artist column on wide rows; narrow rows flow instead.
 		if clay.UI()(
 		{
 			layout = {
@@ -551,10 +555,13 @@ track_table :: proc(
 				icon_element(textures, "clock", .Muted, 15 * d)
 			}
 		}
-		// Row padding (12/92), the number slot and the gaps come off the top;
-		// the title takes most of what is left, the artist the rest.
+		// Row padding (12/92), the number slot and the gaps come off the top.
+		// Wide rows columnate under the header labels; narrow rows flow with
+		// the title taking most of what is left and the artist the rest.
 		row_text := max(0, available_width - (SCROLLBAR_OUTSET + 182) * d)
+		columns := row_text >= ROW_COLUMN_BREAK * d
 		title_max := row_text * 0.6
+		column_box := max(0, available_width - (SCROLLBAR_OUTSET + 158) * d) * 0.5
 		gap := f32(u16(2 * d))
 		visible = scroll_items(
 			"detail_rows",
@@ -574,7 +581,10 @@ track_table :: proc(
 			// Each line is pre-shortened to its box: clay clips pixels but
 			// never draws an ellipsis itself. With no fonts (layout tests)
 			// everything below is the identity.
-			title_box := min(hero_text_width(ui_state, row.name, 15, 3), title_max)
+			title_box := column_box
+			if !columns {
+				title_box = min(hero_text_width(ui_state, row.name, 15, 3), title_max)
+			}
 			title_text := hero_fit_text(
 				ui_state,
 				row.name,
@@ -622,14 +632,17 @@ track_table :: proc(
 						clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
 					)
 				}
-				// The title hugs its text so the artist follows at exactly one
-				// gap on every row; the cap keeps a runaway title from eating
+				// Wide rows give the title a fixed column under the header;
+				// narrow rows hug the text so the artist follows at exactly
+				// one gap, with the cap keeping a runaway title from eating
 				// the artist. Slot-keyed like card clips: one stable scroll
 				// entry per visible row instead of one per absolute index.
 				if clay.UI_WithId(clay.ID("row_clip", u32(index - visible.first)))(
 				{
 					layout = {
-						sizing = {width = clay.SizingFit({max = title_max})},
+						sizing = {
+							width = columns ? clay.SizingPercent(0.5) : clay.SizingFit({max = title_max}),
+						},
 						childAlignment = {y = .Center},
 					},
 					clip = {horizontal = true},
