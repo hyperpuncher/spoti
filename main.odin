@@ -499,6 +499,8 @@ main :: proc() {
 	scrollbar_drag: Scrollbar_Drag
 	detail_scroll_target: f32
 	detail_scroll_armed := false
+	last_detail_uri := ""
+	defer delete(last_detail_uri)
 	autoscroll_container := ""
 	autoscroll_anchor := sdl.FPoint{}
 	autoscroll_moving := false
@@ -1241,6 +1243,21 @@ main :: proc() {
 		fx := Button_Fx_Ctx {
 			anims      = &button_anims,
 			mouse_down = .LEFT in buttons,
+		}
+		// Fresh pages start at the top. Warm opens keep the scroll
+		// container alive across the switch, so without this the
+		// previous page's offset (and glide) would carry over and a
+		// long playlist would reopen at its bottom skeleton tail.
+		current_detail_uri := detail_card_uri(library_client.detail)
+		if current_detail_uri != last_detail_uri {
+			delete(last_detail_uri)
+			last_detail_uri = strings.clone(current_detail_uri)
+			if data := clay.GetScrollContainerData(clay.ID("detail_rows"));
+			   data.found && data.scrollPosition != nil {
+				data.scrollPosition.y = 0
+			}
+			detail_smooth.target = 0
+			detail_smooth.active = false
 		}
 		commands, visible := layout(
 			view,
