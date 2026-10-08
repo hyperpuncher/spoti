@@ -56,6 +56,15 @@ scroll_items :: proc(
 			height = scroll.scrollContainerDimensions.height
 		}
 	}
+	// Sections share one scroll container and each sees the viewport at its
+	// own leading offset. A section wholly outside the viewport renders no
+	// cards but keeps its full height as spacers: clamping its offset to
+	// zero instead would draw a full viewport of off-screen cards and
+	// overflow Clay's fixed 100-entry scroll container array.
+	if count > 0 && columns > 0 && stride > 0 {
+		section := f32((count + columns - 1) / columns) * stride
+		if offset + height <= 0 || offset >= section {return {after = section}}
+	}
 	return visible_items(count, columns, stride, offset, height)
 }
 

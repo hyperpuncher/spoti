@@ -66,6 +66,14 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 	}
 	client.detail.albums.total = 3000
 	client.detail.albums.has_more = true
+	client.detail.singles.items = make([dynamic]library.Entry, 3000)
+	defer delete(client.detail.singles.items)
+	for &release in client.detail.singles.items {
+		release.name = "Single"
+		release.subtitle = "2026"
+	}
+	client.detail.singles.total = 3000
+	client.detail.singles.has_more = true
 	textures := Textures {
 		by_key = make(map[u64]^sdl.Texture),
 	}
@@ -230,11 +238,113 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						)
 						if fraction == 1 {testing.expect_value(t, visible.tracks.last, 3000)}
 					} else if fraction == 1 {
-						testing.expect_value(t, visible.releases.last, 3000)
+						testing.expect_value(t, visible.singles.last, 3000)
 					}
 				}
 			}
 		}
+	}
+}
+
+@(test)
+artist_sections_skip_off_screen_cards :: proc(t: ^testing.T) {
+	memory := make([]u8, int(clay.MinMemorySize()))
+	defer delete(memory)
+	errors := 0
+	clay.Initialize(
+		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
+		{1920, 1080},
+		{handler = layout_test_error, userData = &errors},
+	)
+	defer clay.SetCurrentContext(nil)
+	density: f32 = 1
+	clay.SetMeasureTextFunction(layout_test_measure, &density)
+
+	client: library.Client
+	client.detail.ready = true
+	client.detail.source = .Artist
+	client.detail.id = "artist"
+	client.detail.name = "Artist"
+	client.detail.label = "Artist"
+	client.detail.rows = make([dynamic]library.Track_Row, 10)
+	defer delete(client.detail.rows)
+	for &row in client.detail.rows {
+		row.name = "Top track"
+		row.artists = "Artist"
+		row.duration_ms = 180_000
+	}
+	client.detail.albums.items = make([dynamic]library.Entry, 2000)
+	defer delete(client.detail.albums.items)
+	for &entry in client.detail.albums.items {
+		entry.name = "Album title"
+		entry.subtitle = "2026"
+	}
+	client.detail.albums.total = 2000
+	client.detail.albums.has_more = true
+	client.detail.singles.items = make([dynamic]library.Entry, 2000)
+	defer delete(client.detail.singles.items)
+	for &entry in client.detail.singles.items {
+		entry.name = "Single title"
+		entry.subtitle = "2026"
+	}
+	client.detail.singles.total = 2000
+	client.detail.singles.has_more = true
+	textures := Textures {
+		by_key = make(map[u64]^sdl.Texture),
+	}
+	defer {
+		delete(textures.by_key)
+		delete(textures.requested)
+	}
+	app_state: State
+	anims := make(map[string]Button_Fx)
+	defer delete(anims)
+	fx := Button_Fx_Ctx {
+		anims = &anims,
+	}
+	for _ in 0 ..< 2 {
+		clay.UpdateScrollContainers(false, {}, 0)
+		_, _ = layout(
+			{button = "pause"},
+			&client,
+			&app_state,
+			.Albums,
+			&textures,
+			&fx,
+			SIDEBAR_MAX,
+			1920,
+			1080,
+			26,
+			0,
+			1,
+			nil,
+		)
+	}
+	for fraction in ([]f32{0, 0.5, 1}) {
+		clay.UpdateScrollContainers(false, {}, 0)
+		scroll := clay.GetScrollContainerData(clay.ID("detail_rows"))
+		scroll.scrollPosition.y =
+			fraction *
+			min(0, scroll.scrollContainerDimensions.height - scroll.contentDimensions.height)
+		_, _ = layout(
+			{button = "pause"},
+			&client,
+			&app_state,
+			.Albums,
+			&textures,
+			&fx,
+			SIDEBAR_MAX,
+			1920,
+			1080,
+			26,
+			0,
+			1,
+			nil,
+		)
+		// Clay prunes its 100-entry scroll container array each frame, so a
+		// single frame may hold at most that many clips. Off-screen sections
+		// must render no cards instead of a full viewport each.
+		testing.expect_value(t, errors, 0)
 	}
 }
 
