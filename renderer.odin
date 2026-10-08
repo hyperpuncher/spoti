@@ -136,7 +136,7 @@ measure_text :: proc "c" (
 	font := ui.font_for_size(state, f32(config.fontSize) * ui.scale(state), config.fontId)
 	if font == nil {return {}}
 	width, height: c.int
-	_ = ttf.GetStringSize(font, cstring(text.chars), uint(text.length), &width, &height)
+	_ = ttf.GetStringSize(font, text.chars, uint(text.length), &width, &height)
 	return {f32(width), f32(height)}
 }
 

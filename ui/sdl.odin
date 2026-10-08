@@ -408,13 +408,7 @@ frame_done :: proc(state: ^State) {
 	font := font_for_size(state, 14 * density, 1)
 	label_width, label_height: c.int
 	if font != nil &&
-	   ttf.GetStringSize(
-		   font,
-		   cstring(raw_data(label)),
-		   uint(len(label)),
-		   &label_width,
-		   &label_height,
-	   ) {
+	   ttf.GetStringSize(font, raw_data(label), uint(len(label)), &label_width, &label_height) {
 		text(
 			state,
 			label,

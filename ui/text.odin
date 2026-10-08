@@ -7,14 +7,14 @@ import ttf "vendor:sdl3/ttf"
 cached_text :: proc(state: ^State, font: ^ttf.Font, value: string) -> ^ttf.Text {
 	content: ^ttf.Text
 	if state.text_count == len(state.texts) {
-		content = ttf.CreateText(state.text_engine, font, cstring(raw_data(value)), len(value))
+		content = ttf.CreateText(state.text_engine, font, raw_data(value), len(value))
 		if content == nil {return nil}
 		append(&state.texts, content)
 	} else {
 		content = state.texts[state.text_count]
 		if ttf.GetTextFont(content) != font && !ttf.SetTextFont(content, font) {return nil}
 		if string(cstring(content.text)) != value &&
-		   !ttf.SetTextString(content, cstring(raw_data(value)), len(value)) {return nil}
+		   !ttf.SetTextString(content, raw_data(value), len(value)) {return nil}
 	}
 	state.text_count += 1
 	return content
