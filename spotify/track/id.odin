@@ -1,6 +1,5 @@
 package track
 
-import "core:fmt"
 import "core:strings"
 
 // Spotify track IDs are 22 base-62 digits encoding a 128-bit identifier.
@@ -32,12 +31,6 @@ parse_id :: proc(input: string) -> (raw: [16]u8, ok: bool) {
 	}
 	for i in 0 ..< 16 {raw[i] = u8(value >> u128(8 * (15 - i)))}
 	return raw, true
-}
-
-hex_id :: proc(id: [16]u8) -> string {
-	value: u128
-	for b in id {value = value << 8 | u128(b)}
-	return fmt.aprintf("%032x", value)
 }
 
 BASE62_ALPHABET :: "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"

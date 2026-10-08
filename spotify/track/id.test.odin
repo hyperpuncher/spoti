@@ -32,9 +32,6 @@ spotify_link_decodes_to_binary_id :: proc(t: ^testing.T) {
 	for input in cases {
 		got, ok := parse_id(input)
 		testing.expect(t, ok && slice.equal(got[:], expected[:]))
-		hex := hex_id(got)
-		testing.expect(t, hex == "3e28fa7f7e454a1d9fedb9d1d5d4e254")
-		delete(hex)
 	}
 	_, ok := parse_id("spotify:track:zzzzzzzzzzzzzzzzzzzzzz") // overflows u128
 	testing.expect(t, !ok)

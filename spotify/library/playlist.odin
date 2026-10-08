@@ -181,11 +181,7 @@ playlist_metadata_request :: proc(uris: []string) -> [dynamic]u8 {
 	for uri in uris {
 		if _, supported := playlist_track_id(uri); !supported || uri in asked {continue}
 		asked[uri] = true
-		entity := make([dynamic]u8)
-		ap.put_bytes(&entity, 1, transmute([]u8)uri)
-		ap.put_bytes(&entity, 2, []u8{0x08, 10}) // ExtensionQuery: TRACK_V4
-		ap.put_bytes(&request, 2, entity[:])
-		delete(entity)
+		ap.extension_request(&request, uri, ap.TRACK_V4)
 	}
 	return request
 }
@@ -193,14 +189,6 @@ playlist_metadata_request :: proc(uris: []string) -> [dynamic]u8 {
 Playlist_Answer :: struct {
 	seen: bool,
 	row:  Track_Row,
-}
-
-// Both extension arrays and entities place their status in header field 1.
-extension_proto_status :: proc(body: []u8) -> (code: u64, ok: bool) {
-	header, _, valid := ap.get_bytes(body, 1)
-	if !valid {return}
-	code, _, ok = ap.get_number(header, 1)
-	return
 }
 
 parse_playlist_metadata :: proc(
@@ -224,7 +212,7 @@ parse_playlist_metadata :: proc(
 		kind, _, kind_valid := ap.get_number(array, 2)
 		if !kind_valid {return}
 		if kind != 10 {continue}
-		provider, provider_valid := extension_proto_status(array)
+		provider, provider_valid := ap.extension_status(array)
 		if !provider_valid || provider != 0 && provider != 200 {return}
 		cursor := 0
 		for cursor < len(array) {
@@ -237,7 +225,7 @@ parse_playlist_metadata :: proc(
 			uri := string(uri_bytes)
 			answer, requested := &answers[uri]
 			if !requested || answer.seen {return}
-			code, status_valid := extension_proto_status(entity)
+			code, status_valid := ap.extension_status(entity)
 			if !status_valid {return}
 			answer.seen = true
 			if code == 404 || code == 451 {continue} 	// unavailable tracks are not playable

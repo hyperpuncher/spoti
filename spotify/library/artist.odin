@@ -19,7 +19,6 @@ ARTIST_V4 :: 8
 TOP_TRACKS_MAX :: 10
 ARTIST_METADATA_LIMIT :: 2 * 1024 * 1024
 ARTIST_METADATA_INVALID :: -4
-EXTENDED_METADATA_ADDRESS :: "https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata"
 
 // BatchedEntityRequest for one artist, asking only for ARTIST_V4.
 artist_metadata_request :: proc(uri: string) -> [dynamic]u8 {
@@ -76,7 +75,7 @@ fetch_artist_top_tracks :: proc(
 	defer delete(request)
 	if len(request) == 0 {return {}, 200, true}
 	metadata, metadata_status, received := http.post_protobuf(
-		EXTENDED_METADATA_ADDRESS,
+		ap.EXTENDED_METADATA_ADDRESS,
 		request[:],
 		{bearer = access, limit = ARTIST_METADATA_LIMIT},
 		reuse,
@@ -139,7 +138,7 @@ fetch_artist_body :: proc(
 	request := artist_metadata_request(uri)
 	defer delete(request)
 	body, status, ok = http.post_protobuf(
-		EXTENDED_METADATA_ADDRESS,
+		ap.EXTENDED_METADATA_ADDRESS,
 		request[:],
 		{bearer = access, limit = ARTIST_METADATA_LIMIT},
 		reuse,
@@ -158,47 +157,10 @@ parse_artist_top_uris :: proc(
 	uris: []string,
 	ok: bool,
 ) {
-	artist, found, valid := artist_extension_message(body)
+	artist, found, valid := ap.extension_message(body, ARTIST_V4)
 	if !valid {return nil, false}
 	if !found {return nil, true}
 	return parse_artist_top_message(artist, country, allocator)
-}
-
-// Walk the BatchedExtensionResponse down to the artist message: extension
-// array field 2, kind field 2, entity data field 3, Any payload field 2.
-artist_extension_message :: proc(body: []u8) -> (message: []u8, found, valid: bool) {
-	pos := 0
-	for pos < len(body) {
-		field, wire, array, _, array_valid := ap.next_field(body, &pos)
-		if !array_valid {return nil, false, false}
-		if field != 2 {continue}
-		if wire != 2 {return nil, false, false}
-		kind, _, kind_valid := ap.get_number(array, 2)
-		if !kind_valid {return nil, false, false}
-		if kind != ARTIST_V4 {continue}
-		provider, provider_valid := extension_proto_status(array)
-		if !provider_valid {return nil, false, false}
-		if provider != 0 && provider != 200 {return nil, false, false}
-		cursor := 0
-		for cursor < len(array) {
-			entity_field, entity_wire, entity, _, entity_valid := ap.next_field(array, &cursor)
-			if !entity_valid {return nil, false, false}
-			if entity_field != 3 {continue}
-			if entity_wire != 2 {return nil, false, false}
-			code, status_valid := extension_proto_status(entity)
-			if !status_valid {return nil, false, false}
-			if code == 404 || code == 451 {return nil, false, true}
-			if code != 0 && code != 200 {return nil, false, false}
-			any, has_data, data_valid := ap.get_bytes(entity, 3)
-			if !data_valid {return nil, false, false}
-			if !has_data {return nil, false, true}
-			metadata, has_payload, payload_valid := ap.get_bytes(any, 2)
-			if !payload_valid {return nil, false, false}
-			if !has_payload {return nil, false, true}
-			return metadata, true, true
-		}
-	}
-	return nil, false, true
 }
 
 // Pick one top_track block, then collect its track ids. The account country

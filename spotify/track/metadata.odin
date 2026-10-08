@@ -2,6 +2,9 @@ package track
 
 import ap "../ap"
 
+// Decodable Spotify audio formats. metadata.proto AudioFile.Format. The MP3,
+// AAC, XHE-AAC, MP4 and FLAC values are deliberately absent: the streaming
+// decoder only handles Vorbis, which is what the service serves.
 Audio_Format :: enum u64 {
 	Vorbis_96  = 0,
 	Vorbis_160 = 1,
@@ -15,14 +18,94 @@ Metadata :: struct {
 	duration_ms: int,
 }
 
-// metadata.proto Track. Prefer the highest available Vorbis bitrate (320,
-// then 160, then 96). Never use preview files or select a codec we cannot
-// decode. Lossless FLAC is not supported by the current streaming decoder.
-parse_metadata :: proc(message: []u8, expected_id: [16]u8) -> (track: Metadata, ok: bool) {
+// Quality ranking, best first. Zero marks a format this client cannot decode,
+// so it is never selected.
+format_rank :: proc(format: u64) -> int {
+	switch format {
+	case 2:
+		return 3 // OGG_VORBIS_320
+	case 1:
+		return 2 // OGG_VORBIS_160
+	case 0:
+		return 1 // OGG_VORBIS_96
+	}
+	return 0
+}
+
+// Keep the best ranked file of an AudioFile message seen so far.
+select_file :: proc(bytes: []u8, track: ^Metadata, best: ^int) {
+	file_id, found, file_valid := ap.get_bytes(bytes, 1)
+	if !found || !file_valid || len(file_id) != 20 {return}
+	format: u64
+	format, found, file_valid = ap.get_number(bytes, 2)
+	if !found || !file_valid {return}
+	rank := format_rank(format)
+	if rank <= best^ {return}
+	copy(track.file_id[:], file_id)
+	track.format = Audio_Format(format)
+	best^ = rank
+}
+
+// Diagnostic for a rejected Track message. Reports which identifying fields
+// were present and every audio-file format, including alternatives. Format
+// numbers are codec IDs, never track or file identifiers.
+Metadata_Diagnosis :: struct {
+	gid, name, duration: bool,
+	entries:             int,
+	alternatives:        int,
+	fields:              [dynamic]u64,
+	formats:             [dynamic]u64,
+}
+
+diagnose_metadata :: proc(message: []u8) -> Metadata_Diagnosis {
+	pos := 0
+	diagnosis: Metadata_Diagnosis
+	for pos < len(message) {
+		field, wire, bytes, _, valid := ap.next_field(message, &pos)
+		if !valid {break}
+		append(&diagnosis.fields, field)
+		switch field {
+		case 1:
+			diagnosis.gid = true
+		case 2:
+			diagnosis.name = true
+		case 7:
+			diagnosis.duration = true
+		case 12:
+			if wire == 2 {diagnosis_file(bytes, &diagnosis)}
+		case 13:
+			if wire != 2 {continue}
+			diagnosis.alternatives += 1
+			cursor := 0
+			for cursor < len(bytes) {
+				alt_field, alt_wire, alt, _, alt_valid := ap.next_field(bytes, &cursor)
+				if !alt_valid {break}
+				if alt_field == 12 && alt_wire == 2 {diagnosis_file(alt, &diagnosis)}
+			}
+		}
+	}
+	return diagnosis
+}
+
+diagnosis_file :: proc(bytes: []u8, diagnosis: ^Metadata_Diagnosis) {
+	diagnosis.entries += 1
+	if format, found, file_valid := ap.get_number(bytes, 2); found && file_valid {
+		append(&diagnosis.formats, format)
+	}
+}
+
+// metadata.proto Track from the private metadata service. Identity is
+// required; a file is optional because the dedicated AUDIO_FILES extension
+// carries it for tracks the Track message leaves without a file list. A
+// relinked recording has no files on the primary Track and carries them on
+// an alternative, so those are consulted only when the primary has none.
+parse_track :: proc(message: []u8, expected_id: [16]u8) -> (track: Metadata, ok: bool) {
 	pos := 0
 	gid: []u8
 	seen_name, seen_duration := false, false
-	best := -1
+	best := 0
+	alternatives: [dynamic][]u8
+	defer delete(alternatives)
 	for pos < len(message) {
 		field, wire, bytes, number, valid := ap.next_field(message, &pos)
 		if !valid {return {}, false}
@@ -41,20 +124,42 @@ parse_metadata :: proc(message: []u8, expected_id: [16]u8) -> (track: Metadata, 
 			track.duration_ms, seen_duration = int(number >> 1), true
 		case 12:
 			if wire != 2 {return {}, false}
-			file_id, found, file_valid := ap.get_bytes(bytes, 1)
-			if !found || !file_valid || len(file_id) != 20 {continue}
-			format: u64
-			format, found, file_valid = ap.get_number(bytes, 2)
-			if !found || !file_valid || format > 2 {continue}
-			preference := format == 2 ? 3 : format == 1 ? 2 : 1
-			if preference > best {
-				copy(track.file_id[:], file_id)
-				track.format = Audio_Format(format)
-				best = preference
-			}
+			select_file(bytes, &track, &best)
+		case 13:
+			if wire != 2 {return {}, false}
+			append(&alternatives, bytes)
 		}
 	}
-	if len(gid) != len(expected_id) || best < 0 || !seen_name || !seen_duration {return {}, false}
+	if len(gid) != len(expected_id) || !seen_name || !seen_duration {return {}, false}
 	for i in 0 ..< 16 {if gid[i] != expected_id[i] {return {}, false}}
+	if best == 0 {
+		for alternative in alternatives {
+			cursor := 0
+			for cursor < len(alternative) {
+				field, wire, bytes, _, valid := ap.next_field(alternative, &cursor)
+				if !valid {return {}, false}
+				if field == 12 && wire == 2 {select_file(bytes, &track, &best)}
+			}
+			if best > 0 {break}
+		}
+	}
 	return track, true
+}
+
+// AudioFilesExtensionResponse: repeated ExtendedAudioFile.files (field 1),
+// each wrapping an AudioFile (field 1). The dedicated file list, present even
+// when the Track message has no files.
+parse_audio_files :: proc(message: []u8, track: ^Metadata) -> bool {
+	best := 0
+	if track.file_id != {} {best = format_rank(u64(track.format))}
+	pos := 0
+	for pos < len(message) {
+		field, wire, bytes, _, valid := ap.next_field(message, &pos)
+		if !valid {return track.file_id != {}}
+		if field != 1 || wire != 2 {continue}
+		file, found, file_valid := ap.get_bytes(bytes, 1)
+		if !found || !file_valid {continue}
+		select_file(file, track, &best)
+	}
+	return track.file_id != {}
 }

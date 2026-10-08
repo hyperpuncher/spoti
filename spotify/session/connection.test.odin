@@ -46,34 +46,12 @@ test_send_packet :: proc(
 	testing.expect(t, ap.send_full(socket, wire[:]))
 }
 
-test_source_reply :: proc(
+test_audio_key_reply :: proc(
 	t: ^testing.T,
 	server: net.TCP_Socket,
 	sender: ^ap.Packet_Cipher,
-	id: [16]u8,
 	sequence: int,
 ) {
-	file_id: [20]u8
-	for &byte in file_id {byte = u8(sequence + 2)}
-	file: [dynamic]u8
-	defer delete(file)
-	ap.put_bytes(&file, 1, file_id[:])
-	ap.put_number(&file, 2, 2)
-	metadata: [dynamic]u8
-	defer delete(metadata)
-	id := id
-	ap.put_bytes(&metadata, 1, id[:])
-	ap.put_bytes(&metadata, 2, []u8{'t', 'r', 'a', 'c', 'k'})
-	ap.put_number(&metadata, 7, 400000)
-	ap.put_bytes(&metadata, 12, file[:])
-	reply := make([dynamic]u8)
-	defer delete(reply)
-	append(&reply, 0, 8)
-	for shift := 7; shift >= 0; shift -= 1 {append(&reply, u8(u64(sequence) >> u64(shift * 8)))}
-	append(&reply, 1, 0, 2, 0, 3, 0x20, 0x90, 0x03)
-	append(&reply, u8(len(metadata) >> 8), u8(len(metadata)))
-	append(&reply, ..metadata[:])
-	test_send_packet(t, server, sender, 0xb2, reply[:])
 	audio_key: [20]u8
 	audio_key[3] = u8(sequence)
 	for &byte in audio_key[4:] {byte = u8(sequence + 10)}
@@ -81,7 +59,9 @@ test_source_reply :: proc(
 }
 
 @(test)
-shared_ap_transport_resolves_two_tracks_without_resetting_cipher_nonces :: proc(t: ^testing.T) {
+shared_ap_transport_requests_two_audio_keys_without_resetting_cipher_nonces :: proc(
+	t: ^testing.T,
+) {
 	c, server, connected := test_connection(t)
 	if !connected {return}
 	defer close_connection(&c)
@@ -89,35 +69,23 @@ shared_ap_transport_resolves_two_tracks_without_resetting_cipher_nonces :: proc(
 	key: [32]u8 = 7
 	sender, receiver := ap.packet_cipher(key[:]), ap.packet_cipher(key[:])
 	id: [16]u8 = 1
+	file_id: [20]u8 = 2
 	test_send_packet(t, server, &sender, 0x04, []u8{0, 0, 0, 0})
-	for sequence in 0 ..< 2 {test_source_reply(t, server, &sender, id, sequence)}
+	for sequence in 0 ..< 2 {test_audio_key_reply(t, server, &sender, sequence)}
 	for sequence in 0 ..< 2 {
-		source, ok := fetch_ap_source(&c, id, nil)
-		defer close_source(&source)
+		audio_key, ok := fetch_audio_key(&c, "", id, file_id, nil)
 		if !testing.expect(t, ok) {return}
-		testing.expect_value(t, source.name, "track")
-		testing.expect_value(t, source.file_id[0], u8(sequence + 2))
-		testing.expect_value(t, source.key[0], u8(sequence + 10))
-		testing.expect_value(t, source.duration_ms, 200000)
+		testing.expect_value(t, audio_key[0], u8(sequence + 10))
 		command, request, received := ap.read_packet(server, &receiver)
 		defer delete(request)
 		testing.expect(
 			t,
-			received && command == 0xb2 && len(request) >= 10 && request[9] == u8(sequence),
-		)
-		key_command, request_key, received_key := ap.read_packet(server, &receiver)
-		defer delete(request_key)
-		testing.expect(
-			t,
-			received_key &&
-			key_command == 0x0c &&
-			len(request_key) == 42 &&
-			request_key[39] == u8(sequence),
+			received && command == 0x0c && len(request) == 42 && request[39] == u8(sequence),
 		)
 	}
 	testing.expect_value(t, c.sequence, u32(2))
-	testing.expect_value(t, c.sender.nonce, u32(4))
-	testing.expect_value(t, c.receiver.nonce, u32(5))
+	testing.expect_value(t, c.sender.nonce, u32(2))
+	testing.expect_value(t, c.receiver.nonce, u32(3))
 	testing.expect(t, c.connected && !c.broken)
 }
 
@@ -240,21 +208,20 @@ broken_or_unauthenticated_packets_reconnect_once_and_retry_the_track :: proc(t: 
 			work.accepted = true
 			key: [32]u8 = 7
 			sender, receiver := ap.packet_cipher(key[:]), ap.packet_cipher(key[:])
-			id: [16]u8 = 1
-			test_source_reply(work.t, server, &sender, id, 0)
-			for _ in 0 ..< 2 {
-				_, bytes, received := ap.read_packet(server, &receiver)
-				defer delete(bytes)
-				if !received {return}
-			}
+			test_audio_key_reply(work.t, server, &sender, 0)
+			_, bytes, received := ap.read_packet(server, &receiver)
+			defer delete(bytes)
+			_ = received
 		})
 		if !testing.expect(t, worker != nil) {return}
 		defer {thread.join(worker); thread.destroy(worker)}
 		id: [16]u8 = 1
-		source, ok := resolve_ap_connection(
+		file_id: [20]u8 = 2
+		audio_key, ok := fetch_audio_key(
 			&c,
 			address,
 			id,
+			file_id,
 			nil,
 			proc(c: ^AP_Connection, address: string, cancel: ^bool) -> bool {
 				if cancelled(cancel) {return false}
@@ -272,8 +239,7 @@ broken_or_unauthenticated_packets_reconnect_once_and_retry_the_track :: proc(t: 
 				return true
 			},
 		)
-		defer close_source(&source)
-		testing.expect(t, ok && source.name == "track" && source.key[0] == 10)
+		testing.expect(t, ok && audio_key[0] == 10)
 		testing.expect(t, c.connected && c.sequence == 1)
 	}
 }
