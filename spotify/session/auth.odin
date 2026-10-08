@@ -33,6 +33,7 @@ authorize :: proc(
 	cancel: ^bool = nil,
 	refresh_token: string = "",
 	force: bool = false,
+	interactive: bool = true,
 ) -> (
 	tokens: oauth.Tokens,
 	ok: bool,
@@ -78,6 +79,9 @@ authorize :: proc(
 		}
 	}
 	if cancel != nil && sync.atomic_load(cancel) {return}
+	// A stored grant that would not refresh must not open a browser here;
+	// callers that need the user present pass the default interactive=true.
+	if !interactive {return}
 	listener, ready := oauth.listen()
 	if !ready {fmt.eprintln("cannot listen on 127.0.0.1:8898 (is another player using it?)"); return}
 	defer net.close(listener)

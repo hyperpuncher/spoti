@@ -31,6 +31,16 @@ connection: AP_Connection
 connection_mutex: sync.Mutex
 connection_worker: ^thread.Thread
 connection_stop: bool
+// Account country from the AP CountryCode packet. Best effort: it arrives
+// only once a playback connection exists, and an empty value just means the
+// caller falls back to the worldwide list. Two bytes, so no lock is taken.
+connection_country: [2]u8
+connection_country_ready: bool
+
+cached_country :: proc() -> string {
+	if !connection_country_ready {return ""}
+	return string(connection_country[:])
+}
 
 cancelled :: proc(cancel: ^bool) -> bool {
 	return cancel != nil && sync.atomic_load(cancel)
@@ -79,8 +89,19 @@ service_keep_alive :: proc(c: ^AP_Connection) -> bool {
 	return true
 }
 
-handle_keep_alive :: proc(c: ^AP_Connection, command: u8) -> bool {
+handle_keep_alive :: proc(c: ^AP_Connection, command: u8, payload: []u8) -> bool {
 	switch command {
+	case 0x1b:
+		// CountryCode: two uppercase letters, echoed as raw bytes.
+		if len(payload) >= 2 &&
+		   payload[0] >= 'A' &&
+		   payload[0] <= 'Z' &&
+		   payload[1] >= 'A' &&
+		   payload[1] <= 'Z' {
+			connection_country = {payload[0], payload[1]}
+			connection_country_ready = true
+		}
+		return true
 	case 0x04:
 		c.keep_alive = .Pong
 		c.deadline = time.tick_add(time.tick_now(), 60 * time.Second)
@@ -104,7 +125,7 @@ poll_connection :: proc(c: ^AP_Connection, stop: ^bool) {
 		if ready > 0 {
 			command, payload, ok := ap.read_packet(c.socket, &c.receiver, stop)
 			defer {crypto.zero_explicit(raw_data(payload), len(payload)); delete(payload)}
-			if !ok {c.broken = true} else {_ = handle_keep_alive(c, command)}
+			if !ok {c.broken = true} else {_ = handle_keep_alive(c, command, payload)}
 		}
 	}
 	if c.broken {close_connection(c)}
@@ -171,7 +192,7 @@ read_connection_reply :: proc(c: ^AP_Connection, cancel: ^bool) -> (u8, []u8, bo
 		if cancelled(cancel) || !service_keep_alive(c) {return 0, nil, false}
 		command, payload, ok := ap.read_packet(c.socket, &c.receiver, cancel)
 		if !ok {c.broken = true; return 0, nil, false}
-		if !handle_keep_alive(c, command) {return command, payload, true}
+		if !handle_keep_alive(c, command, payload) {return command, payload, true}
 		crypto.zero_explicit(raw_data(payload), len(payload))
 		delete(payload)
 	}

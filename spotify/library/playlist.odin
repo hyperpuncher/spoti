@@ -196,7 +196,7 @@ Playlist_Answer :: struct {
 }
 
 // Both extension arrays and entities place their status in header field 1.
-playlist_proto_status :: proc(body: []u8) -> (code: u64, ok: bool) {
+extension_proto_status :: proc(body: []u8) -> (code: u64, ok: bool) {
 	header, _, valid := ap.get_bytes(body, 1)
 	if !valid {return}
 	code, _, ok = ap.get_number(header, 1)
@@ -224,7 +224,7 @@ parse_playlist_metadata :: proc(
 		kind, _, kind_valid := ap.get_number(array, 2)
 		if !kind_valid {return}
 		if kind != 10 {continue}
-		provider, provider_valid := playlist_proto_status(array)
+		provider, provider_valid := extension_proto_status(array)
 		if !provider_valid || provider != 0 && provider != 200 {return}
 		cursor := 0
 		for cursor < len(array) {
@@ -237,7 +237,7 @@ parse_playlist_metadata :: proc(
 			uri := string(uri_bytes)
 			answer, requested := &answers[uri]
 			if !requested || answer.seen {return}
-			code, status_valid := playlist_proto_status(entity)
+			code, status_valid := extension_proto_status(entity)
 			if !status_valid {return}
 			answer.seen = true
 			if code == 404 || code == 451 {continue} 	// unavailable tracks are not playable

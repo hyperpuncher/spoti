@@ -292,6 +292,18 @@ handle :: proc(
 				detail.rows_error = rows_status != 0 ? rows_status : -1
 			}
 		}
+		// Popular rides the open, so hero play, row clicks and the footer
+		// queue all read the same rows. A miss just hides the section.
+		if ok && request.source == .Artist {
+			top, _, top_ok := read_artist_top_tracks(
+				client,
+				streaming,
+				request.id,
+				virtual.arena_allocator(&detail.arena),
+				reuse,
+			)
+			if top_ok {detail.rows = top}
+		}
 		if ok {
 			detail.liked = request.saved
 			if !request.saved && time.since(client.saved_at) >= 0 {

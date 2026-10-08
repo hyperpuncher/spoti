@@ -508,6 +508,168 @@ loading_track_table :: proc(d: f32) {
 // header-aligned columns.
 ROW_COLUMN_BREAK :: 600
 
+// One track row: number or playing bars, pre-shortened title, linked
+// artists and duration. Shared by track tables and Popular.
+track_list_row :: proc(
+	row: ^library.Track_Row,
+	index: int,
+	slot: u32,
+	view: View,
+	ui_state: ^ui.State,
+	columns: bool,
+	row_text, title_max, column_box: f32,
+	d: f32,
+) {
+	// Each line is pre-shortened to its box: clay clips pixels but
+	// never draws an ellipsis itself. With no fonts (layout tests)
+	// everything below is the identity.
+	title_box := column_box
+	if !columns {
+		title_box = min(hero_text_width(ui_state, row.name, 15, 3), title_max)
+	}
+	title_text := hero_fit_text(ui_state, row.name, title_box, 15, 3, 1, context.temp_allocator)
+	// Boundary-fitted segments: whole artists that fit, then an
+	// ellipsis. A first artist that alone overflows truncates with
+	// one like before. Sources that omit URIs render plain text.
+	artist_box := max(0, row_text - title_box)
+	comma_w := hero_text_width(ui_state, ", ", 14, 0)
+	hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
+	if clay.UI_WithId(clay.ID("track_row", u32(index)))(
+	{
+		layout = {
+			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(44 * d)},
+			padding = {left = u16(12 * d), right = u16(92 * d)},
+			childAlignment = {y = .Center},
+			childGap = u16(18 * d),
+		},
+		backgroundColor = hovered ? HOVER : clay.Color{},
+		cornerRadius = clay.CornerRadiusAll(4 * d),
+	},
+	) {
+		current := row.uri == view.current_uri && view.button != "play"
+		if current {
+			playing_bars(view.playing, d)
+		} else if clay.UI()(
+		{layout = {sizing = {width = clay.SizingFixed(24 * d)}, childAlignment = {x = .Right}}},
+		) {
+			clay.Text(
+				fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
+				clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
+			)
+		}
+		// Wide rows give the title a fixed column under the header;
+		// narrow rows hug the text so the artist follows at exactly
+		// one gap, with the cap keeping a runaway title from eating
+		// the artist. Slot-keyed like card clips: one stable scroll
+		// entry per visible row instead of one per absolute index.
+		if clay.UI_WithId(clay.ID("row_clip", slot))(
+		{
+			layout = {
+				sizing = {
+					width = columns ? clay.SizingPercent(0.5) : clay.SizingFit({max = title_max}),
+				},
+				childAlignment = {y = .Center},
+			},
+			clip = {horizontal = true},
+		},
+		) {
+			clay.Text(
+				title_text,
+				clay.TextElementConfig {
+					fontId = 3,
+					fontSize = 15,
+					textColor = current ? GREEN : WHITE,
+					wrapMode = .None,
+				},
+			)
+		}
+		if clay.UI_WithId(clay.ID("artist_clip", slot))(
+		{
+			layout = {sizing = {width = clay.SizingGrow({})}, childAlignment = {y = .Center}},
+			clip = {horizontal = true},
+		},
+		) {
+			used := f32(0)
+			for ai in 0 ..< min(len(row.artist_links), 64) {
+				link := row.artist_links[ai]
+				linked := len(link.uri) > 0
+				separator := ai + 1 < len(row.artist_links) ? ", " : ""
+				need := hero_text_width(ui_state, link.name, 14, 0)
+				if separator != "" {need += comma_w}
+				if used + need > artist_box {
+					if ai == 0 {
+						fit := hero_fit_text(
+							ui_state,
+							link.name,
+							artist_box,
+							14,
+							0,
+							1,
+							context.temp_allocator,
+						)
+						artist_segment(slot, ai, fit, linked)
+					} else {
+						clay.Text(
+							"…",
+							clay.TextElementConfig {
+								fontSize = 14,
+								textColor = MUTED,
+								wrapMode = .None,
+							},
+						)
+					}
+					break
+				}
+				artist_segment(slot, ai, link.name, linked)
+				if separator != "" {
+					clay.Text(
+						separator,
+						clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
+					)
+				}
+				used += need
+			}
+		}
+		if clay.UI()(
+		{
+			layout = {
+				sizing = {width = clay.SizingFixed(56 * d)},
+				childAlignment = {x = .Right, y = .Center},
+			},
+			floating = {
+				offset = {-24 * d, 0},
+				zIndex = 1,
+				attachment = {element = .RightCenter, parent = .RightCenter},
+				pointerCaptureMode = .Passthrough,
+				attachTo = .Parent,
+				clipTo = .AttachedParent,
+			},
+		},
+		) {
+			clay.Text(
+				duration_text_alloc(row.duration_ms),
+				clay.TextElementConfig{fontId = 1, fontSize = 14, textColor = MUTED},
+			)
+		}
+	}
+}
+
+// Track-row text budgets for one container width: the flowing title cap,
+// the wide fixed column, the row gap and the wide/narrow switch.
+track_row_boxes :: proc(
+	available_width, d: f32,
+) -> (
+	row_text, title_max, column_box, gap: f32,
+	columns: bool,
+) {
+	row_text = max(0, available_width - (SCROLLBAR_OUTSET + 182) * d)
+	columns = row_text >= ROW_COLUMN_BREAK * d
+	title_max = row_text * 0.6
+	column_box = max(0, available_width - (SCROLLBAR_OUTSET + 158) * d) * 0.5
+	gap = f32(u16(2 * d))
+	return
+}
+
 track_table :: proc(
 	detail: ^library.Detail,
 	view: View,
@@ -581,11 +743,7 @@ track_table :: proc(
 		// Row padding (12/92), the number slot and the gaps come off the top.
 		// Wide rows columnate under the header labels; narrow rows flow with
 		// the title taking most of what is left and the artist the rest.
-		row_text := max(0, available_width - (SCROLLBAR_OUTSET + 182) * d)
-		columns := row_text >= ROW_COLUMN_BREAK * d
-		title_max := row_text * 0.6
-		column_box := max(0, available_width - (SCROLLBAR_OUTSET + 158) * d) * 0.5
-		gap := f32(u16(2 * d))
+		row_text, title_max, column_box, gap, columns := track_row_boxes(available_width, d)
 		visible = scroll_items(
 			"detail_rows",
 			detail_item_count(len(detail.rows), detail.total, detail.has_more),
@@ -602,158 +760,18 @@ track_table :: proc(
 			}
 			row := &detail.rows[index]
 			slot := u32(index - visible.first)
-			// Each line is pre-shortened to its box: clay clips pixels but
-			// never draws an ellipsis itself. With no fonts (layout tests)
-			// everything below is the identity.
-			title_box := column_box
-			if !columns {
-				title_box = min(hero_text_width(ui_state, row.name, 15, 3), title_max)
-			}
-			title_text := hero_fit_text(
+			track_list_row(
+				row,
+				index,
+				slot,
+				view,
 				ui_state,
-				row.name,
-				title_box,
-				15,
-				3,
-				1,
-				context.temp_allocator,
+				columns,
+				row_text,
+				title_max,
+				column_box,
+				d,
 			)
-			// Boundary-fitted segments: whole artists that fit, then an
-			// ellipsis. A first artist that alone overflows truncates with
-			// one like before. Sources that omit URIs render plain text.
-			artist_box := max(0, row_text - title_box)
-			comma_w := hero_text_width(ui_state, ", ", 14, 0)
-			hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
-			if clay.UI_WithId(clay.ID("track_row", u32(index)))(
-			{
-				layout = {
-					sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(44 * d)},
-					padding = {left = u16(12 * d), right = u16(92 * d)},
-					childAlignment = {y = .Center},
-					childGap = u16(18 * d),
-				},
-				backgroundColor = hovered ? HOVER : clay.Color{},
-				cornerRadius = clay.CornerRadiusAll(4 * d),
-			},
-			) {
-				current := row.uri == view.current_uri && view.button != "play"
-				if current {
-					playing_bars(view.playing, d)
-				} else if clay.UI()(
-				{
-					layout = {
-						sizing = {width = clay.SizingFixed(24 * d)},
-						childAlignment = {x = .Right},
-					},
-				},
-				) {
-					clay.Text(
-						fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
-						clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
-					)
-				}
-				// Wide rows give the title a fixed column under the header;
-				// narrow rows hug the text so the artist follows at exactly
-				// one gap, with the cap keeping a runaway title from eating
-				// the artist. Slot-keyed like card clips: one stable scroll
-				// entry per visible row instead of one per absolute index.
-				if clay.UI_WithId(clay.ID("row_clip", slot))(
-				{
-					layout = {
-						sizing = {
-							width = columns ? clay.SizingPercent(0.5) : clay.SizingFit({max = title_max}),
-						},
-						childAlignment = {y = .Center},
-					},
-					clip = {horizontal = true},
-				},
-				) {
-					clay.Text(
-						title_text,
-						clay.TextElementConfig {
-							fontId = 3,
-							fontSize = 15,
-							textColor = current ? GREEN : WHITE,
-							wrapMode = .None,
-						},
-					)
-				}
-				if clay.UI_WithId(clay.ID("artist_clip", slot))(
-				{
-					layout = {
-						sizing = {width = clay.SizingGrow({})},
-						childAlignment = {y = .Center},
-					},
-					clip = {horizontal = true},
-				},
-				) {
-					used := f32(0)
-					for ai in 0 ..< min(len(row.artist_links), 64) {
-						link := row.artist_links[ai]
-						linked := len(link.uri) > 0
-						separator := ai + 1 < len(row.artist_links) ? ", " : ""
-						need := hero_text_width(ui_state, link.name, 14, 0)
-						if separator != "" {need += comma_w}
-						if used + need > artist_box {
-							if ai == 0 {
-								fit := hero_fit_text(
-									ui_state,
-									link.name,
-									artist_box,
-									14,
-									0,
-									1,
-									context.temp_allocator,
-								)
-								artist_segment(slot, ai, fit, linked)
-							} else {
-								clay.Text(
-									"…",
-									clay.TextElementConfig {
-										fontSize = 14,
-										textColor = MUTED,
-										wrapMode = .None,
-									},
-								)
-							}
-							break
-						}
-						artist_segment(slot, ai, link.name, linked)
-						if separator != "" {
-							clay.Text(
-								separator,
-								clay.TextElementConfig {
-									fontSize = 14,
-									textColor = MUTED,
-									wrapMode = .None,
-								},
-							)
-						}
-						used += need
-					}
-				}
-				if clay.UI()(
-				{
-					layout = {
-						sizing = {width = clay.SizingFixed(56 * d)},
-						childAlignment = {x = .Right, y = .Center},
-					},
-					floating = {
-						offset = {-24 * d, 0},
-						zIndex = 1,
-						attachment = {element = .RightCenter, parent = .RightCenter},
-						pointerCaptureMode = .Passthrough,
-						attachTo = .Parent,
-						clipTo = .AttachedParent,
-					},
-				},
-				) {
-					clay.Text(
-						duration_text_alloc(row.duration_ms),
-						clay.TextElementConfig{fontId = 1, fontSize = 14, textColor = MUTED},
-					)
-				}
-			}
 		}
 		list_spacer(visible.after - gap)
 		scroll_fades(
@@ -774,8 +792,10 @@ track_table :: proc(
 
 artist_page :: proc(
 	detail: ^library.Detail,
+	view: View,
 	textures: ^Textures,
 	available_width, viewport_height, card_text_height, dt, d: f32,
+	ui_state: ^ui.State,
 	visible: ^Frame_Visible,
 ) {
 	if clay.UI_WithId(clay.ID("detail_rows"))(
@@ -795,6 +815,60 @@ artist_page :: proc(
 		row_height := card_row_height(card_width, card_text_height, d)
 		row_gap := f32(u16(8 * d))
 		leading: f32 = 0
+		// Popular keeps the track table's tighter row gap inside its own
+		// wrapper, so the container gap never enters the row stride.
+		if len(detail.rows) > 0 {
+			if clay.UI()(
+			{
+				layout = {
+					layoutDirection = .TopToBottom,
+					sizing = {width = clay.SizingGrow({})},
+					childGap = u16(2 * d),
+				},
+			},
+			) {
+				if clay.UI_WithId(clay.ID("popular_title"))({}) {
+					clay.Text("Popular", clay.TextElementConfig{fontSize = 22, textColor = WHITE})
+				}
+				row_text, title_max, column_box, track_gap, row_columns := track_row_boxes(
+					available_width,
+					d,
+				)
+				popular_leading :=
+					clay.GetElementData(clay.ID("popular_title")).boundingBox.height + track_gap
+				visible.tracks = scroll_items(
+					"detail_rows",
+					len(detail.rows),
+					1,
+					44 * d + track_gap,
+					viewport_height,
+					popular_leading,
+				)
+				list_spacer(visible.tracks.before - track_gap)
+				for index in visible.tracks.first ..< visible.tracks.last {
+					row := &detail.rows[index]
+					track_list_row(
+						row,
+						index,
+						u32(index - visible.tracks.first),
+						view,
+						ui_state,
+						row_columns,
+						row_text,
+						title_max,
+						column_box,
+						d,
+					)
+				}
+				list_spacer(visible.tracks.after - track_gap)
+				leading =
+					clay.GetElementData(clay.ID("popular_title")).boundingBox.height +
+					track_gap +
+					f32(len(detail.rows)) * 44 * d +
+					f32(max(len(detail.rows) - 1, 0)) * track_gap +
+					row_gap
+			}
+		}
 		leading = release_section(
 			&detail.albums,
 			"Albums",
@@ -1240,7 +1314,9 @@ detail_page :: proc(
 		},
 		) {
 			play_enabled := detail_play_enabled(client)
-			if detail.source != .Artist {
+			// Artists play their Popular tracks; the queue builds from
+			// the same rows as every other collection.
+			{
 				hero_scale, hero_over := button_fx(fx, "hero_play", play_enabled)
 				if clay.UI_WithId(clay.ID("hero_play"))(
 				{
@@ -1328,12 +1404,14 @@ detail_page :: proc(
 		} else if detail.source == .Artist {
 			artist_page(
 				detail,
+				view,
 				textures,
 				available_width,
 				viewport_height,
 				card_text_height,
 				dt,
 				d,
+				ui_state,
 				visible,
 			)
 		} else if detail.source == .Playlist && detail.rows_error != 0 {

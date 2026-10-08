@@ -8,14 +8,51 @@ import "core:sync"
 
 PLAYLIST_AUTH_REQUIRED :: -3
 
-authorize_session :: proc(client: ^Client, tokens: ^oauth.Tokens, force: bool = false) -> bool {
+// interactive=false never starts a browser sign-in; it only reuses a live or
+// stored streaming grant. Sections that ride along with a page use it so an
+// open never blocks on approval.
+authorize_session :: proc(
+	client: ^Client,
+	tokens: ^oauth.Tokens,
+	force: bool = false,
+	interactive: bool = true,
+) -> bool {
 	if sync.atomic_load(&client.cancel) {return false}
 	if !force && tokens.access != "" && !oauth.expired(tokens^) {return true}
-	fresh, ok := session.authorize(.Remember, &client.cancel, tokens.refresh, force)
+	fresh, ok := session.authorize(
+		.Remember,
+		&client.cancel,
+		tokens.refresh,
+		force,
+		interactive = interactive,
+	)
 	if !ok {return false}
 	oauth.wipe_tokens(tokens)
 	tokens^ = fresh
 	return !sync.atomic_load(&client.cancel)
+}
+
+// Artist top tracks, non-interactive: the section is optional, so it never
+// prompts and simply stays hidden when no streaming grant is at hand.
+read_artist_top_tracks :: proc(
+	client: ^Client,
+	tokens: ^oauth.Tokens,
+	id: string,
+	allocator: runtime.Allocator,
+	reuse: rawptr = nil,
+) -> (
+	rows: [dynamic]Track_Row,
+	status: int,
+	ok: bool,
+) {
+	if !authorize_session(client, tokens, interactive = false) {return nil, 0, false}
+	return fetch_artist_top_tracks(
+		tokens.access,
+		id,
+		allocator,
+		reuse,
+		country = session.cached_country(),
+	)
 }
 
 // Called only after the official playlist-items endpoint returns 403. Renew
