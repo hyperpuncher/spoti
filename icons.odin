@@ -41,6 +41,7 @@ ICON_NAMES :: []string {
 	"chevron-left",
 	"chevron-right",
 	"volume-2",
+	"speaker",
 	"music",
 	"chevrons-up-down",
 	"check",

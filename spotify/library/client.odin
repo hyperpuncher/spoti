@@ -38,6 +38,7 @@ Request_Kind :: enum {
 	Add_To_Playlist,
 	Remove_From_Playlist,
 	Devices,
+	Transfer,
 	Auth, // result-only: the worker could not sign in
 }
 
@@ -57,6 +58,8 @@ Request :: struct {
 	playlist_id:   string, // Add/Remove_From_Playlist; worker frees
 	playlist_name: string, // Add/Remove_From_Playlist; worker frees, echoed for the toast
 	track_uri:     string, // Add/Remove_From_Playlist; worker frees
+	device_id:     string, // Transfer; worker frees
+	play:          bool, // Transfer; start playback on the target
 }
 
 Result :: struct {
@@ -87,6 +90,7 @@ Result :: struct {
 	playlist_name: string, // Add/Remove_From_Playlist; receiver frees
 	track_uri:     string, // Remove_From_Playlist; receiver frees
 	devices:       [dynamic]Device, // Devices; receiver frees or adopts
+	device_id:     string, // Transfer; receiver frees
 }
 
 Cover_Request :: struct {
@@ -135,6 +139,9 @@ Client :: struct {
 	like_pending:          bool, // hero heart toggle in flight
 	me_id:                 string, // owned; the signed-in account id
 	devices:               [dynamic]Device, // owned; Connect devices
+	transfer_pending:      bool, // Connect transfer in flight
+	transfer_ok:           bool, // Connect transfer outcome for the toast
+	transfer_name:         string, // owned; transfer target for the toast
 	write_pending:         bool, // add or remove write in flight
 	write_ok:              bool, // last write result
 	write_name:            string, // owned; playlist name for the toast
@@ -177,6 +184,7 @@ free_request :: proc(request: Request) {
 	delete(request.playlist_id)
 	delete(request.playlist_name)
 	delete(request.track_uri)
+	delete(request.device_id)
 }
 
 // Sends a worker request; drops and frees it when the queue is full.
@@ -277,6 +285,11 @@ fail_request :: proc(client: ^Client, request: Request) {
 				track_uri = strings.clone(request.track_uri),
 				status = -1,
 			},
+		)
+	case .Transfer:
+		send(
+			client,
+			Result{kind = .Transfer, device_id = strings.clone(request.device_id), status = -1},
 		)
 	}
 }
@@ -459,6 +472,17 @@ handle :: proc(
 	case .Devices:
 		devices, status, ok := fetch_devices(tokens.access, reuse)
 		send(client, Result{kind = .Devices, devices = devices, status = status, ok = ok})
+	case .Transfer:
+		status, ok := transfer_playback(tokens.access, request.device_id, request.play, reuse)
+		send(
+			client,
+			Result {
+				kind = .Transfer,
+				device_id = strings.clone(request.device_id),
+				status = status,
+				ok = ok,
+			},
+		)
 	case .Add_To_Playlist, .Remove_From_Playlist:
 		removed := request.kind == .Remove_From_Playlist
 		uris := [?]string{request.track_uri}
@@ -523,6 +547,7 @@ free_result :: proc(result: Result) {
 	delete(local.id)
 	delete(local.me_id)
 	free_devices(local.devices)
+	delete(local.device_id)
 	delete(local.playlist_id)
 	delete(local.playlist_name)
 	delete(local.track_uri)
@@ -782,7 +807,29 @@ remove_track_from_playlist :: proc(
 	return true
 }
 
-// Queues a library membership flip for the hero heart. The worker answers
+// Queues a Connect playback transfer to one device. Play starts it
+// there when true, otherwise the current play state carries over. One
+// transfer at a time; a playlist write in flight also blocks it.
+transfer_to_device :: proc(client: ^Client, device_id: string, play: bool) -> bool {
+	if len(device_id) == 0 || client.write_pending || client.transfer_pending {return false}
+	request := Request {
+		kind      = .Transfer,
+		device_id = strings.clone(device_id),
+		play      = play,
+	}
+	queue_request(client, &request) or_return
+	client.transfer_pending = true
+	return true
+}
+
+// Display name of a known device for the transfer toast; empty when the
+// list no longer has it.
+transfer_device_name :: proc(client: ^Client, device_id: string) -> string {
+	for device in client.devices {
+		if device.id == device_id {return device.name}
+	}
+	return ""
+}
 // with a Like result that flips the detail and syncs the sidebar grids.
 toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) -> bool {
 	if len(id) == 0 {return false}
@@ -1269,6 +1316,17 @@ apply :: proc(client: ^Client, result: Result) {
 		free_devices(client.devices)
 		client.devices = local.devices
 		local.devices = nil
+	case .Transfer:
+		diagnostic.writef(
+			"library transfer status=%d ok=%v has_name=%v",
+			local.status,
+			local.ok,
+			len(transfer_device_name(client, local.device_id)) > 0,
+		)
+		client.transfer_pending = false
+		client.transfer_ok = local.ok
+		delete(client.transfer_name)
+		client.transfer_name = strings.clone(transfer_device_name(client, local.device_id))
 	case .Add_To_Playlist, .Remove_From_Playlist:
 		removed := local.kind == .Remove_From_Playlist
 		client.write_pending = false
@@ -1333,6 +1391,7 @@ stop :: proc(client: ^Client) {
 	delete(client.search_query)
 	delete(client.me_id)
 	free_devices(client.devices)
+	delete(client.transfer_name)
 	delete(client.write_name)
 	delete(client.stale_playlist)
 	for i in 0 ..< len(client.cover_queue) {artwork.free_image(&client.cover_queue[i].image)}

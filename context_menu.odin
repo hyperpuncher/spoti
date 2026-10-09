@@ -280,6 +280,100 @@ playlist_picker :: proc(view: View, d: f32) {
 	}
 }
 
+// Connect device panel: the fetched devices with the active one checked.
+// It floats above the footer speaker button; a pick transfers playback.
+// Boxes are one frame old, like every other floating panel.
+device_panel :: proc(view: View, textures: ^Textures, d: f32) {
+	if !view.device_open {return}
+	rows := view.device_rows
+	panel_height :=
+		len(rows) == 0 ? 44 * d : min(f32(len(rows)) * PICKER_ROW * d + 12 * d, PICKER_MAX_HEIGHT * d)
+	anchor := clay.GetElementData(clay.ID("footer_devices")).boundingBox
+	panel_x := anchor.x + anchor.width - PICKER_WIDTH * d
+	panel_y := anchor.y - panel_height - 8 * d
+	if clay.UI_WithId(clay.ID("device_panel"))(
+	{
+		layout = {
+			layoutDirection = .TopToBottom,
+			sizing = {
+				width = clay.SizingFixed(PICKER_WIDTH * d),
+				height = clay.SizingFixed(panel_height),
+			},
+			padding = clay.PaddingAll(u16(6 * d)),
+		},
+		floating = {offset = {panel_x, panel_y}, zIndex = 11, attachTo = .Root},
+		backgroundColor = PANEL,
+		cornerRadius = clay.CornerRadiusAll(8 * d),
+	},
+	) {
+		if len(rows) == 0 {
+			clay.Text("No devices found", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+			return
+		}
+		if clay.UI_WithId(clay.ID("device_picker"))(
+		{
+			layout = {
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+				childGap = u16(2 * d),
+			},
+			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+		},
+		) {
+			for device, index in rows {
+				hovered := clay.PointerOver(clay.ID("device_item", u32(index)))
+				if clay.UI_WithId(clay.ID("device_item", u32(index)))(
+				{
+					layout = {
+						sizing = {
+							width = clay.SizingGrow({}),
+							height = clay.SizingFixed((PICKER_ROW - 2) * d),
+						},
+						padding = {left = u16(8 * d), right = u16(8 * d)},
+						childGap = u16(8 * d),
+						childAlignment = {y = .Center},
+					},
+					backgroundColor = hovered ? HOVER : clay.Color{},
+					cornerRadius = clay.CornerRadiusAll(5 * d),
+				},
+				) {
+					if device.active {
+						icon_element(textures, "check", .White, 14 * d)
+					} else if clay.UI()({layout = {sizing = {width = clay.SizingFixed(14 * d)}}}) {
+					}
+					if clay.UI()(
+					{
+						layout = {
+							layoutDirection = .TopToBottom,
+							sizing = {width = clay.SizingGrow({})},
+						},
+						clip = {horizontal = true},
+					},
+					) {
+						clay.Text(
+							device.name,
+							clay.TextElementConfig {
+								fontSize = 14,
+								textColor = WHITE,
+								wrapMode = .None,
+							},
+						)
+						subtitle := device.restricted ? "restricted" : device.type
+						clay.Text(
+							subtitle,
+							clay.TextElementConfig {
+								fontSize = 12,
+								textColor = MUTED,
+								wrapMode = .None,
+							},
+						)
+					}
+				}
+			}
+		}
+	}
+}
+
 // Picks the card or track under a right-click and opens its menu.
 open_menu_at :: proc(
 	menu: ^Context_Menu,

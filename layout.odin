@@ -123,6 +123,9 @@ View :: struct {
 	menu_add_index: int, // row index of Add to playlist, or -1
 	picker_open:    bool,
 	picker_rows:    []library.Entry,
+	device_open:    bool, // the Connect device panel is showing
+	device_active:  bool, // a Connect device is the API-active one
+	device_rows:    []library.Device, // borrowed; the last fetched list
 	drag_active:    bool, // a track is being dragged onto a playlist card
 	drag_x:         f32,
 	drag_y:         f32,
@@ -541,6 +544,14 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 			},
 		},
 		) {
+			player_control(
+				"footer_devices",
+				"speaker",
+				view.device_active ? .Green : .Muted,
+				textures,
+				fx,
+				d,
+			)
 			icon_element(textures, "volume-2", .Muted, 18 * d)
 			if clay.UI_WithId(clay.ID("volume_slider"))(
 			{
@@ -833,6 +844,7 @@ layout :: proc(
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
 		context_menu(view, textures, d)
+		device_panel(view, textures, d)
 		drag_ghost(view, d)
 		toast_banner(view, d)
 		autoscroll_indicator(view, textures, d)

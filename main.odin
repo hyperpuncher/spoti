@@ -599,6 +599,7 @@ App :: struct {
 	playback_prompt_opened: bool,
 	page_counts:            [library.Kind]int,
 	menu:                   Context_Menu,
+	device_open:            bool, // the Connect device panel is showing
 	resizing:               bool,
 	scrollbar_drag:         Scrollbar_Drag,
 	detail_scroll_target:   f32,
@@ -613,6 +614,7 @@ App :: struct {
 	toast:                  string,
 	toast_until:            u64,
 	last_write_pending:     bool,
+	last_transfer_pending:  bool,
 	drag_candidate:         bool,
 	dragging:               bool,
 	drag_index:             int,
@@ -1562,6 +1564,10 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	}
 	link_album = len(foot_album_uri) > 0
 	link_artist = len(foot_first_uri) > 0
+	devices_active := false
+	for device in library_client.devices {
+		if device.active {devices_active = true; break}
+	}
 	// A finished write shows its outcome for a moment; the toast is the
 	// only signal that a change the user cannot see actually landed.
 	if last_write_pending && !library_client.write_pending {
@@ -1574,6 +1580,23 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		toast_until = sdl.GetTicksNS() + 2_500_000_000
 	}
 	last_write_pending = library_client.write_pending
+	// A finished transfer names its target; the local worker stops so the
+	// room does not play twice. The stop lands on the next playback stage.
+	if last_transfer_pending && !library_client.transfer_pending {
+		delete(toast)
+		if library_client.transfer_ok {
+			if len(library_client.transfer_name) > 0 {
+				toast = fmt.aprintf("Playing on %s", library_client.transfer_name)
+			} else {
+				toast = strings.clone("Playback transferred")
+			}
+			stop_pressed = true
+		} else {
+			toast = strings.clone("Couldn't transfer playback")
+		}
+		toast_until = sdl.GetTicksNS() + 2_500_000_000
+	}
+	last_transfer_pending = library_client.transfer_pending
 	if len(toast) > 0 && sdl.GetTicksNS() > toast_until {
 		delete(toast)
 		toast = ""
@@ -1630,6 +1653,9 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		menu_add_index = menu_add_index(&menu),
 		picker_open    = menu.picker_open,
 		picker_rows    = menu.picker_items[:],
+		device_open    = device_open,
+		device_active  = devices_active,
+		device_rows    = library_client.devices[:],
 		drag_active    = dragging,
 		drag_x         = mouse.x,
 		drag_y         = mouse.y,
@@ -2181,6 +2207,24 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	if clicked && hit("footer_repeat", mouse_click) {
 		repeat = !repeat
 		replay_pending = repeat && stage == .Ended
+	}
+	if clicked && hit("footer_devices", mouse_click) {
+		device_open = !device_open
+		if device_open {_ = library.refresh_devices(&library_client)}
+	}
+	if device_open && clicked {
+		for device, index in library_client.devices {
+			if !hit_index("device_item", mouse_click, u32(index)) {continue}
+			device_open = false
+			_ = library.transfer_to_device(&library_client, device.id, stage == .Playing)
+			break
+		}
+		if device_open {
+			panel := clay.GetElementData(clay.ID("device_panel")).boundingBox
+			if panel.width > 0 &&
+			   !hit("footer_devices", mouse_click) &&
+			   !point_in_box(mouse_click, panel) {device_open = false}
+		}
 	}
 	mpris_delta = 0
 	mpris_seek_ms = 0
