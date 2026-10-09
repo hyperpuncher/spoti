@@ -559,7 +559,6 @@ track_list_row :: proc(
 	// ellipsis. A first artist that alone overflows truncates with
 	// one like before. Sources that omit URIs render plain text.
 	artist_box := max(0, row_text - title_box)
-	comma_w := hero_text_width(ui_state, ", ", 14, 0)
 	hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
 	if clay.UI_WithId(clay.ID("track_row", u32(index)))(
 	{
@@ -616,46 +615,13 @@ track_list_row :: proc(
 			clip = {horizontal = true},
 		},
 		) {
-			used := f32(0)
-			for ai in 0 ..< min(len(row.artist_links), 64) {
-				link := row.artist_links[ai]
-				linked := len(link.uri) > 0
-				separator := ai + 1 < len(row.artist_links) ? ", " : ""
-				need := hero_text_width(ui_state, link.name, 14, 0)
-				if separator != "" {need += comma_w}
-				if used + need > artist_box {
-					if ai == 0 {
-						fit := hero_fit_text(
-							ui_state,
-							link.name,
-							artist_box,
-							14,
-							0,
-							1,
-							context.temp_allocator,
-						)
-						artist_segment(slot, ai, fit, linked)
-					} else {
-						clay.Text(
-							"…",
-							clay.TextElementConfig {
-								fontSize = 14,
-								textColor = MUTED,
-								wrapMode = .None,
-							},
-						)
-					}
-					break
-				}
-				artist_segment(slot, ai, link.name, linked)
-				if separator != "" {
-					clay.Text(
-						separator,
-						clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
-					)
-				}
-				used += need
-			}
+			artist_links_row(
+				ui_state,
+				row.artist_links,
+				artist_box,
+				"artist_link",
+				artist_link_id(slot, 0),
+			)
 		}
 		if clay.UI()(
 		{
@@ -1129,15 +1095,13 @@ artist_link_id :: proc(slot: u32, ai: int) -> u32 {
 
 // One artist segment: a hug box when linked (hover brightens, clicks open
 // the page), plain text otherwise. The caller owns truncation.
-artist_segment :: proc(slot: u32, ai: int, name: string, linked: bool) {
+artist_segment :: proc(id: string, index: u32, name: string, linked: bool) {
 	if !linked {
 		clay.Text(name, clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None})
 		return
 	}
-	over := clay.PointerOver(clay.ID("artist_link", artist_link_id(slot, ai)))
-	if clay.UI_WithId(clay.ID("artist_link", artist_link_id(slot, ai)))(
-	{layout = {sizing = {width = clay.SizingFit({})}}},
-	) {
+	over := clay.PointerOver(clay.ID(id, index))
+	if clay.UI_WithId(clay.ID(id, index))({layout = {sizing = {width = clay.SizingFit({})}}}) {
 		clay.Text(
 			name,
 			clay.TextElementConfig {
@@ -1146,6 +1110,47 @@ artist_segment :: proc(slot: u32, ai: int, name: string, linked: bool) {
 				wrapMode = .None,
 			},
 		)
+	}
+}
+
+// Whole artist links that fit the box, then an ellipsis. A lone overlong
+// first artist is shortened to fit. Shared by track rows and the detail hero,
+// which owns the text that follows.
+artist_links_row :: proc(
+	ui_state: ^ui.State,
+	links: []library.Artist_Link,
+	box: f32,
+	id: string,
+	base: u32,
+) {
+	comma_w := hero_text_width(ui_state, ", ", 14, 0)
+	used := f32(0)
+	for ai in 0 ..< min(len(links), 64) {
+		link := links[ai]
+		linked := len(link.uri) > 0
+		separator := ai + 1 < len(links) ? ", " : ""
+		need := hero_text_width(ui_state, link.name, 14, 0)
+		if separator != "" {need += comma_w}
+		if used + need > box {
+			if ai == 0 {
+				fit := hero_fit_text(ui_state, link.name, box, 14, 0, 1, context.temp_allocator)
+				artist_segment(id, base + u32(ai), fit, linked)
+			} else {
+				clay.Text(
+					"…",
+					clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
+				)
+			}
+			return
+		}
+		artist_segment(id, base + u32(ai), link.name, linked)
+		if separator != "" {
+			clay.Text(
+				separator,
+				clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
+			)
+		}
+		used += need
 	}
 }
 
@@ -1300,7 +1305,11 @@ detail_page :: proc(
 				)
 				count_label := detail.source == .Artist ? "releases" : "songs"
 				parts := make([dynamic]string, 0, 3, context.temp_allocator)
-				if len(detail.subtitle) > 0 {append(&parts, detail.subtitle)}
+				// Album artists render as their own clickable segments, so the
+				// joined subtitle only serves sources that carry no links.
+				if len(detail.subtitle) > 0 && len(detail.artist_links) == 0 {
+					append(&parts, detail.subtitle)
+				}
 				if len(detail.year) >= 4 {append(&parts, detail.year)}
 				if detail.source == .Playlist && detail.rows_error != 0 {
 					append(&parts, "tracks unavailable")
@@ -1316,16 +1325,49 @@ detail_page :: proc(
 					)
 				}
 				metadata := strings.join(parts[:], " · ", context.temp_allocator)
-				metadata_text := hero_fit_text(
-					ui_state,
-					metadata,
-					title_width,
-					14,
-					0,
-					1,
-					context.temp_allocator,
-				)
-				clay.Text(metadata_text, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+				if len(detail.artist_links) > 0 {
+					tail := fmt.aprintf(" · %s", metadata, allocator = context.temp_allocator)
+					tail_width := hero_text_width(ui_state, tail, 14, 0)
+					if clay.UI()(
+					{
+						layout = {
+							sizing = {width = clay.SizingGrow({})},
+							childAlignment = {y = .Center},
+						},
+						clip = {horizontal = true},
+					},
+					) {
+						artist_links_row(
+							ui_state,
+							detail.artist_links,
+							max(0, title_width - tail_width),
+							"hero_artist_link",
+							0,
+						)
+						clay.Text(
+							tail,
+							clay.TextElementConfig {
+								fontSize = 14,
+								textColor = MUTED,
+								wrapMode = .None,
+							},
+						)
+					}
+				} else {
+					metadata_text := hero_fit_text(
+						ui_state,
+						metadata,
+						title_width,
+						14,
+						0,
+						1,
+						context.temp_allocator,
+					)
+					clay.Text(
+						metadata_text,
+						clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+					)
+				}
 			}
 		}
 		if clay.UI()(

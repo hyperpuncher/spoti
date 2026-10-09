@@ -106,6 +106,16 @@ pointer_over :: proc(id: string, index: u32 = 0) -> bool {
 	return clay.PointerOver(clay.ID(id, index))
 }
 
+// One hover scan for both artist link namespaces: the hero uses its own id
+// with base 0, track rows use the row slot compound ids.
+artist_links_hovered :: proc(links: []library.Artist_Link, id: string, base: u32) -> bool {
+	for ai in 0 ..< min(len(links), 64) {
+		if len(links[ai].uri) == 0 {continue}
+		if pointer_over(id, base + u32(ai)) {return true}
+	}
+	return false
+}
+
 // Follows the desktop theme through SDL; unknown means dark, and
 // SPOTI_THEME forces light or dark for testing and user control.
 system_dark :: proc() -> bool {
@@ -171,16 +181,20 @@ update_cursor :: proc(
 		return
 	}
 	if client.detail.ready {
+		if artist_links_hovered(client.detail.artist_links, "hero_artist_link", 0) {
+			ui.set_cursor(state, .Pointer)
+			return
+		}
 		for index in visible.tracks.first ..< visible.tracks.last {
 			if index < len(client.detail.rows) {
 				row := client.detail.rows[index]
-				slot := u32(index - visible.tracks.first)
-				for ai in 0 ..< min(len(row.artist_links), 64) {
-					if len(row.artist_links[ai].uri) == 0 {continue}
-					if pointer_over("artist_link", artist_link_id(slot, ai)) {
-						ui.set_cursor(state, .Pointer)
-						return
-					}
+				if artist_links_hovered(
+					row.artist_links,
+					"artist_link",
+					artist_link_id(u32(index - visible.tracks.first), 0),
+				) {
+					ui.set_cursor(state, .Pointer)
+					return
 				}
 			}
 			if pointer_over("track_row", u32(index)) {
@@ -1730,6 +1744,31 @@ main :: proc() {
 								entry,
 							)
 						}
+						break
+					}
+				}
+				if !handled && library_client.detail.ready {
+					for ai in 0 ..< min(len(library_client.detail.artist_links), 64) {
+						link := library_client.detail.artist_links[ai]
+						if len(link.uri) == 0 {continue}
+						if !hit_index("hero_artist_link", mouse_click, u32(ai)) {continue}
+						preview := library.Entry {
+							name = link.name,
+							uri  = link.uri,
+						}
+						handled = open_entry_page(
+							&library_client,
+							&nav,
+							&app_state,
+							&textures,
+							&detail_pinned,
+							&detail_scroll_armed,
+							filter,
+							search_mode,
+							search_kind,
+							input,
+							preview,
+						)
 						break
 					}
 				}

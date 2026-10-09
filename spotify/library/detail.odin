@@ -46,6 +46,7 @@ Detail :: struct {
 	label:         string, // Album, Playlist, Artist or Liked Songs
 	name:          string,
 	subtitle:      string,
+	artist_links:  []Artist_Link, // arena-owned; albums only
 	year:          string, // album release year, e.g. "2024"
 	image:         string,
 	image_small:   string,
@@ -198,6 +199,7 @@ fetch_detail :: proc(
 		)
 		detail.name = strings.clone(header.name, allocator)
 		detail.subtitle = joined_artists(header.artists, allocator)
+		detail.artist_links = artist_links_from(header.artists, allocator)
 		detail.year = release_year(header.release_date, allocator)
 		detail.image = strings.clone(cover_url_largest(header.images), allocator)
 		detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
@@ -647,20 +649,27 @@ saved_track_rows :: proc(
 	return rows, total, offset + len(items), next && len(items) > 0, 200, true
 }
 
-track_row :: proc(track: Track_Ref, allocator: runtime.Allocator) -> (row: Track_Row, ok: bool) {
-	if len(track.name) == 0 || len(track.uri) > 128 || track.duration_ms < 0 {return}
-	links := make([]Artist_Link, len(track.artists), allocator)
-	for artist, index in track.artists {
+// One Artist_Link per artist, in display order. Empty stays nil so plain
+// text never pays for links.
+artist_links_from :: proc(artists: []Artist, allocator: runtime.Allocator) -> []Artist_Link {
+	if len(artists) == 0 {return nil}
+	links := make([]Artist_Link, len(artists), allocator)
+	for artist, index in artists {
 		links[index] = Artist_Link {
 			name = strings.clone(artist.name, allocator),
 			uri  = strings.clone(artist.uri, allocator),
 		}
 	}
+	return links
+}
+
+track_row :: proc(track: Track_Ref, allocator: runtime.Allocator) -> (row: Track_Row, ok: bool) {
+	if len(track.name) == 0 || len(track.uri) > 128 || track.duration_ms < 0 {return}
 	return {
 			uri = strings.clone(track.uri, allocator),
 			name = strings.clone(track.name, allocator),
 			artists = joined_artists(track.artists, allocator),
-			artist_links = links,
+			artist_links = artist_links_from(track.artists, allocator),
 			album = strings.clone(track.album.name, allocator),
 			album_uri = strings.clone(track.album.uri, allocator),
 			duration_ms = track.duration_ms,
