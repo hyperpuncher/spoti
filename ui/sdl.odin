@@ -3,6 +3,7 @@ package ui
 import c "core:c/libc"
 import "core:fmt"
 import "core:math"
+import "core:unicode/utf8"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
@@ -437,6 +438,17 @@ text :: proc(
 	content := cached_text(state, font, value)
 	if content == nil {return}
 	_ = ttf.SetTextColor(content, color.r, color.g, color.b, color.a)
+	// SDL_ttf draws from the pen, so a glyph's left side bearing would indent
+	// the ink and grow with font size. Shift the pen so the ink starts at the
+	// box's left edge and lines up with smaller text in the same column.
+	pen_x := x - glyph_left_bearing(font, value)
 	// Whole-pixel positions keep glyph rasterization identical between frames.
-	_ = ttf.DrawRendererText(content, f32(int(x + 0.5)), f32(int(y + 0.5)))
+	_ = ttf.DrawRendererText(content, f32(int(pen_x + 0.5)), f32(int(y + 0.5)))
+}
+
+glyph_left_bearing :: proc(font: ^ttf.Font, value: string) -> f32 {
+	r, _ := utf8.decode_rune_in_string(value)
+	minx: c.int
+	if !ttf.GetGlyphMetrics(font, u32(r), &minx, nil, nil, nil, nil) {return 0}
+	return f32(minx)
 }
