@@ -451,33 +451,23 @@ handle :: proc(
 	case .Me:
 		id, status, ok := fetch_me(tokens.access, reuse)
 		send(client, Result{kind = .Me, me_id = id, status = status, ok = ok})
-	case .Add_To_Playlist:
+	case .Add_To_Playlist, .Remove_From_Playlist:
+		removed := request.kind == .Remove_From_Playlist
 		uris := [?]string{request.track_uri}
-		status, ok := add_to_playlist(tokens.access, request.playlist_id, uris[:], reuse)
-		send(
-			client,
-			Result {
-				kind = .Add_To_Playlist,
-				playlist_id = strings.clone(request.playlist_id),
+		result := Result {
+				kind          = request.kind,
+				playlist_id   = strings.clone(request.playlist_id),
 				playlist_name = strings.clone(request.playlist_name),
-				status = status,
-				ok = ok,
-			},
-		)
-	case .Remove_From_Playlist:
-		uris := [?]string{request.track_uri}
-		status, ok := remove_from_playlist(tokens.access, request.playlist_id, uris[:], reuse)
-		send(
-			client,
-			Result {
-				kind = .Remove_From_Playlist,
-				playlist_id = strings.clone(request.playlist_id),
-				playlist_name = strings.clone(request.playlist_name),
-				track_uri = strings.clone(request.track_uri),
-				status = status,
-				ok = ok,
-			},
-		)
+			}
+		if removed {
+			status, ok := remove_from_playlist(tokens.access, request.playlist_id, uris[:], reuse)
+			result.status, result.ok, result.track_uri =
+				status, ok, strings.clone(request.track_uri)
+		} else {
+			status, ok := add_to_playlist(tokens.access, request.playlist_id, uris[:], reuse)
+			result.status, result.ok = status, ok
+		}
+		send(client, result)
 	}
 }
 
@@ -1249,35 +1239,26 @@ apply :: proc(client: ^Client, result: Result) {
 		delete(client.me_id)
 		client.me_id = local.me_id
 		local.me_id = ""
-	case .Add_To_Playlist:
+	case .Add_To_Playlist, .Remove_From_Playlist:
+		removed := local.kind == .Remove_From_Playlist
 		client.write_pending = false
 		client.write_ok = local.ok
-		client.write_removed = false
+		client.write_removed = removed
 		delete(client.write_name)
 		client.write_name = local.playlist_name
 		local.playlist_name = ""
 		if local.ok {
 			delete(client.stale_playlist)
 			client.stale_playlist = strings.clone(local.playlist_id)
-		}
-		diagnostic.writef("library add-to-playlist ok=%v status=%d", local.ok, local.status)
-		diagnostic.result("add-to-playlist", local.ok, local.status, 0, 0, false)
-	case .Remove_From_Playlist:
-		client.write_pending = false
-		client.write_ok = local.ok
-		client.write_removed = true
-		delete(client.write_name)
-		client.write_name = local.playlist_name
-		local.playlist_name = ""
-		if local.ok {
-			delete(client.stale_playlist)
-			client.stale_playlist = strings.clone(local.playlist_id)
-			if client.detail.source == .Playlist && client.detail.id == local.playlist_id {
+			if removed &&
+			   client.detail.source == .Playlist &&
+			   client.detail.id == local.playlist_id {
 				_ = remove_detail_row(client, local.track_uri)
 			}
 		}
-		diagnostic.writef("library remove-from-playlist ok=%v status=%d", local.ok, local.status)
-		diagnostic.result("remove-from-playlist", local.ok, local.status, 0, 0, false)
+		verb := removed ? "remove-from-playlist" : "add-to-playlist"
+		diagnostic.writef("library %s ok=%v status=%d", verb, local.ok, local.status)
+		diagnostic.result(verb, local.ok, local.status, 0, 0, false)
 	}
 }
 
