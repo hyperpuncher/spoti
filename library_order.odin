@@ -41,7 +41,9 @@ less_played :: proc(a, b: Rated_Entry) -> bool {
 	return a.recent_rank < b.recent_rank
 }
 
-// Sorting only when a page grew (or the pins changed) keeps page merges cheap.
+// Sorting only when a page changed keeps page merges cheap. A length check
+// alone would miss a revalidation that replaces a page with the same count,
+// silently dropping the pins, so any landed page forces a re-sort too.
 sort_library_pages :: proc(
 	client: ^library.Client,
 	app_state: ^State,
@@ -50,10 +52,11 @@ sort_library_pages :: proc(
 ) {
 	for kind in library.Kind {
 		page := &client.pages[kind]
-		if !force && len(page.items) == counts[kind] {continue}
+		if !force && !client.pages_dirty && len(page.items) == counts[kind] {continue}
 		sort_library_page(page, kind, app_state)
 		counts[kind] = len(page.items)
 	}
+	client.pages_dirty = false
 }
 
 // The grid URI for the open detail, or "" for Liked Songs.

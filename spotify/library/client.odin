@@ -101,6 +101,7 @@ Client :: struct {
 	state:                 State,
 	pages:                 [Kind]Page,
 	pending:               [Kind]bool,
+	pages_dirty:           bool, // a page landed; the owner re-sorts before layout
 	detail:                Detail,
 	prev_detail:           Detail, // last page left, with its rows; instant back-nav
 	prev_at:               time.Time,
@@ -1114,6 +1115,7 @@ apply :: proc(client: ^Client, result: Result) {
 			destination.total,
 			destination.has_more,
 		)
+		client.pages_dirty = true
 		client.state = client.failed ? .Failed : client.remaining_initial > 0 ? .Loading : .Ready
 	case .Auth:
 		client.state = local.auth == .Missing_Client_ID ? .Missing_Client_ID : .Sign_In_Failed

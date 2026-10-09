@@ -585,6 +585,7 @@ main :: proc() {
 	sidebar_width := app_state.sidebar_width
 	state_dirty := false
 	order_dirty := false
+	pending_redraw := false
 	detail_pinned := false
 	nav: Nav
 	nav_back_pressed, nav_forward_pressed: bool
@@ -736,7 +737,8 @@ main :: proc() {
 			wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
 		}
 		has_event := sdl.WaitEventTimeout(&event, wait_ms)
-		redraw := has_event || first_frame || fx_animating || fades_animating
+		redraw := has_event || first_frame || fx_animating || fades_animating || pending_redraw
+		pending_redraw = false
 		first_frame = false
 		if has_event {
 			for {
@@ -976,6 +978,10 @@ main :: proc() {
 			_ = library.start(&library_client)
 		}
 		if library.poll(&library_client) {redraw = true}
+		// Sort before layout so a landed revalidation or a fresh pin paints in
+		// the correct order on the same frame instead of the next one.
+		sort_library_pages(&library_client, &app_state, &page_counts, order_dirty)
+		order_dirty = false
 		library_prompt := prompt_pending(.Library)
 		if library_prompt != library_prompt_shown {
 			library_prompt_shown = library_prompt
@@ -2143,8 +2149,7 @@ main :: proc() {
 				},
 			)
 		}
-		sort_library_pages(&library_client, &app_state, &page_counts, order_dirty)
-		order_dirty = false
+		if order_dirty {pending_redraw = true}
 		// Persist the last played track. Title and artist arrive after the
 		// selection via the Ready packet, so every field is watched, not
 		// just the URI. The state holds the saved copy; no shadow variables.
