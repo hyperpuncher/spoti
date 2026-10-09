@@ -1283,29 +1283,23 @@ detail_page :: proc(
 					clay.TextElementConfig{fontId = 2, fontSize = title_size, textColor = WHITE},
 				)
 				count_label := detail.source == .Artist ? "releases" : "songs"
-				base := detail.subtitle
-				if len(detail.year) >= 4 {
-					base = fmt.aprintf(
-						"%s · %s",
-						base,
-						detail.year,
-						allocator = context.temp_allocator,
-					)
-				}
-				metadata := fmt.aprintf(
-					"%s · %d %s",
-					base,
-					detail.total,
-					count_label,
-					allocator = context.temp_allocator,
-				)
+				parts := make([dynamic]string, 0, 3, context.temp_allocator)
+				if len(detail.subtitle) > 0 {append(&parts, detail.subtitle)}
+				if len(detail.year) >= 4 {append(&parts, detail.year)}
 				if detail.source == .Playlist && detail.rows_error != 0 {
-					metadata = fmt.aprintf(
-						"%s · tracks unavailable",
-						base,
-						allocator = context.temp_allocator,
+					append(&parts, "tracks unavailable")
+				} else {
+					append(
+						&parts,
+						fmt.aprintf(
+							"%d %s",
+							detail.total,
+							count_label,
+							allocator = context.temp_allocator,
+						),
 					)
 				}
+				metadata := strings.join(parts[:], " · ", context.temp_allocator)
 				metadata_text := hero_fit_text(
 					ui_state,
 					metadata,

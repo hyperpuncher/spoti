@@ -98,6 +98,7 @@ Album_Ref :: struct {
 	artists:      []Artist,
 	release_date: string,
 	total_tracks: int,
+	album_type:   string,
 }
 
 Track_Ref :: struct {

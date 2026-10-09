@@ -192,7 +192,10 @@ fetch_detail :: proc(
 			free_detail(&detail)
 			return {}, header_status, false
 		}
-		detail.label = strings.clone("Album", allocator)
+		detail.label = strings.clone(
+			release_kind(header.album_type, header.total_tracks),
+			allocator,
+		)
 		detail.name = strings.clone(header.name, allocator)
 		detail.subtitle = joined_artists(header.artists, allocator)
 		detail.year = release_year(header.release_date, allocator)
@@ -215,7 +218,7 @@ fetch_detail :: proc(
 		}
 		detail.label = strings.clone("Artist", allocator)
 		detail.name = strings.clone(header.name, allocator)
-		detail.subtitle = strings.clone("Artist", allocator)
+		detail.subtitle = ""
 		detail.image = strings.clone(cover_url_largest(header.images), allocator)
 		detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
 	}
@@ -556,6 +559,30 @@ fetch_artist_albums :: proc(
 	return parse_artist_albums(body[:], allocator)
 }
 
+// Spotify reports only album/single/compilation. An EP is a short single,
+// so the track count splits it from a true single.
+release_kind :: proc(album_type: string, total_tracks: int) -> string {
+	switch album_type {
+	case "single":
+		return total_tracks <= 3 ? "Single" : "EP"
+	case "compilation":
+		return "Compilation"
+	}
+	return "Album"
+}
+
+// The discography card subtitle: the release year, then the content kind,
+// e.g. "2026 · EP".
+release_subtitle :: proc(
+	album_type, date: string,
+	total_tracks: int,
+	allocator: runtime.Allocator,
+) -> string {
+	kind := release_kind(album_type, total_tracks)
+	if len(date) < 4 {return strings.clone(kind, allocator)}
+	return fmt.aprintf("%s · %s", date[:4], kind, allocator = allocator)
+}
+
 parse_artist_albums :: proc(
 	body: []u8,
 	allocator: runtime.Allocator,
@@ -579,7 +606,12 @@ parse_artist_albums :: proc(
 				name = strings.clone(album.name, allocator),
 				uri = strings.clone(album.uri, allocator),
 				image = strings.clone(cover_url(album.images), allocator),
-				subtitle = release_year(album.release_date, allocator),
+				subtitle = release_subtitle(
+					album.album_type,
+					album.release_date,
+					album.total_tracks,
+					allocator,
+				),
 				total = album.total_tracks,
 			},
 		)

@@ -101,7 +101,7 @@ artist_discography_uses_current_album_page :: proc(t: ^testing.T) {
 	}
 	defer virtual.arena_destroy(&arena)
 
-	body: string = `{"items":[{"name":"A Release","uri":"spotify:album:abc","release_date":"2026-09-12","total_tracks":8,"images":[{"url":"https://i.scdn.co/image/release","width":300}]}],"offset":0,"total":11,"next":"next"}`
+	body: string = `{"items":[{"name":"A Release","uri":"spotify:album:abc","release_date":"2026-09-12","total_tracks":6,"album_type":"single","images":[{"url":"https://i.scdn.co/image/release","width":300}]}],"offset":0,"total":11,"next":"next"}`
 	releases, total, next, more, status, ok := parse_artist_albums(
 		transmute([]u8)body,
 		virtual.arena_allocator(&arena),
@@ -112,8 +112,8 @@ artist_discography_uses_current_album_page :: proc(t: ^testing.T) {
 		len(releases) == 1 &&
 		releases[0].name == "A Release" &&
 		releases[0].uri == "spotify:album:abc" &&
-		releases[0].subtitle == "2026" &&
-		releases[0].total == 8,
+		releases[0].subtitle == "2026 · EP" &&
+		releases[0].total == 6,
 	)
 }
 
