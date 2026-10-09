@@ -827,69 +827,8 @@ main :: proc() {
 		first_frame = false
 		if !running {break}
 		t0 := sdl.GetTicksNS()
-		if nav_back_pressed || nav_forward_pressed {
-			nav_state: Nav_State
-			moved := false
-			// The container vanishes while the next page loads, so the
-			// offset is banked before leaving and restored after.
-			nav_save_scroll(&nav, detail_scroll_y())
-			if nav_back_pressed {
-				nav_back_pressed = false
-				nav_state, moved = nav_back(&nav)
-			} else {
-				nav_forward_pressed = false
-				nav_state, moved = nav_forward(&nav)
-			}
-			if moved {
-				nav_restore(
-					nav_state,
-					&library_client,
-					&app_state,
-					&state_dirty,
-					&filter,
-					&search_mode,
-					&search_kind,
-					&input,
-					&detail_pinned,
-				)
-				if len(nav_state.detail.uri) == 0 {
-					detail_scroll_armed = false
-				} else {
-					detail_scroll_target = nav_state.detail_scroll
-					detail_scroll_armed = true
-				}
-				redraw = true
-			}
-		}
-		if input_changed {
-			input_changed = false
-			trimmed := strings.trim_space(input)
-			if len(trimmed) == 0 {
-				library.clear_search(&library_client)
-				search_mode = false
-				search_pending = false
-				delete(input)
-				input = {}
-				nav_replace(&nav, nav_capture(&library_client, filter, false, search_kind, ""))
-			} else if _, valid := track.parse_id(trimmed); valid {
-				// A pasted link waits for Enter; never catalog-search it.
-				library.clear_search(&library_client)
-				search_mode = false
-				search_pending = false
-				nav_replace(&nav, nav_capture(&library_client, filter, false, search_kind, input))
-			} else {
-				search_pending = true
-				search_deadline = sdl.GetTicksNS() + SEARCH_DEBOUNCE_NS
-			}
-		}
-		if search_pending && sdl.GetTicksNS() >= search_deadline {
-			search_pending = false
-			if library.search(&library_client, input) {
-				search_mode = true
-				nav_save_scroll(&nav, detail_scroll_y())
-				nav_record_search(&nav, &library_client, filter, search_kind, input)
-			}
-		}
+		app_navigate(&app, &frame)
+		app_search(&app, &frame)
 		if preload_worker != nil && thread.is_done(preload_worker) {
 			thread.join(preload_worker)
 			thread.destroy(preload_worker)
@@ -2369,4 +2308,79 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		}
 	}
 	return has_event, fades_animating
+}
+
+// History moves plus the banked scroll offset that follows them.
+app_navigate :: proc(app: ^App, frame: ^Frame) {
+	using app
+	using frame
+	if nav_back_pressed || nav_forward_pressed {
+		nav_state: Nav_State
+		moved := false
+		// The container vanishes while the next page loads, so the
+		// offset is banked before leaving and restored after.
+		nav_save_scroll(&nav, detail_scroll_y())
+		if nav_back_pressed {
+			nav_back_pressed = false
+			nav_state, moved = nav_back(&nav)
+		} else {
+			nav_forward_pressed = false
+			nav_state, moved = nav_forward(&nav)
+		}
+		if moved {
+			nav_restore(
+				nav_state,
+				&library_client,
+				&app_state,
+				&state_dirty,
+				&filter,
+				&search_mode,
+				&search_kind,
+				&input,
+				&detail_pinned,
+			)
+			if len(nav_state.detail.uri) == 0 {
+				detail_scroll_armed = false
+			} else {
+				detail_scroll_target = nav_state.detail_scroll
+				detail_scroll_armed = true
+			}
+			redraw = true
+		}
+	}
+}
+
+// Debounced catalog search driven by input edits.
+app_search :: proc(app: ^App, frame: ^Frame) {
+	using app
+	using frame
+	if input_changed {
+		input_changed = false
+		trimmed := strings.trim_space(input)
+		if len(trimmed) == 0 {
+			library.clear_search(&library_client)
+			search_mode = false
+			search_pending = false
+			delete(input)
+			input = {}
+			nav_replace(&nav, nav_capture(&library_client, filter, false, search_kind, ""))
+		} else if _, valid := track.parse_id(trimmed); valid {
+			// A pasted link waits for Enter; never catalog-search it.
+			library.clear_search(&library_client)
+			search_mode = false
+			search_pending = false
+			nav_replace(&nav, nav_capture(&library_client, filter, false, search_kind, input))
+		} else {
+			search_pending = true
+			search_deadline = sdl.GetTicksNS() + SEARCH_DEBOUNCE_NS
+		}
+	}
+	if search_pending && sdl.GetTicksNS() >= search_deadline {
+		search_pending = false
+		if library.search(&library_client, input) {
+			search_mode = true
+			nav_save_scroll(&nav, detail_scroll_y())
+			nav_record_search(&nav, &library_client, filter, search_kind, input)
+		}
+	}
 }
