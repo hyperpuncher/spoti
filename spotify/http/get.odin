@@ -177,6 +177,50 @@ post_protobuf :: proc(
 	)
 }
 
+// Authenticated JSON POST, e.g. adding items to a playlist. The body is a
+// plain string, never logged; POSTFIELDSIZE bounds the upload.
+post_json :: proc(
+	address, body: string,
+	options: Options = {},
+	reuse: rawptr = nil,
+) -> (
+	response: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	if len(body) == 0 {return nil, 0, false}
+	return request(
+		address,
+		options,
+		body,
+		content_type = "Content-Type: application/json",
+		reuse = reuse,
+	)
+}
+
+// Authenticated JSON DELETE, e.g. removing items from a playlist. The body
+// is a plain string, never logged; POSTFIELDSIZE bounds the upload.
+delete_json :: proc(
+	address, body: string,
+	options: Options = {},
+	reuse: rawptr = nil,
+) -> (
+	response: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	if len(body) == 0 {return nil, 0, false}
+	opts := options
+	opts.method = "DELETE"
+	return request(
+		address,
+		opts,
+		body,
+		content_type = "Content-Type: application/json",
+		reuse = reuse,
+	)
+}
+
 // A reused easy handle keeps its TCP/TLS session alive across sequential
 // requests on one worker thread. Handles must never cross threads; callers
 // pass nil for one-off requests outside the workers.
@@ -258,9 +302,12 @@ request :: proc(
 		c_method := strings.clone_to_cstring(options.method)
 		defer delete(c_method)
 		if easy_setopt(client, CURL_CUSTOMREQUEST, c_method) != 0 {return nil, 0, false}
-		// An explicit empty body so the write carries Content-Length: 0.
-		if easy_setopt(client, CURL_POSTFIELDS, "") != 0 ||
-		   easy_setopt(client, CURL_POSTFIELDSIZE, c.long(0)) != 0 {return nil, 0, false}
+		// An explicit empty body so a bodyless write carries Content-Length: 0.
+		// A JSON body was already installed above and must not be cleared.
+		if len(form) == 0 {
+			if easy_setopt(client, CURL_POSTFIELDS, "") != 0 ||
+			   easy_setopt(client, CURL_POSTFIELDSIZE, c.long(0)) != 0 {return nil, 0, false}
+		}
 	}
 	if options.range != "" {
 		c_range := strings.clone_to_cstring(options.range)

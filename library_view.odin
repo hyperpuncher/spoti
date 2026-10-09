@@ -22,6 +22,9 @@ Frame_Visible :: struct {
 RELEASE_CARD_MAX :: 200
 RELEASE_CARD_COLUMNS :: 8
 
+// A playlist card under a dragged track lights green.
+DROP_TARGET :: clay.Color{30, 215, 96, 80}
+
 // Clip slots are visible-relative per section, so the singles grid offsets
 // its truncation clips past anything the albums grid can hold.
 RELEASE_CLIP_STRIDE :: 64
@@ -287,6 +290,7 @@ library_card :: proc(
 	// persistent Clay scroll entry each, so slot keys keep the entries
 	// stable while scrolling instead of churning one per row per frame.
 	clip_slot: u32 = 0,
+	drop_target: bool = false,
 ) {
 	hovered := clay.PointerOver(clay.ID(id, index))
 	padding := 8 * d
@@ -299,7 +303,7 @@ library_card :: proc(
 			padding = clay.PaddingAll(u16(padding)),
 			childGap = u16(7 * d),
 		},
-		backgroundColor = hovered ? HOVER : selected ? SELECTED : clay.Color{},
+		backgroundColor = hovered ? HOVER : drop_target ? DROP_TARGET : selected ? SELECTED : clay.Color{},
 		cornerRadius = clay.CornerRadiusAll(10 * d),
 	},
 	) {
@@ -386,6 +390,7 @@ sidebar :: proc(
 	searching: bool,
 	textures: ^Textures,
 	width, viewport_height, card_text_height, d, dt: f32,
+	drop_target: int,
 ) -> (
 	visible: Visible_Items,
 ) {
@@ -476,6 +481,7 @@ sidebar :: proc(
 							selected = card_selected(&page.items[next], &client.detail),
 							pinned = state_is_pinned(app_state, page.items[next].uri),
 							clip_slot = u32(next - visible.first),
+							drop_target = next == drop_target,
 						)
 					}
 				}

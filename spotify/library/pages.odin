@@ -20,17 +20,19 @@ Kind :: enum {
 
 // One library card: a playlist, album or artist with its cover and metadata.
 Entry :: struct {
-	name:         string,
-	uri:          string,
-	image:        string, // cover URL; never a token or signed CDN URL
-	subtitle:     string, // owner or artists
-	year:         string, // album release year, e.g. "2024"
-	saved:        bool, // came from a library tab, so membership needs no check
-	total:        int, // track count where Spotify reports one
-	album:        string, // track entries only, for the footer link
-	album_uri:    string, // track entries only, for the footer link
-	first_artist: string, // track entries only, for the footer link
-	artist_uri:   string, // track entries only, for the footer link
+	name:          string,
+	uri:           string,
+	image:         string, // cover URL; never a token or signed CDN URL
+	subtitle:      string, // owner or artists
+	year:          string, // album release year, e.g. "2024"
+	saved:         bool, // came from a library tab, so membership needs no check
+	total:         int, // track count where Spotify reports one
+	album:         string, // track entries only, for the footer link
+	album_uri:     string, // track entries only, for the footer link
+	first_artist:  string, // track entries only, for the footer link
+	artist_uri:    string, // track entries only, for the footer link
+	owner_id:      string, // playlist entries only; who can add items
+	collaborative: bool, // playlist entries only; collaborators can add items
 }
 
 Page :: struct {
@@ -61,6 +63,8 @@ clone_entry :: proc(entry: Entry, allocator: runtime.Allocator) -> Entry {
 		album_uri = strings.clone(entry.album_uri, allocator),
 		first_artist = strings.clone(entry.first_artist, allocator),
 		artist_uri = strings.clone(entry.artist_uri, allocator),
+		owner_id = strings.clone(entry.owner_id, allocator),
+		collaborative = entry.collaborative,
 	}
 }
 
@@ -106,13 +110,14 @@ Track_Ref :: struct {
 }
 
 Playlist_Ref :: struct {
-	id:          string,
-	name:        string,
-	uri:         string,
-	images:      []Image,
-	owner:       Owner,
-	description: string,
-	items:       Count `json:"tracks"`,
+	id:            string,
+	name:          string,
+	uri:           string,
+	images:        []Image,
+	owner:         Owner,
+	description:   string,
+	collaborative: bool,
+	items:         Count `json:"tracks"`,
 }
 
 Saved_Track :: struct {
@@ -221,6 +226,8 @@ append_card_entry :: proc(
 	name, uri, image, subtitle, year: string,
 	total: int,
 	allocator: runtime.Allocator,
+	owner_id: string = "",
+	collaborative: bool = false,
 ) {
 	if len(name) == 0 || len(uri) > 128 || image == "" {return}
 	append(
@@ -232,6 +239,8 @@ append_card_entry :: proc(
 			subtitle = strings.clone(subtitle, allocator),
 			year = release_year(year, allocator),
 			total = total,
+			owner_id = strings.clone(owner_id, allocator),
+			collaborative = collaborative,
 		},
 	)
 }
@@ -256,6 +265,8 @@ append_playlist_entry :: proc(
 		"",
 		row.items.total,
 		allocator,
+		owner_id = row.owner.id,
+		collaborative = row.collaborative,
 	)
 }
 

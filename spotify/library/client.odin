@@ -34,22 +34,28 @@ Request_Kind :: enum {
 	More,
 	Search,
 	Like,
+	Me, // result-only: the signed-in account id
+	Add_To_Playlist,
+	Remove_From_Playlist,
 	Auth, // result-only: the worker could not sign in
 }
 
 Request :: struct {
-	kind:    Request_Kind,
-	list:    Kind,
-	offset:  int,
-	group:   Album_Group, // More; which artist section to page
-	cursor:  string, // Index; worker frees
-	source:  Source,
-	id:      string, // Detail, More; worker frees
-	query:   string, // Search; worker frees
-	serial:  u64, // Search; echoes back so stale results are dropped
-	liked:   bool, // Like; the membership to set
-	saved:   bool, // Detail; the preview already knows the membership
-	refresh: bool, // Index; a revalidation that replaces the page
+	kind:          Request_Kind,
+	list:          Kind,
+	offset:        int,
+	group:         Album_Group, // More; which artist section to page
+	cursor:        string, // Index; worker frees
+	source:        Source,
+	id:            string, // Detail, More; worker frees
+	query:         string, // Search; worker frees
+	serial:        u64, // Search; echoes back so stale results are dropped
+	liked:         bool, // Like; the membership to set
+	saved:         bool, // Detail; the preview already knows the membership
+	refresh:       bool, // Index; a revalidation that replaces the page
+	playlist_id:   string, // Add/Remove_From_Playlist; worker frees
+	playlist_name: string, // Add/Remove_From_Playlist; worker frees, echoed for the toast
+	track_uri:     string, // Add/Remove_From_Playlist; worker frees
 }
 
 Result :: struct {
@@ -75,6 +81,10 @@ Result :: struct {
 	auth:          Auth_Result, // Auth; why sign-in stopped
 	retry_after:   int, // Index; seconds the server asked us to wait
 	refresh:       bool, // Index; a revalidation that replaces the page
+	me_id:         string, // Me; receiver frees
+	playlist_id:   string, // Add/Remove_From_Playlist; receiver frees
+	playlist_name: string, // Add/Remove_From_Playlist; receiver frees
+	track_uri:     string, // Remove_From_Playlist; receiver frees
 }
 
 Cover_Request :: struct {
@@ -120,6 +130,12 @@ Client :: struct {
 	search_error:          int,
 	search_pages:          [Kind]Page,
 	like_pending:          bool, // hero heart toggle in flight
+	me_id:                 string, // owned; the signed-in account id
+	write_pending:         bool, // add or remove write in flight
+	write_ok:              bool, // last write result
+	write_name:            string, // owned; playlist name for the toast
+	write_removed:         bool, // last write removed an item rather than added one
+	stale_playlist:        string, // owned; a playlist changed by a write, re-fetched on open
 }
 
 run :: proc(pointer: rawptr) {
@@ -154,6 +170,9 @@ free_request :: proc(request: Request) {
 	delete(request.cursor)
 	delete(request.id)
 	delete(request.query)
+	delete(request.playlist_id)
+	delete(request.playlist_name)
+	delete(request.track_uri)
 }
 
 // Sends a worker request; drops and frees it when the queue is full.
@@ -230,6 +249,29 @@ fail_request :: proc(client: ^Client, request: Request) {
 				status = -1,
 			},
 		)
+	case .Me:
+		send(client, Result{kind = .Me, status = -1})
+	case .Add_To_Playlist:
+		send(
+			client,
+			Result {
+				kind = .Add_To_Playlist,
+				playlist_id = strings.clone(request.playlist_id),
+				playlist_name = strings.clone(request.playlist_name),
+				status = -1,
+			},
+		)
+	case .Remove_From_Playlist:
+		send(
+			client,
+			Result {
+				kind = .Remove_From_Playlist,
+				playlist_id = strings.clone(request.playlist_id),
+				playlist_name = strings.clone(request.playlist_name),
+				track_uri = strings.clone(request.track_uri),
+				status = -1,
+			},
+		)
 	}
 }
 
@@ -274,6 +316,7 @@ handle :: proc(
 			request.source,
 			request.id,
 			reuse = reuse,
+			refresh = request.refresh,
 		)
 		if ok && request.source == .Playlist && detail.rows_error == 403 {
 			rows, total, next, more, rows_status, rows_ok := read_session_playlist(
@@ -376,6 +419,7 @@ handle :: proc(
 					allocator,
 					"",
 					reuse,
+					refresh = request.refresh,
 				)
 		}
 		if request.source == .Playlist && !aresult.ok && aresult.status == 403 {
@@ -399,6 +443,36 @@ handle :: proc(
 				search_serial = request.serial,
 				search_query = strings.clone(request.query),
 				search_pages = pages,
+				status = status,
+				ok = ok,
+			},
+		)
+	case .Me:
+		id, status, ok := fetch_me(tokens.access, reuse)
+		send(client, Result{kind = .Me, me_id = id, status = status, ok = ok})
+	case .Add_To_Playlist:
+		uris := [?]string{request.track_uri}
+		status, ok := add_to_playlist(tokens.access, request.playlist_id, uris[:], reuse)
+		send(
+			client,
+			Result {
+				kind = .Add_To_Playlist,
+				playlist_id = strings.clone(request.playlist_id),
+				playlist_name = strings.clone(request.playlist_name),
+				status = status,
+				ok = ok,
+			},
+		)
+	case .Remove_From_Playlist:
+		uris := [?]string{request.track_uri}
+		status, ok := remove_from_playlist(tokens.access, request.playlist_id, uris[:], reuse)
+		send(
+			client,
+			Result {
+				kind = .Remove_From_Playlist,
+				playlist_id = strings.clone(request.playlist_id),
+				playlist_name = strings.clone(request.playlist_name),
+				track_uri = strings.clone(request.track_uri),
 				status = status,
 				ok = ok,
 			},
@@ -448,6 +522,10 @@ free_result :: proc(result: Result) {
 	free_search_pages(&local.search_pages)
 	delete(local.search_query)
 	delete(local.id)
+	delete(local.me_id)
+	delete(local.playlist_id)
+	delete(local.playlist_name)
+	delete(local.track_uri)
 }
 
 start :: proc(client: ^Client) -> bool {
@@ -528,6 +606,8 @@ start :: proc(client: ^Client) -> bool {
 		client.pending[kind] = true
 		_ = chan.send(client.requests, Request{kind = .Index, list = kind, refresh = true})
 	}
+	// The account id tells owned playlists from followed ones for the picker.
+	_ = chan.send(client.requests, Request{kind = .Me})
 	return true
 }
 
@@ -574,14 +654,22 @@ more :: proc(client: ^Client, kind: Kind) {
 
 open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry) -> bool {
 	if len(id) == 0 {return false}
+	// A playlist changed by an add or remove re-fetches in the background, but
+	// still opens from the buffer or warm cache so the list never blanks.
+	stale := source == .Playlist && id == client.stale_playlist
+	if len(client.stale_playlist) > 0 && !stale {
+		delete(client.stale_playlist)
+		client.stale_playlist = ""
+	}
 	// A page left minutes ago reopens with its rows in place: no request,
 	// no paging chain, and the banked scroll offset applies at once.
 	if detail_buffer_take(client, source, id, preview) {return true}
 	request := Request {
-		kind   = .Detail,
-		source = source,
-		id     = strings.clone(id),
-		saved  = preview.saved,
+		kind    = .Detail,
+		source  = source,
+		id      = strings.clone(id),
+		saved   = preview.saved,
+		refresh = stale,
 	}
 	if !queue_request(client, &request) {return false}
 	// Clone before releasing the current detail: discography cards can borrow
@@ -631,6 +719,21 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	return true
 }
 
+// Drops one row from the open detail by URI after the server confirmed the
+// removal, so the list reflects it at once instead of after a full re-fetch.
+remove_detail_row :: proc(client: ^Client, uri: string) -> bool {
+	if !client.detail.ready || len(uri) == 0 {return false}
+	for row, index in client.detail.rows {
+		if row.uri != uri {continue}
+		copy(client.detail.rows[index:], client.detail.rows[index + 1:])
+		pop(&client.detail.rows)
+		if client.detail.total > 0 {client.detail.total -= 1}
+		if client.detail.next_offset > 0 {client.detail.next_offset -= 1}
+		return true
+	}
+	return false
+}
+
 // True while an open is slow enough, and empty enough, that a placeholder
 // helps. Pagination keeps its rows; only the first fill can show the table.
 detail_loading_visible :: proc(client: ^Client) -> bool {
@@ -640,6 +743,43 @@ detail_loading_visible :: proc(client: ^Client) -> bool {
 		len(client.detail.albums.items) == 0 &&
 		len(client.detail.singles.items) == 0 \
 	)
+}
+
+// Queues an add of one track to a playlist. The worker answers with an
+// Add_To_Playlist result that drives the toast. Only one write rides at a
+// time, so a second drop cannot stack behind a slow write.
+add_track_to_playlist :: proc(
+	client: ^Client,
+	playlist_id, playlist_name, track_uri: string,
+) -> bool {
+	if len(playlist_id) == 0 || len(track_uri) == 0 || client.write_pending {return false}
+	request := Request {
+		kind          = .Add_To_Playlist,
+		playlist_id   = strings.clone(playlist_id),
+		playlist_name = strings.clone(playlist_name),
+		track_uri     = strings.clone(track_uri),
+	}
+	if !queue_request(client, &request) {return false}
+	client.write_pending = true
+	return true
+}
+
+// Queues the removal of one track from a playlist. Shares the add's toast
+// fields so a failure or success reads the same way to the user.
+remove_track_from_playlist :: proc(
+	client: ^Client,
+	playlist_id, playlist_name, track_uri: string,
+) -> bool {
+	if len(playlist_id) == 0 || len(track_uri) == 0 || client.write_pending {return false}
+	request := Request {
+		kind          = .Remove_From_Playlist,
+		playlist_id   = strings.clone(playlist_id),
+		playlist_name = strings.clone(playlist_name),
+		track_uri     = strings.clone(track_uri),
+	}
+	if !queue_request(client, &request) {return false}
+	client.write_pending = true
+	return true
 }
 
 // Queues a library membership flip for the hero heart. The worker answers
@@ -814,11 +954,12 @@ more_rows :: proc(client: ^Client) -> bool {
 	fresh := detail_page_fresh(client.detail.source, client.detail.id, offset, group)
 	if !fresh && time.since(client.page_at) < 0 {return false}
 	request := Request {
-		kind   = .More,
-		source = client.detail.source,
-		id     = strings.clone(client.detail.id),
-		offset = offset,
-		group  = group,
+		kind    = .More,
+		source  = client.detail.source,
+		id      = strings.clone(client.detail.id),
+		offset  = offset,
+		group   = group,
+		refresh = client.detail.source == .Playlist && client.detail.id == client.stale_playlist,
 	}
 	if !queue_request(client, &request) {return false}
 	client.detail_loading = true
@@ -1002,6 +1143,12 @@ apply :: proc(client: ^Client, result: Result) {
 			virtual.arena_allocator(&local.detail.arena),
 		)
 		move_detail(&client.detail, &local.detail)
+		// The changed playlist now matches the server again, so later opens and
+		// pages can use the cache instead of bypassing it forever.
+		if client.detail.source == .Playlist && client.detail.id == client.stale_playlist {
+			delete(client.stale_playlist)
+			client.stale_playlist = ""
+		}
 	case .Like:
 		if !local.ok {
 			client.like_pending = false
@@ -1089,6 +1236,46 @@ apply :: proc(client: ^Client, result: Result) {
 		client.search_query = local.search_query
 		local.search_query = ""
 		diagnostic.result("search", local.ok, local.status, 0, 0, false)
+	case .Me:
+		diagnostic.writef(
+			"library me status=%d ok=%v has_id=%v",
+			local.status,
+			local.ok,
+			len(local.me_id) > 0,
+		)
+		if !local.ok {return}
+		delete(client.me_id)
+		client.me_id = local.me_id
+		local.me_id = ""
+	case .Add_To_Playlist:
+		client.write_pending = false
+		client.write_ok = local.ok
+		client.write_removed = false
+		delete(client.write_name)
+		client.write_name = local.playlist_name
+		local.playlist_name = ""
+		if local.ok {
+			delete(client.stale_playlist)
+			client.stale_playlist = strings.clone(local.playlist_id)
+		}
+		diagnostic.writef("library add-to-playlist ok=%v status=%d", local.ok, local.status)
+		diagnostic.result("add-to-playlist", local.ok, local.status, 0, 0, false)
+	case .Remove_From_Playlist:
+		client.write_pending = false
+		client.write_ok = local.ok
+		client.write_removed = true
+		delete(client.write_name)
+		client.write_name = local.playlist_name
+		local.playlist_name = ""
+		if local.ok {
+			delete(client.stale_playlist)
+			client.stale_playlist = strings.clone(local.playlist_id)
+			if client.detail.source == .Playlist && client.detail.id == local.playlist_id {
+				_ = remove_detail_row(client, local.track_uri)
+			}
+		}
+		diagnostic.writef("library remove-from-playlist ok=%v status=%d", local.ok, local.status)
+		diagnostic.result("remove-from-playlist", local.ok, local.status, 0, 0, false)
 	}
 }
 
@@ -1131,6 +1318,9 @@ stop :: proc(client: ^Client) {
 	delete(client.detail_request_id)
 	free_search_pages(&client.search_pages)
 	delete(client.search_query)
+	delete(client.me_id)
+	delete(client.write_name)
+	delete(client.stale_playlist)
 	for i in 0 ..< len(client.cover_queue) {artwork.free_image(&client.cover_queue[i].image)}
 	delete(client.cover_queue)
 	client^ = {}

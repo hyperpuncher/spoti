@@ -73,10 +73,33 @@ hit :: proc(id: string, point: sdl.FPoint) -> bool {
 	return hit_index(id, point, 0)
 }
 
+// Point test against a known box, for floating panels whose state is latched
+// one frame behind the layout.
+point_in_box :: proc(point: sdl.FPoint, box: clay.BoundingBox) -> bool {
+	return(
+		box.width > 0 &&
+		box.height > 0 &&
+		point.x >= box.x &&
+		point.x < box.x + box.width &&
+		point.y >= box.y &&
+		point.y < box.y + box.height \
+	)
+}
+
 // Overscan items can have rectangles outside their scroll viewport. Drawing
 // is clipped by Clay, but explicit rectangle hit tests must check the clip too.
 hit_clipped :: proc(id, clip: string, point: sdl.FPoint, index: u32 = 0) -> bool {
 	return hit(clip, point) && hit_index(id, point, index)
+}
+
+// The grid card under the pointer, or -1. Overscan cards outside the viewport
+// are skipped, so a drop or hover never lands on one the user cannot see.
+grid_card_at :: proc(page: ^library.Page, visible: Visible_Items, point: sdl.FPoint) -> int {
+	for index in visible.first ..< visible.last {
+		if index >= len(page.items) {continue}
+		if hit_clipped("card", "library_grid", point, u32(index)) {return index}
+	}
+	return -1
 }
 
 pointer_over :: proc(id: string, index: u32 = 0) -> bool {
@@ -465,6 +488,15 @@ parse_card_uri :: proc(uri: string) -> (source: library.Source, id: string, ok: 
 	return source, id, true
 }
 
+// Pixels the pointer must travel before a press becomes a drag.
+DRAG_THRESHOLD :: 6.0
+
+drag_started :: proc(current, start: sdl.FPoint, threshold: f32) -> bool {
+	dx := current.x - start.x
+	dy := current.y - start.y
+	return dx * dx + dy * dy >= threshold * threshold
+}
+
 main :: proc() {
 	verbose := false
 	for arg in os.args[1:] {
@@ -550,6 +582,20 @@ main :: proc() {
 	autoscroll_anchor := sdl.FPoint{}
 	autoscroll_moving := false
 	grid_smooth, detail_smooth: Smooth
+	picker_smooth: Smooth
+	toast := ""
+	defer delete(toast)
+	toast_until: u64
+	last_write_pending := false
+	drag_candidate := false
+	dragging := false
+	drag_index := -1
+	drag_start := sdl.FPoint{}
+	drag_uri := ""
+	defer delete(drag_uri)
+	drag_label := ""
+	defer delete(drag_label)
+	drop_target := -1
 	stage_sum: [3]f64
 	stage_max: [3]f64
 	stage_n := 0
@@ -1133,6 +1179,7 @@ main :: proc() {
 		// Glide wheel targets toward their offsets before the idle check so
 		// a settling glide keeps frames (and redraws) coming by itself.
 		smooth_dt := f32(sdl.GetTicksNS() - last) / 1e9
+		if smooth_step("playlist_picker", &picker_smooth, smooth_dt) {redraw = true}
 		if smooth_step("library_grid", &grid_smooth, smooth_dt) {redraw = true}
 		if smooth_step("detail_rows", &detail_smooth, smooth_dt) {redraw = true}
 		// The autoscroll step runs after layout, so a gliding frame must
@@ -1232,38 +1279,21 @@ main :: proc() {
 		}
 		link_album := len(foot_album_uri) > 0
 		link_artist := len(foot_first_uri) > 0
-		view := View {
-			title         = shown_title,
-			status        = shown_status,
-			album_linked  = link_album,
-			artist_linked = link_artist,
-			button        = button,
-			progress      = progress,
-			elapsed       = duration_text(shown_ms, times[0][:]),
-			total         = duration_text(duration_ms, times[1][:]),
-			input         = shown_input,
-			cover         = displayed_cover,
-			repeat        = repeat,
-			shuffle       = shuffle,
-			volume        = volume,
-			input_active  = input_active,
-			pinned        = detail_pinned,
-			search_mode   = search_mode,
-			sign_in       = library_prompt,
-			can_back      = nav_can_back(&nav),
-			can_forward   = nav_can_forward(&nav),
-			search_kind   = search_kind,
-			menu_open     = menu.open,
-			menu_x        = menu.point.x,
-			menu_y        = menu.point.y,
-			menu_count    = menu.count,
-			menu_selected = menu.selected,
-			menu_labels   = menu.labels,
-			scroll_active = autoscroll_container != "",
-			scroll_x      = autoscroll_anchor.x,
-			scroll_y      = autoscroll_anchor.y,
-			current_uri   = selected,
-			playing       = stage == .Playing,
+		// A finished write shows its outcome for a moment; the toast is the
+		// only signal that a change the user cannot see actually landed.
+		if last_write_pending && !library_client.write_pending {
+			verb := library_client.write_removed ? "Removed from" : "Added to"
+			if !library_client.write_ok {
+				verb = library_client.write_removed ? "Couldn't remove from" : "Couldn't add to"
+			}
+			delete(toast)
+			toast = fmt.aprintf("%s %s", verb, library_client.write_name)
+			toast_until = sdl.GetTicksNS() + 2_500_000_000
+		}
+		last_write_pending = library_client.write_pending
+		if len(toast) > 0 && sdl.GetTicksNS() > toast_until {
+			delete(toast)
+			toast = ""
 		}
 		width, height = ui.size(&state)
 		mouse_x, mouse_y: f32
@@ -1277,7 +1307,71 @@ main :: proc() {
 		previous_density := ui.scale(&state)
 		density := ui.update_scale(&state)
 		if density != previous_density {clay.ResetMeasureTextCache()}
-		wheel_used := scroll_wheel("library_grid", wheel.y, density, &grid_smooth)
+		// The picker submenu opens while the pointer is over the add row and
+		// stays open while it is over the menu or the panel, so the pointer
+		// can cross the small gap between them. Boxes are one frame old.
+		if menu.open {
+			add_index := menu_add_index(&menu)
+			add_box :=
+				clay.GetElementData(clay.ID("menu_item", u32(max(add_index, 0)))).boundingBox
+			menu_box := clay.GetElementData(clay.ID("context_menu")).boundingBox
+			panel_box := clay.GetElementData(clay.ID("playlist_picker_panel")).boundingBox
+			corridor := menu_box
+			corridor.width += 8 * density
+			over_add := add_index >= 0 && point_in_box(mouse, add_box)
+			over_picker := point_in_box(mouse, panel_box) || point_in_box(mouse, corridor)
+			menu.picker_open = over_add || (menu.picker_open && over_picker)
+		} else {
+			menu.picker_open = false
+		}
+		if menu.picker_open {rebuild_picker_items(&menu, &library_client)}
+		// A picker is an explicit ask for the full list, so keep paging the
+		// sidebar's playlist tab while it is open; the page interval paces it.
+		if menu.picker_open {library.more(&library_client, .Playlists)}
+		view := View {
+			title          = shown_title,
+			status         = shown_status,
+			album_linked   = link_album,
+			artist_linked  = link_artist,
+			button         = button,
+			progress       = progress,
+			elapsed        = duration_text(shown_ms, times[0][:]),
+			total          = duration_text(duration_ms, times[1][:]),
+			input          = shown_input,
+			cover          = displayed_cover,
+			repeat         = repeat,
+			shuffle        = shuffle,
+			volume         = volume,
+			input_active   = input_active,
+			pinned         = detail_pinned,
+			search_mode    = search_mode,
+			sign_in        = library_prompt,
+			can_back       = nav_can_back(&nav),
+			can_forward    = nav_can_forward(&nav),
+			search_kind    = search_kind,
+			menu_open      = menu.open,
+			menu_x         = menu.point.x,
+			menu_y         = menu.point.y,
+			menu_count     = menu.count,
+			menu_selected  = menu.selected,
+			menu_labels    = menu.labels,
+			menu_add_index = menu_add_index(&menu),
+			picker_open    = menu.picker_open,
+			picker_rows    = menu.picker_items[:],
+			drag_active    = dragging,
+			drag_x         = mouse.x,
+			drag_y         = mouse.y,
+			drag_label     = drag_label,
+			drop_target    = drop_target,
+			toast          = toast,
+			scroll_active  = autoscroll_container != "",
+			scroll_x       = autoscroll_anchor.x,
+			scroll_y       = autoscroll_anchor.y,
+			current_uri    = selected,
+			playing        = stage == .Playing,
+		}
+		wheel_used := scroll_wheel("playlist_picker", wheel.y, density, &picker_smooth)
+		if !wheel_used {wheel_used = scroll_wheel("library_grid", wheel.y, density, &grid_smooth)}
 		if !wheel_used {
 			wheel_used = scroll_wheel("detail_rows", wheel.y, density, &detail_smooth)
 			if wheel_used {detail_scroll_armed = false}
@@ -1416,6 +1510,10 @@ main :: proc() {
 			display_page = &library_client.search_pages[search_kind]
 			display_kind = search_kind
 		}
+		drop_target = -1
+		if dragging && display_kind == .Playlists {
+			drop_target = grid_card_at(display_page, visible.cards, mouse)
+		}
 		// Pages stream in as the grid nears the bottom; sorting applies to what
 		// is loaded, exactly like the reference client. Walking the whole
 		// collection would burn the dev-mode quota bucket on every launch.
@@ -1434,42 +1532,73 @@ main :: proc() {
 		}
 		track_selected := false
 		if clicked && menu.open {
-			for index in 0 ..< menu.count {
-				if !hit_index("menu_item", mouse_click, u32(index)) {continue}
-				switch menu.items[index] {
-				case .Pin:
-					_ = state_toggle_pin(&app_state, menu.uri)
-					if menu.uri == detail_card_uri(library_client.detail) {
-						detail_pinned = state_is_pinned(&app_state, menu.uri)
-					}
-					order_dirty = true
-					state_dirty = true
-				case .Pick_Sort:
-					app_state.sort[filter] = menu.sorts[index]
-					order_dirty = true
-					state_dirty = true
-				case .Copy_Link:
-					copy_spotify_uri(menu.uri)
-				case .Open_In_Spotify:
-					open_spotify_uri(menu.uri)
-				case .Play:
-					if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
-						queue_detail_rows(&play_queue, &library_client.detail)
-						stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
-						play_index =
-							shuffle ? reorder_play_queue(play_queue[:], menu.track, true) : menu.track
-						track_selected = select_play_item(
-							play_queue[:],
-							play_index,
-							&selected,
-							&player_cover,
-							&artist,
+			picked := false
+			if menu.picker_open {
+				for entry, index in menu.picker_items {
+					if !hit_index("picker_item", mouse_click, u32(index)) {continue}
+					if strings.has_prefix(entry.uri, "spotify:playlist:") {
+						_ = library.add_track_to_playlist(
+							&library_client,
+							entry.uri[len("spotify:playlist:"):],
+							entry.name,
+							menu.uri,
 						)
 					}
+					picked = true
+					break
 				}
-				break
 			}
-			menu.open = false
+			keep_open := false
+			if !picked {
+				for index in 0 ..< menu.count {
+					if !hit_index("menu_item", mouse_click, u32(index)) {continue}
+					switch menu.items[index] {
+					case .Pin:
+						_ = state_toggle_pin(&app_state, menu.uri)
+						if menu.uri == detail_card_uri(library_client.detail) {
+							detail_pinned = state_is_pinned(&app_state, menu.uri)
+						}
+						order_dirty = true
+						state_dirty = true
+					case .Pick_Sort:
+						app_state.sort[filter] = menu.sorts[index]
+						order_dirty = true
+						state_dirty = true
+					case .Copy_Link:
+						copy_spotify_uri(menu.uri)
+					case .Open_In_Spotify:
+						open_spotify_uri(menu.uri)
+					case .Play:
+						if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
+							queue_detail_rows(&play_queue, &library_client.detail)
+							stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
+							play_index =
+								shuffle ? reorder_play_queue(play_queue[:], menu.track, true) : menu.track
+							track_selected = select_play_item(
+								play_queue[:],
+								play_index,
+								&selected,
+								&player_cover,
+								&artist,
+							)
+						}
+					case .Add_To_Playlist:
+						menu.picker_open = true
+						keep_open = true
+					case .Remove_From_Playlist:
+						if len(library_client.detail.id) > 0 {
+							_ = library.remove_track_from_playlist(
+								&library_client,
+								library_client.detail.id,
+								library_client.detail.name,
+								menu.uri,
+							)
+						}
+					}
+					break
+				}
+			}
+			if !keep_open {menu.open = false}
 		} else if clicked {
 			if hit("library_scrollbar", mouse_click) {
 				begin_scrollbar_drag(&scrollbar_drag, "library_grid", mouse_click.y)
@@ -1676,27 +1805,19 @@ main :: proc() {
 								}
 								if handled {break}
 							}
-							queue_detail_rows(&play_queue, &library_client.detail)
-							stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
-							play_index =
-								shuffle ? reorder_play_queue(play_queue[:], index, true) : index
-							track_selected = select_play_item(
-								play_queue[:],
-								play_index,
-								&selected,
-								&player_cover,
-								&artist,
-							)
-							if track_selected {
-								state_note_recent(
-									&app_state,
-									detail_card_uri(library_client.detail),
-								)
-								order_dirty = true
-								state_dirty = true
-							}
+							// Arm a drag instead of playing: the play only fires
+							// on release without a drag, so a drop onto a
+							// playlist never also starts the track.
 							delete(input)
 							input = {}
+							drag_candidate = true
+							dragging = false
+							drag_index = index
+							drag_start = mouse_click
+							delete(drag_uri)
+							drag_uri = strings.clone(library_client.detail.rows[index].uri)
+							delete(drag_label)
+							drag_label = strings.clone(library_client.detail.rows[index].name)
 							handled = true
 							break
 						}
@@ -1707,6 +1828,50 @@ main :: proc() {
 					_ = sdl.StopTextInput(state.window)
 				}
 			}
+		}
+		// A track-row press arms a drag; a released press either drops the
+		// track on a playlist card or plays the row. Dragging never plays.
+		if drag_candidate && .LEFT in buttons {
+			if !dragging && drag_started(mouse, drag_start, DRAG_THRESHOLD * density) {
+				dragging = true
+			}
+		}
+		if drag_candidate && .LEFT not_in buttons {
+			if dragging {
+				if display_kind == .Playlists {
+					if index := grid_card_at(display_page, visible.cards, mouse); index >= 0 {
+						entry := display_page.items[index]
+						if strings.has_prefix(entry.uri, "spotify:playlist:") {
+							_ = library.add_track_to_playlist(
+								&library_client,
+								entry.uri[len("spotify:playlist:"):],
+								entry.name,
+								drag_uri,
+							)
+						}
+					}
+				}
+			} else if drag_index >= 0 && drag_index < len(library_client.detail.rows) {
+				index := drag_index
+				queue_detail_rows(&play_queue, &library_client.detail)
+				stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
+				play_index = shuffle ? reorder_play_queue(play_queue[:], index, true) : index
+				track_selected = select_play_item(
+					play_queue[:],
+					play_index,
+					&selected,
+					&player_cover,
+					&artist,
+				)
+				if track_selected {
+					state_note_recent(&app_state, detail_card_uri(library_client.detail))
+					order_dirty = true
+					state_dirty = true
+				}
+			}
+			drag_candidate = false
+			dragging = false
+			drag_index = -1
 		}
 		if resizing {
 			if .LEFT not_in buttons {

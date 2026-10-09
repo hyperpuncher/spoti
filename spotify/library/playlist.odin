@@ -28,6 +28,7 @@ fetch_playlist_rows :: proc(
 	offset: int,
 	allocator: runtime.Allocator,
 	reuse: rawptr = nil,
+	refresh: bool = false,
 ) -> (
 	rows: [dynamic]Track_Row,
 	total, next_offset: int,
@@ -39,13 +40,15 @@ fetch_playlist_rows :: proc(
 	if _, valid := track.parse_id(id); !valid {return}
 	// AP rows cache exactly like Web API bodies: a fresh pair parses
 	// straight off disk, a failed fetch falls back to the stale pair.
-	if cached_rows, cached_total, cached_next, cached_more, cached := read_playlist_cache(
-		id,
-		offset,
-		allocator,
-		PAGE_TTL,
-	); cached {
-		return cached_rows, cached_total, cached_next, cached_more, 200, true
+	if !refresh {
+		if cached_rows, cached_total, cached_next, cached_more, cached := read_playlist_cache(
+			id,
+			offset,
+			allocator,
+			PAGE_TTL,
+		); cached {
+			return cached_rows, cached_total, cached_next, cached_more, 200, true
+		}
 	}
 	address := fmt.aprintf(
 		"https://spclient.wg.spotify.com/playlist/v2/playlist/%s?decorate=revision,length,attributes,owner&from=%d&length=%d",

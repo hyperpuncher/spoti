@@ -2,6 +2,7 @@
 // Like a library page, a detail owns one arena and is released in one call.
 package library
 
+import diagnostic "../../diagnostic"
 import http "../http"
 import "base:runtime"
 import "core:encoding/json"
@@ -50,6 +51,8 @@ Detail :: struct {
 	image_small:   string,
 	image_preview: string, // selected card cover, retained until hero texture is ready
 	total:         int,
+	owner_id:      string, // playlist only; who can change the items
+	collaborative: bool, // playlist only; collaborators can change the items
 	rows:          [dynamic]Track_Row,
 	albums:        Release_Group,
 	singles:       Release_Group,
@@ -138,6 +141,7 @@ fetch_detail :: proc(
 	session_access: string = "",
 	reuse: rawptr = nil,
 	cache_only: bool = false,
+	refresh: bool = false,
 ) -> (
 	detail: Detail,
 	status: int,
@@ -160,6 +164,7 @@ fetch_detail :: proc(
 			"playlists",
 			reuse = reuse,
 			cache_only = cache_only,
+			refresh = refresh,
 		)
 		if !header_ok {
 			free_detail(&detail)
@@ -168,6 +173,8 @@ fetch_detail :: proc(
 		detail.label = strings.clone("Playlist", allocator)
 		detail.name = strings.clone(header.name, allocator)
 		detail.subtitle = strings.clone(header.owner.display_name, allocator)
+		detail.owner_id = strings.clone(header.owner.id, allocator)
+		detail.collaborative = header.collaborative
 		detail.image = strings.clone(cover_url_largest(header.images), allocator)
 		detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
 		detail.total = header.items.total
@@ -179,6 +186,7 @@ fetch_detail :: proc(
 			"albums",
 			reuse = reuse,
 			cache_only = cache_only,
+			refresh = refresh,
 		)
 		if !header_ok {
 			free_detail(&detail)
@@ -199,6 +207,7 @@ fetch_detail :: proc(
 			"artists",
 			reuse = reuse,
 			cache_only = cache_only,
+			refresh = refresh,
 		)
 		if !header_ok {
 			free_detail(&detail)
@@ -261,6 +270,7 @@ fetch_detail :: proc(
 		session_access,
 		reuse,
 		cache_only,
+		refresh,
 	)
 	if !rows_ok {
 		if source == .Playlist {
@@ -286,6 +296,7 @@ fetch_header :: proc(
 	access, id, resource: string,
 	reuse: rawptr = nil,
 	cache_only: bool = false,
+	refresh: bool = false,
 ) -> (
 	header: T,
 	status: int,
@@ -303,6 +314,7 @@ fetch_header :: proc(
 		reuse,
 		ttl = PAGE_TTL,
 		cache_only = cache_only,
+		refresh = refresh,
 	)
 	if !fetched {return {}, status, false}
 	defer delete(bytes)
@@ -322,6 +334,7 @@ fetch_track_page :: proc(
 	session_access: string = "",
 	reuse: rawptr = nil,
 	cache_only: bool = false,
+	refresh: bool = false,
 ) -> (
 	rows: [dynamic]Track_Row,
 	total: int,
@@ -332,10 +345,18 @@ fetch_track_page :: proc(
 ) {
 	if offset < 0 || offset > 1_000_000 || !safe_id(id) {return}
 	if source == .Artist {return}
-	body, body_status, fetched := fetch_track_body(access, source, id, offset, reuse, cache_only)
+	body, body_status, fetched := fetch_track_body(
+		access,
+		source,
+		id,
+		offset,
+		reuse,
+		cache_only,
+		refresh,
+	)
 	defer delete(body)
 	if fetched && source == .Playlist && body_status == 403 && session_access != "" {
-		return fetch_playlist_rows(session_access, id, offset, allocator, reuse)
+		return fetch_playlist_rows(session_access, id, offset, allocator, reuse, refresh)
 	}
 	if !fetched || body_status != 200 {return nil, 0, 0, false, body_status, false}
 	switch source {
@@ -406,6 +427,7 @@ fetch_track_body :: proc(
 	offset: int,
 	reuse: rawptr = nil,
 	cache_only: bool = false,
+	refresh: bool = false,
 ) -> (
 	body: [dynamic]u8,
 	status: int,
@@ -421,6 +443,7 @@ fetch_track_body :: proc(
 		reuse,
 		ttl = PAGE_TTL,
 		cache_only = cache_only,
+		refresh = refresh,
 	)
 }
 
@@ -615,12 +638,18 @@ track_row :: proc(track: Track_Ref, allocator: runtime.Allocator) -> (row: Track
 		true
 }
 
-safe_id :: proc(id: string) -> bool {
+// Spotify ids are base62. Account ids additionally allow the legacy '.',
+// '_' and '-' characters. The length cap keeps a hostile id from growing
+// without bound.
+safe_id :: proc(id: string, account := false) -> bool {
 	if len(id) == 0 || len(id) > 64 {return false}
 	for ch in transmute([]u8)id {
-		if !(ch >= '0' && ch <= '9' ||
-			   ch >= 'a' && ch <= 'z' ||
-			   ch >= 'A' && ch <= 'Z') {return false}
+		switch {
+		case ch >= '0' && ch <= '9', ch >= 'a' && ch <= 'z', ch >= 'A' && ch <= 'Z':
+		case account && (ch == '.' || ch == '_' || ch == '-'):
+		case:
+			return false
+		}
 	}
 	return true
 }
@@ -706,4 +735,130 @@ set_saved :: proc(
 	// A completed exchange is not a save: a 403 or a 429 must not flip the
 	// heart while Spotify kept nothing.
 	return status, ok && status >= 200 && status < 300
+}
+
+// Spotify caps one add at 100 items.
+ADD_ITEMS_MAX :: 100
+
+// Spotify URIs are colon-separated alphanumerics, so anything with a quote,
+// a backslash or a control byte is rejected instead of escaped.
+valid_item_uri :: proc(uri: string) -> bool {
+	if len(uri) == 0 || len(uri) > 128 {return false}
+	for ch in transmute([]u8)uri {
+		if ch < 0x20 || ch == '"' || ch == '\\' {return false}
+	}
+	return true
+}
+
+// Builds the JSON body for one add: `{"uris":["spotify:track:..."]}`.
+add_items_body :: proc(uris: []string) -> (body: string, ok: bool) {
+	if len(uris) == 0 || len(uris) > ADD_ITEMS_MAX {return "", false}
+	builder: strings.Builder
+	strings.builder_init(&builder, context.temp_allocator)
+	strings.write_string(&builder, `{"uris":[`)
+	for uri, index in uris {
+		if !valid_item_uri(uri) {return "", false}
+		if index > 0 {strings.write_byte(&builder, ',')}
+		strings.write_byte(&builder, '"')
+		strings.write_string(&builder, uri)
+		strings.write_byte(&builder, '"')
+	}
+	strings.write_string(&builder, `]}`)
+	return strings.to_string(builder), true
+}
+
+// Add track URIs to a playlist. Only a 2xx means Spotify stored them; a
+// followed playlist answers 403 because the caller neither owns it nor
+// collaborates on it. The JSON body is built here and never logged.
+add_to_playlist :: proc(
+	access, playlist_id: string,
+	uris: []string,
+	reuse: rawptr = nil,
+) -> (
+	status: int,
+	ok: bool,
+) {
+	if !safe_id(playlist_id) {return 0, false}
+	body_text, body_ok := add_items_body(uris)
+	if !body_ok {return 0, false}
+	address := fmt.aprintf("https://api.spotify.com/v1/playlists/%s/items", playlist_id)
+	defer delete(address)
+	body, code, fetched := http.post_json(
+		address,
+		body_text,
+		{bearer = access, limit = 4096},
+		reuse,
+	)
+	defer delete(body)
+	if !fetched {return code, false}
+	return code, code >= 200 && code < 300
+}
+
+// Builds the JSON body for a removal: `{"items":[{"uri":"..."}]}`.
+remove_items_body :: proc(uris: []string) -> (body: string, ok: bool) {
+	if len(uris) == 0 || len(uris) > ADD_ITEMS_MAX {return "", false}
+	builder: strings.Builder
+	strings.builder_init(&builder, context.temp_allocator)
+	strings.write_string(&builder, `{"items":[`)
+	for uri, index in uris {
+		if !valid_item_uri(uri) {return "", false}
+		if index > 0 {strings.write_byte(&builder, ',')}
+		strings.write_string(&builder, `{"uri":"`)
+		strings.write_string(&builder, uri)
+		strings.write_string(&builder, `"}`)
+	}
+	strings.write_string(&builder, `]}`)
+	return strings.to_string(builder), true
+}
+
+// Remove track URIs from a playlist. The non-deprecated /items path takes an
+// `items` array; the old /tracks path takes `tracks` and is deprecated.
+remove_from_playlist :: proc(
+	access, playlist_id: string,
+	uris: []string,
+	reuse: rawptr = nil,
+) -> (
+	status: int,
+	ok: bool,
+) {
+	if !safe_id(playlist_id) {return 0, false}
+	body_text, body_ok := remove_items_body(uris)
+	if !body_ok {return 0, false}
+	address := fmt.aprintf("https://api.spotify.com/v1/playlists/%s/items", playlist_id)
+	defer delete(address)
+	body, code, fetched := http.delete_json(
+		address,
+		body_text,
+		{bearer = access, limit = 4096},
+		reuse,
+	)
+	defer delete(body)
+	if !fetched {return code, false}
+	return code, code >= 200 && code < 300
+}
+
+// The signed-in account's own id. Needed to tell owned playlists from the
+// ones the account merely follows, since the Web API reports no edit flag.
+// Fetched fresh, never cached: the profile carries more than this app needs.
+ME_ADDRESS :: "https://api.spotify.com/v1/me"
+
+fetch_me :: proc(access: string, reuse: rawptr = nil) -> (id: string, status: int, ok: bool) {
+	body, code, fetched := http.get(ME_ADDRESS, {bearer = access, limit = 64 * 1024}, reuse)
+	defer delete(body)
+	if !fetched || code != 200 {
+		diagnostic.writef("library me fetch status=%d fetched=%v", code, fetched)
+		return "", code, false
+	}
+	profile: struct {
+		id: string,
+	}
+	if json.unmarshal(body[:], &profile, allocator = context.temp_allocator) != nil {
+		diagnostic.writef("library me parse status=%d bytes=%d", code, len(body))
+		return "", code, false
+	}
+	if !safe_id(profile.id, account = true) {
+		diagnostic.writef("library me id rejected len=%d", len(profile.id))
+		return "", code, false
+	}
+	return strings.clone(profile.id), code, true
 }

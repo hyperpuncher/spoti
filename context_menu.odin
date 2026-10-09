@@ -13,25 +13,38 @@ Menu_Item :: enum {
 	Open_In_Spotify,
 	Play,
 	Pick_Sort,
+	Add_To_Playlist,
+	Remove_From_Playlist,
 }
 
 Context_Menu :: struct {
-	open:     bool,
-	point:    sdl.FPoint,
-	track:    int, // detail row index, or -1 for cards
-	uri:      string, // owned clone of the target
-	items:    [4]Menu_Item,
-	labels:   [4]string,
-	count:    int,
-	selected: int, // check-marked row, or -1
-	sorts:    [4]Sort, // sort payload per row for Pick_Sort
+	open:         bool,
+	point:        sdl.FPoint,
+	track:        int, // detail row index, or -1 for cards
+	uri:          string, // owned clone of the target
+	items:        [4]Menu_Item,
+	labels:       [4]string,
+	count:        int,
+	selected:     int, // check-marked row, or -1
+	sorts:        [4]Sort, // sort payload per row for Pick_Sort
+	picker_open:  bool, // the nested add-to-playlist submenu is showing
+	picker_items: [dynamic]library.Entry, // reused, owned; the editable playlists
 }
 
 free_context_menu :: proc(menu: ^Context_Menu) {
 	delete(menu.uri)
+	delete(menu.picker_items)
 	menu^ = {}
 	// Only the sort picker marks a row; the others must not draw a check.
 	menu.selected = -1
+}
+
+// Row index of the add-to-playlist action, or -1 when the menu has none.
+menu_add_index :: proc(menu: ^Context_Menu) -> int {
+	for index in 0 ..< menu.count {
+		if menu.items[index] == .Add_To_Playlist {return index}
+	}
+	return -1
 }
 
 open_card_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, pinned: bool) {
@@ -49,7 +62,13 @@ open_card_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, pinn
 	menu.count = 3
 }
 
-open_track_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, track: int, uri: string) {
+open_track_menu :: proc(
+	menu: ^Context_Menu,
+	point: sdl.FPoint,
+	track: int,
+	uri: string,
+	removable: bool = false,
+) {
 	free_context_menu(menu)
 	menu.open = true
 	menu.point = point
@@ -57,11 +76,18 @@ open_track_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, track: int, uri:
 	menu.uri = strings.clone(uri)
 	menu.items[0] = .Play
 	menu.labels[0] = "Play"
-	menu.items[1] = .Copy_Link
-	menu.labels[1] = "Copy link"
-	menu.items[2] = .Open_In_Spotify
-	menu.labels[2] = "Open in Spotify"
-	menu.count = 3
+	if removable {
+		menu.items[1] = .Remove_From_Playlist
+		menu.labels[1] = "Remove from playlist"
+	} else {
+		menu.items[1] = .Add_To_Playlist
+		menu.labels[1] = "Add to playlist"
+	}
+	menu.items[2] = .Copy_Link
+	menu.labels[2] = "Copy link"
+	menu.items[3] = .Open_In_Spotify
+	menu.labels[3] = "Open in Spotify"
+	menu.count = 4
 }
 
 // Search tracks play with a left click; the menu only links out.
@@ -140,6 +166,118 @@ context_menu :: proc(view: View, textures: ^Textures, d: f32) {
 			}
 		}
 	}
+	if view.picker_open {playlist_picker(view, d)}
+}
+
+PICKER_WIDTH :: 260
+PICKER_ROW :: 30
+PICKER_MAX_HEIGHT :: 360
+
+// The playlists the account can add items to: owned or collaborative. Before
+// the account id arrives every loaded playlist is offered, and a pick that
+// turns out non-editable simply answers 403.
+rebuild_picker_items :: proc(menu: ^Context_Menu, client: ^library.Client) {
+	clear(&menu.picker_items)
+	for entry in client.pages[.Playlists].items {
+		editable := len(client.me_id) == 0 || entry.owner_id == client.me_id || entry.collaborative
+		if editable {append(&menu.picker_items, entry)}
+	}
+}
+
+// Nested submenu of the track menu: the playlists the account can add items
+// to. It opens beside the add-to-playlist row and scrolls when the list is
+// taller than the panel.
+playlist_picker :: proc(view: View, d: f32) {
+	add_index := view.menu_add_index
+	if add_index < 0 {return}
+	menu_box := clay.GetElementData(clay.ID("context_menu")).boundingBox
+	add_box := clay.GetElementData(clay.ID("menu_item", u32(add_index))).boundingBox
+	picker_x := menu_box.x + menu_box.width + 4 * d
+	picker_y := add_box.y
+	rows := f32(len(view.picker_rows))
+	panel_height := rows == 0 ? 44 * d : min(rows * PICKER_ROW * d + 12 * d, PICKER_MAX_HEIGHT * d)
+	if clay.UI_WithId(clay.ID("playlist_picker_panel"))(
+	{
+		layout = {
+			layoutDirection = .TopToBottom,
+			sizing = {
+				width = clay.SizingFixed(PICKER_WIDTH * d),
+				height = clay.SizingFixed(panel_height),
+			},
+			padding = clay.PaddingAll(u16(6 * d)),
+		},
+		floating = {offset = {picker_x, picker_y}, zIndex = 11, attachTo = .Root},
+		backgroundColor = PANEL,
+		cornerRadius = clay.CornerRadiusAll(8 * d),
+	},
+	) {
+		if rows == 0 {
+			clay.Text(
+				"No playlists you can edit",
+				clay.TextElementConfig{fontSize = 13, textColor = MUTED},
+			)
+			return
+		}
+		if clay.UI_WithId(clay.ID("playlist_picker"))(
+		{
+			layout = {
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+				childGap = u16(2 * d),
+			},
+			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+		},
+		) {
+			for entry, index in view.picker_rows {
+				hovered := clay.PointerOver(clay.ID("picker_item", u32(index)))
+				if clay.UI_WithId(clay.ID("picker_item", u32(index)))(
+				{
+					layout = {
+						sizing = {
+							width = clay.SizingGrow({}),
+							height = clay.SizingFixed((PICKER_ROW - 2) * d),
+						},
+						padding = {left = u16(8 * d), right = u16(8 * d)},
+						childGap = u16(8 * d),
+						childAlignment = {y = .Center},
+					},
+					backgroundColor = hovered ? HOVER : clay.Color{},
+					cornerRadius = clay.CornerRadiusAll(5 * d),
+				},
+				) {
+					if clay.UI()(
+					{
+						layout = {
+							sizing = {width = clay.SizingGrow({})},
+							childGap = u16(8 * d),
+							childAlignment = {y = .Center},
+						},
+						clip = {horizontal = true},
+					},
+					) {
+						clay.Text(
+							entry.name,
+							clay.TextElementConfig {
+								fontSize = 14,
+								textColor = WHITE,
+								wrapMode = .None,
+							},
+						)
+						if len(entry.subtitle) > 0 {
+							clay.Text(
+								entry.subtitle,
+								clay.TextElementConfig {
+									fontSize = 12,
+									textColor = MUTED,
+									wrapMode = .None,
+								},
+							)
+						}
+					}
+				}
+			}
+		}
+	}
 }
 
 // Picks the card or track under a right-click and opens its menu.
@@ -154,7 +292,11 @@ open_menu_at :: proc(
 ) {
 	for index in visible.tracks.first ..< visible.tracks.last {
 		if !hit_clipped("track_row", "detail_rows", point, u32(index)) {continue}
-		open_track_menu(menu, point, index, client.detail.rows[index].uri)
+		removable :=
+			client.detail.source == .Playlist &&
+			(len(client.detail.owner_id) > 0 && client.detail.owner_id == client.me_id ||
+					client.detail.collaborative)
+		open_track_menu(menu, point, index, client.detail.rows[index].uri, removable)
 		return
 	}
 	for index in visible.cards.first ..< visible.cards.last {

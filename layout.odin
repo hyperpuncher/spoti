@@ -93,37 +93,46 @@ SEARCH_TABS :: [4]library.Kind{.Playlists, .Albums, .Artists, .Tracks}
 SEARCH_TAB_LABELS :: [4]string{"Playlists", "Albums", "Artists", "Tracks"}
 
 View :: struct {
-	title:         string,
-	status:        string,
-	button:        string,
-	progress:      f32,
-	elapsed:       string,
-	total:         string,
-	input:         string,
-	cover:         string,
-	repeat:        bool,
-	shuffle:       bool,
-	volume:        f32,
-	input_active:  bool,
-	album_linked:  bool, // footer title opens the playing album
-	artist_linked: bool, // footer artist opens the playing artist
-	pinned:        bool,
-	sign_in:       bool, // a library browser approval is waiting for a click
-	can_back:      bool,
-	can_forward:   bool,
-	search_mode:   bool,
-	search_kind:   library.Kind,
-	menu_open:     bool,
-	menu_x:        f32,
-	menu_y:        f32,
-	menu_count:    int,
-	menu_labels:   [4]string,
-	menu_selected: int,
-	scroll_active: bool, // middle-click autoscroll anchor indicator
-	current_uri:   string, // borrowed selected track; matches a row uri while it owns playback
-	playing:       bool, // audio flowing this frame; freezes the row bars when false
-	scroll_x:      f32,
-	scroll_y:      f32,
+	title:          string,
+	status:         string,
+	button:         string,
+	progress:       f32,
+	elapsed:        string,
+	total:          string,
+	input:          string,
+	cover:          string,
+	repeat:         bool,
+	shuffle:        bool,
+	volume:         f32,
+	input_active:   bool,
+	album_linked:   bool, // footer title opens the playing album
+	artist_linked:  bool, // footer artist opens the playing artist
+	pinned:         bool,
+	sign_in:        bool, // a library browser approval is waiting for a click
+	can_back:       bool,
+	can_forward:    bool,
+	search_mode:    bool,
+	search_kind:    library.Kind,
+	menu_open:      bool,
+	menu_x:         f32,
+	menu_y:         f32,
+	menu_count:     int,
+	menu_labels:    [4]string,
+	menu_selected:  int,
+	menu_add_index: int, // row index of Add to playlist, or -1
+	picker_open:    bool,
+	picker_rows:    []library.Entry,
+	drag_active:    bool, // a track is being dragged onto a playlist card
+	drag_x:         f32,
+	drag_y:         f32,
+	drag_label:     string,
+	drop_target:    int, // playlist card index under the drag, or -1
+	toast:          string, // transient add-to-playlist feedback
+	scroll_active:  bool, // middle-click autoscroll anchor indicator
+	current_uri:    string, // borrowed selected track; matches a row uri while it owns playback
+	playing:        bool, // audio flowing this frame; freezes the row bars when false
+	scroll_x:       f32,
+	scroll_y:       f32,
 }
 
 chip :: proc(label: string, id: u32, active: bool, d: f32) {
@@ -583,6 +592,60 @@ autoscroll_indicator :: proc(view: View, textures: ^Textures, d: f32) {
 	}
 }
 
+// A small label that follows the pointer while a track is dragged onto a
+// playlist card. Passthrough so it never steals the pointer from the target.
+drag_ghost :: proc(view: View, d: f32) {
+	if !view.drag_active || len(view.drag_label) == 0 {return}
+	if clay.UI_WithId(clay.ID("drag_ghost"))(
+	{
+		layout = {
+			sizing = {width = clay.SizingFit({max = 220 * d}), height = clay.SizingFixed(34 * d)},
+			padding = {left = u16(12 * d), right = u16(12 * d)},
+			childAlignment = {y = .Center},
+		},
+		floating = {
+			offset = {view.drag_x + 14 * d, view.drag_y + 14 * d},
+			zIndex = 20,
+			attachTo = .Root,
+			pointerCaptureMode = .Passthrough,
+		},
+		backgroundColor = PANEL,
+		cornerRadius = clay.CornerRadiusAll(8 * d),
+	},
+	) {
+		clay.Text(
+			view.drag_label,
+			clay.TextElementConfig{fontSize = 14, textColor = WHITE, wrapMode = .None},
+		)
+	}
+}
+
+// Transient feedback for a playlist write, anchored above the player bar.
+// Passthrough so it never blocks a click.
+toast_banner :: proc(view: View, d: f32) {
+	if len(view.toast) == 0 {return}
+	if clay.UI_WithId(clay.ID("toast"))(
+	{
+		layout = {
+			sizing = {width = clay.SizingFit({max = 420 * d}), height = clay.SizingFixed(40 * d)},
+			padding = {left = u16(16 * d), right = u16(16 * d)},
+			childAlignment = {x = .Center, y = .Center},
+		},
+		floating = {
+			offset = {0, -110 * d},
+			zIndex = 30,
+			attachTo = .Root,
+			attachment = {element = .CenterBottom, parent = .CenterBottom},
+			pointerCaptureMode = .Passthrough,
+		},
+		backgroundColor = PANEL,
+		cornerRadius = clay.CornerRadiusAll(8 * d),
+	},
+	) {
+		clay.Text(view.toast, clay.TextElementConfig{fontSize = 14, textColor = WHITE})
+	}
+}
+
 // The app is unusable until the account is approved, so sign-in takes over
 // the whole window instead of sharing it with an empty library.
 sign_in_pending :: proc(state: library.State) -> bool {
@@ -725,6 +788,7 @@ layout :: proc(
 				card_text_height,
 				d,
 				dt,
+				view.drag_active ? view.drop_target : -1,
 			)
 			if clay.UI_WithId(clay.ID("sidebar_handle"))(
 			{
@@ -756,6 +820,8 @@ layout :: proc(
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
 		context_menu(view, textures, d)
+		drag_ghost(view, d)
+		toast_banner(view, d)
 		autoscroll_indicator(view, textures, d)
 	}
 	return clay.EndLayout(dt), visible
