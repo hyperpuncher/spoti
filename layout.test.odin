@@ -230,7 +230,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					)
 					if source == .Album {
 						rows := clay.GetScrollContainerData(clay.ID("detail_rows"))
-						expected_rows := 36 * d + 3000 * (44 * d + f32(u16(2 * d)))
+						expected_rows := 36 * d + 3000 * (ROW_HEIGHT * d + f32(u16(2 * d)))
 						testing.expect(
 							t,
 							math.abs(rows.contentDimensions.height - expected_rows) < 0.5,

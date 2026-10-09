@@ -84,15 +84,20 @@ track_skeleton :: proc(index: int, d: f32) {
 	if clay.UI()(
 	{
 		layout = {
-			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(44 * d)},
-			padding = {left = u16(12 * d), right = u16(92 * d)},
+			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(ROW_HEIGHT * d)},
+			padding = {left = u16(ROW_PAD_LEFT * d), right = u16(ROW_PAD_RIGHT * d)},
 			childAlignment = {y = .Center},
-			childGap = u16(18 * d),
+			childGap = u16(ROW_GAP * d),
 		},
 	},
 	) {
 		if clay.UI()(
-		{layout = {sizing = {width = clay.SizingFixed(24 * d)}, childAlignment = {x = .Right}}},
+		{
+			layout = {
+				sizing = {width = clay.SizingFixed(ROW_NUM_WIDTH * d)},
+				childAlignment = {x = .Right},
+			},
+		},
 		) {
 			clay.Text(
 				fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
@@ -225,7 +230,10 @@ playing_bars :: proc(playing: bool, d: f32) {
 	if clay.UI()(
 	{
 		layout = {
-			sizing = {width = clay.SizingFixed(24 * d), height = clay.SizingFixed(16 * d)},
+			sizing = {
+				width = clay.SizingFixed(ROW_NUM_WIDTH * d),
+				height = clay.SizingFixed(16 * d),
+			},
 			childAlignment = {x = .Center, y = .Bottom},
 			childGap = u16(3 * d),
 		},
@@ -535,6 +543,15 @@ loading_track_table :: proc(d: f32) {
 // header-aligned columns.
 ROW_COLUMN_BREAK :: 600
 
+// One track row's geometry, shared by rows, skeletons, the header labels
+// and the scroll strides so the columns never drift apart.
+ROW_HEIGHT :: 44
+ROW_PAD_LEFT :: 12
+ROW_PAD_RIGHT :: 92
+ROW_NUM_WIDTH :: 24
+ROW_DUR_WIDTH :: 56
+ROW_GAP :: 18
+
 // One track row: number, hover play icon, or playing bars, pre-shortened title,
 // linked artists and duration. Shared by track tables and Popular.
 track_list_row :: proc(
@@ -564,10 +581,10 @@ track_list_row :: proc(
 	if clay.UI_WithId(clay.ID("track_row", u32(index)))(
 	{
 		layout = {
-			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(44 * d)},
-			padding = {left = u16(12 * d), right = u16(92 * d)},
+			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(ROW_HEIGHT * d)},
+			padding = {left = u16(ROW_PAD_LEFT * d), right = u16(ROW_PAD_RIGHT * d)},
 			childAlignment = {y = .Center},
-			childGap = u16(18 * d),
+			childGap = u16(ROW_GAP * d),
 		},
 		backgroundColor = hovered ? HOVER : clay.Color{},
 		cornerRadius = clay.CornerRadiusAll(4 * d),
@@ -579,7 +596,7 @@ track_list_row :: proc(
 		} else if clay.UI()(
 		{
 			layout = {
-				sizing = {width = clay.SizingFixed(24 * d)},
+				sizing = {width = clay.SizingFixed(ROW_NUM_WIDTH * d)},
 				childAlignment = {x = .Right, y = .Center},
 			},
 		},
@@ -636,7 +653,7 @@ track_list_row :: proc(
 		if clay.UI()(
 		{
 			layout = {
-				sizing = {width = clay.SizingFixed(56 * d)},
+				sizing = {width = clay.SizingFixed(ROW_DUR_WIDTH * d)},
 				childAlignment = {x = .Right, y = .Center},
 			},
 			floating = {
@@ -698,9 +715,9 @@ track_table :: proc(
 		{
 			layout = {
 				sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(36 * d)},
-				padding = {left = u16(12 * d), right = u16(92 * d)},
+				padding = {left = u16(ROW_PAD_LEFT * d), right = u16(ROW_PAD_RIGHT * d)},
 				childAlignment = {y = .Center},
-				childGap = u16(18 * d),
+				childGap = u16(ROW_GAP * d),
 			},
 			border = {color = CARD, width = {bottom = 1}},
 		},
@@ -708,7 +725,7 @@ track_table :: proc(
 			if clay.UI()(
 			{
 				layout = {
-					sizing = {width = clay.SizingFixed(24 * d)},
+					sizing = {width = clay.SizingFixed(ROW_NUM_WIDTH * d)},
 					childAlignment = {x = .Right},
 				},
 			},
@@ -727,7 +744,7 @@ track_table :: proc(
 			if clay.UI()(
 			{
 				layout = {
-					sizing = {width = clay.SizingFixed(56 * d)},
+					sizing = {width = clay.SizingFixed(ROW_DUR_WIDTH * d)},
 					childAlignment = {x = .Right, y = .Center},
 				},
 				floating = {
@@ -751,7 +768,7 @@ track_table :: proc(
 			"detail_rows",
 			detail_item_count(len(detail.rows), detail.total, detail.has_more),
 			1,
-			44 * d + gap,
+			ROW_HEIGHT * d + gap,
 			viewport_height,
 			36 * d + gap,
 		)
@@ -844,7 +861,7 @@ artist_page :: proc(
 					"detail_rows",
 					len(detail.rows),
 					1,
-					44 * d + track_gap,
+					ROW_HEIGHT * d + track_gap,
 					viewport_height,
 					popular_leading,
 				)
@@ -869,7 +886,7 @@ artist_page :: proc(
 				leading =
 					clay.GetElementData(clay.ID("popular_title")).boundingBox.height +
 					track_gap +
-					f32(len(detail.rows)) * 44 * d +
+					f32(len(detail.rows)) * ROW_HEIGHT * d +
 					f32(max(len(detail.rows) - 1, 0)) * track_gap +
 					row_gap
 			}
