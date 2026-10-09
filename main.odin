@@ -1,3 +1,4 @@
+#+feature using-stmt
 package main
 
 import "base:runtime"
@@ -549,6 +550,105 @@ drag_started :: proc(current, start: sdl.FPoint, threshold: f32) -> bool {
 	return dx * dx + dy * dy >= threshold * threshold
 }
 
+// The whole program state in one value. main owns it and brings the
+// fields into scope with `using`, so frame stages can split into procs
+// without threading sixty locals through every signature.
+App :: struct {
+	state:                  ui.State,
+	worker:                 ^thread.Thread,
+	work:                   Login_Work,
+	play_source:            Play_Source,
+	preload_worker:         ^thread.Thread,
+	preload_work:           Preload_Work,
+	preload_attempted:      string,
+	cancel:                 bool,
+	closed:                 bool,
+	stream:                 ^sdl.AudioStream,
+	title:                  string,
+	artist:                 string,
+	selected:               string,
+	player_cover:           string,
+	displayed_cover:        string,
+	play_queue:             [dynamic]Play_Item,
+	play_index:             int,
+	queue_detail:           string,
+	queue_gen:              uint,
+	input:                  string,
+	input_active:           bool,
+	select_all:             bool,
+	search_mode:            bool,
+	search_kind:            library.Kind,
+	search_pending:         bool,
+	search_deadline:        u64,
+	textures:               Textures,
+	theme_dark:             bool,
+	mpris_active:           bool,
+	library_client:         library.Client,
+	app_state:              State,
+	filter:                 library.Kind,
+	sidebar_width:          f32,
+	state_dirty:            bool,
+	order_dirty:            bool,
+	pending_redraw:         bool,
+	detail_pinned:          bool,
+	nav:                    Nav,
+	nav_back_pressed:       bool,
+	nav_forward_pressed:    bool,
+	library_prompt_shown:   bool,
+	playback_prompt_opened: bool,
+	page_counts:            [library.Kind]int,
+	menu:                   Context_Menu,
+	resizing:               bool,
+	scrollbar_drag:         Scrollbar_Drag,
+	detail_scroll_target:   f32,
+	detail_scroll_armed:    bool,
+	last_detail_uri:        string,
+	autoscroll_container:   string,
+	autoscroll_anchor:      sdl.FPoint,
+	autoscroll_moving:      bool,
+	grid_smooth:            Smooth,
+	detail_smooth:          Smooth,
+	picker_smooth:          Smooth,
+	toast:                  string,
+	toast_until:            u64,
+	last_write_pending:     bool,
+	drag_candidate:         bool,
+	dragging:               bool,
+	drag_index:             int,
+	drag_start:             sdl.FPoint,
+	drag_uri:               string,
+	drag_label:             string,
+	drop_target:            int,
+	stage_sum:              [3]f64,
+	stage_max:              [3]f64,
+	stage_n:                int,
+	played:                 Last_Played,
+	restore_pending:        bool,
+	button_anims:           map[string]Button_Fx,
+	stage:                  Stage,
+	finished:               bool,
+	repeat:                 bool,
+	replay_pending:         bool,
+	play_after_stop:        bool,
+	fx_animating:           bool,
+	shuffle:                bool,
+	volume:                 f32,
+	volume_dragging:        bool,
+	seek_dragging:          bool,
+	start_paused:           bool,
+	seek_ms:                int,
+	sent_frames:            int,
+	sample_rate:            int,
+	duration_ms:            int,
+	displayed_ms:           int,
+	last:                   u64,
+	first_frame:            bool,
+	running:                bool,
+	width:                  c.int,
+	height:                 c.int,
+	queue:                  chan.Chan(player.Packet),
+}
+
 main :: proc() {
 	verbose := false
 	for arg in os.args[1:] {
@@ -560,102 +660,77 @@ main :: proc() {
 		diagnostic.write("clean shutdown")
 		diagnostic.close()
 	}
-	state, ok := ui.open("spoti", 1280, 820)
+	app := App{}
+	using app
+	ok := false
+	app.state, ok = ui.open("spoti", 1280, 820)
 	if !ok {return}
-	defer ui.close(&state)
+	defer ui.close(&app.state)
 	if !sdl.InitSubSystem(
 		sdl.INIT_AUDIO,
 	) {fmt.eprintln("could not initialize SDL3 audio:", sdl.GetError()); return}
 
 	memory := make([]u8, int(clay.MinMemorySize()))
 	defer delete(memory)
-	width, height := ui.size(&state)
+	width, height = ui.size(&state)
 	clay.Initialize(
 		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
 		{f32(width), f32(height)},
 		{handler = clay_error},
 	)
 	clay.SetMeasureTextFunction(measure_text, &state)
-
-	queue: chan.Chan(player.Packet)
-	worker: ^thread.Thread
-	work: Login_Work
-	play_source: Play_Source
-	preload_worker: ^thread.Thread
-	preload_work: Preload_Work
-	preload_attempted: string
-	cancel, closed := false, false
-	stream: ^sdl.AudioStream
-	title: string
-	artist: string
-	selected := strings.clone(session.TRACK_URL)
-	player_cover, displayed_cover: string
-	play_queue: [dynamic]Play_Item
-	play_index := -1
-	queue_detail := ""
-	queue_gen: uint
-	input: string
-	input_active := false
-	select_all := false
-	search_mode := false
-	search_kind := library.Kind.Playlists
-	search_pending := false
-	search_deadline: u64
-	textures := Textures {
+	cancel, closed = false, false
+	selected = strings.clone(session.TRACK_URL)
+	play_index = -1
+	queue_detail = ""
+	input_active = false
+	select_all = false
+	search_mode = false
+	search_kind = library.Kind.Playlists
+	search_pending = false
+	textures = Textures {
 		by_key    = make(map[u64]^sdl.Texture),
 		requested = make(map[u64]Cover_Request_State),
 	}
-	theme_dark := system_dark()
+	theme_dark = system_dark()
 	apply_theme(theme_dark)
 	load_icons(&state, &textures, theme_dark)
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
-	mpris_active := mpris.start(WAKE_EVENT != 0 ? wake_mpris : nil)
+	mpris_active = mpris.start(WAKE_EVENT != 0 ? wake_mpris : nil)
 	oauth.set_prompt_handler(prompt_arrived)
-	library_client: library.Client
-	app_state := load_state()
-	filter := app_state.tab
-	sidebar_width := app_state.sidebar_width
-	state_dirty := false
-	order_dirty := false
-	pending_redraw := false
-	detail_pinned := false
-	nav: Nav
-	nav_back_pressed, nav_forward_pressed: bool
-	library_prompt_shown := false
-	playback_prompt_opened := false
-	page_counts: [library.Kind]int
-	menu: Context_Menu
-	resizing := false
-	scrollbar_drag: Scrollbar_Drag
-	detail_scroll_target: f32
-	detail_scroll_armed := false
-	last_detail_uri := ""
+	app_state = load_state()
+	filter = app_state.tab
+	sidebar_width = app_state.sidebar_width
+	state_dirty = false
+	order_dirty = false
+	pending_redraw = false
+	detail_pinned = false
+	library_prompt_shown = false
+	playback_prompt_opened = false
+	resizing = false
+	detail_scroll_armed = false
+	last_detail_uri = ""
 	defer delete(last_detail_uri)
-	autoscroll_container := ""
-	autoscroll_anchor := sdl.FPoint{}
-	autoscroll_moving := false
-	grid_smooth, detail_smooth: Smooth
-	picker_smooth: Smooth
-	toast := ""
+	autoscroll_container = ""
+	autoscroll_anchor = sdl.FPoint{}
+	autoscroll_moving = false
+	toast = ""
 	defer delete(toast)
-	toast_until: u64
-	last_write_pending := false
-	drag_candidate := false
-	dragging := false
-	drag_index := -1
-	drag_start := sdl.FPoint{}
-	drag_uri := ""
+	last_write_pending = false
+	drag_candidate = false
+	dragging = false
+	drag_index = -1
+	drag_start = sdl.FPoint{}
+	drag_uri = ""
 	defer delete(drag_uri)
-	drag_label := ""
+	drag_label = ""
 	defer delete(drag_label)
-	drop_target := -1
-	stage_sum: [3]f64
-	stage_max: [3]f64
-	stage_n := 0
+	drop_target = -1
+	stage_n = 0
 	// Resume the last played track and reopen its collection. The footer
 	// shows it without starting playback; pressing play resumes it.
-	played := app_state.last_played
+	played = app_state.last_played
 	if len(played.track) > 0 {
 		delete(selected)
 		selected = strings.clone(played.track)
@@ -672,8 +747,8 @@ main :: proc() {
 		delete(player_cover)
 		player_cover = strings.clone(played.cover)
 	}
-	restore_pending := len(app_state.last_collection) > 0
-	button_anims := make(map[string]Button_Fx)
+	restore_pending = len(app_state.last_collection) > 0
+	button_anims = make(map[string]Button_Fx)
 	defer {
 		if worker != nil {release_worker(worker, queue, &cancel, closed)}
 		if preload_worker != nil {
@@ -704,19 +779,20 @@ main :: proc() {
 		delete(button_anims)
 		if mpris_active {mpris.close()}
 	}
-	stage := Stage.Idle
-	finished := false
-	repeat, replay_pending, play_after_stop := false, false, false
-	fx_animating := false
-	shuffle, volume_dragging := false, false
-	volume := app_state.volume
-	seek_dragging, start_paused := false, false
-	seek_ms := 0
-	sent_frames, sample_rate, duration_ms := 0, 0, 0
-	displayed_ms := 0
-	last := sdl.GetTicksNS()
-	first_frame := true
-	for running := true; running; {
+	stage = Stage.Idle
+	finished = false
+	repeat, replay_pending, play_after_stop = false, false, false
+	fx_animating = false
+	shuffle, volume_dragging = false, false
+	volume = app_state.volume
+	seek_dragging, start_paused = false, false
+	seek_ms = 0
+	sent_frames, sample_rate, duration_ms = 0, 0, 0
+	displayed_ms = 0
+	last = sdl.GetTicksNS()
+	first_frame = true
+	running = true
+	for running {
 		defer free_all(context.temp_allocator)
 		wheel := sdl.FPoint{}
 		mouse_click := sdl.FPoint{}
@@ -994,21 +1070,21 @@ main :: proc() {
 		if !running {break}
 		t0 := sdl.GetTicksNS()
 		if nav_back_pressed || nav_forward_pressed {
-			state: Nav_State
+			nav_state: Nav_State
 			moved := false
 			// The container vanishes while the next page loads, so the
 			// offset is banked before leaving and restored after.
 			nav_save_scroll(&nav, detail_scroll_y())
 			if nav_back_pressed {
 				nav_back_pressed = false
-				state, moved = nav_back(&nav)
+				nav_state, moved = nav_back(&nav)
 			} else {
 				nav_forward_pressed = false
-				state, moved = nav_forward(&nav)
+				nav_state, moved = nav_forward(&nav)
 			}
 			if moved {
 				nav_restore(
-					state,
+					nav_state,
 					&library_client,
 					&app_state,
 					&state_dirty,
@@ -1018,10 +1094,10 @@ main :: proc() {
 					&input,
 					&detail_pinned,
 				)
-				if len(state.detail.uri) == 0 {
+				if len(nav_state.detail.uri) == 0 {
 					detail_scroll_armed = false
 				} else {
-					detail_scroll_target = state.detail_scroll
+					detail_scroll_target = nav_state.detail_scroll
 					detail_scroll_armed = true
 				}
 				redraw = true
