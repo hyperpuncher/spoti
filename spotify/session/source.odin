@@ -119,7 +119,7 @@ open :: proc(
 		ok = true
 		return
 	}
-	if !fetch_cdn_url(keyring_mode, cancel, source.file_id, &source) {return}
+	fetch_cdn_url(keyring_mode, cancel, source.file_id, &source) or_return
 	ok = true
 	return
 }

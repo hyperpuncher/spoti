@@ -190,7 +190,7 @@ advance_play_item :: proc(
 	delta: int,
 	selected, cover, artist: ^string,
 ) -> bool {
-	if !select_play_item(items, index^ + delta, selected, cover, artist) {return false}
+	select_play_item(items, index^ + delta, selected, cover, artist) or_return
 	index^ += delta
 	return true
 }

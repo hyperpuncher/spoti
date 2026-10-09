@@ -193,7 +193,7 @@ ensure_tokens :: proc(client: ^Client, tokens: ^oauth.Tokens) -> bool {
 	if !oauth.expired(tokens^) {return true}
 	if sync.atomic_load(&client.cancel) {return false}
 	client_id := os.get_env("WEB_CLIENT_ID", context.temp_allocator)
-	if !valid_client_id(client_id) {return false}
+	valid_client_id(client_id) or_return
 	grant := oauth.web_grant(client_id)
 	fresh, status := oauth.refresh(tokens.refresh, grant)
 	if status != .Authorized {return false}
@@ -662,7 +662,7 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 		saved   = preview.saved,
 		refresh = stale,
 	}
-	if !queue_request(client, &request) {return false}
+	queue_request(client, &request) or_return
 	// Clone before releasing the current detail: discography cards can borrow
 	// their strings from that arena. Keep the card cover through hero loading.
 	next: Detail
@@ -750,7 +750,7 @@ add_track_to_playlist :: proc(
 		playlist_name = strings.clone(playlist_name),
 		track_uri     = strings.clone(track_uri),
 	}
-	if !queue_request(client, &request) {return false}
+	queue_request(client, &request) or_return
 	client.write_pending = true
 	return true
 }
@@ -768,7 +768,7 @@ remove_track_from_playlist :: proc(
 		playlist_name = strings.clone(playlist_name),
 		track_uri     = strings.clone(track_uri),
 	}
-	if !queue_request(client, &request) {return false}
+	queue_request(client, &request) or_return
 	client.write_pending = true
 	return true
 }
@@ -783,7 +783,7 @@ toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) ->
 		id     = strings.clone(id),
 		liked  = liked,
 	}
-	if !queue_request(client, &request) {return false}
+	queue_request(client, &request) or_return
 	client.like_pending = true
 	return true
 }
@@ -952,7 +952,7 @@ more_rows :: proc(client: ^Client) -> bool {
 		group   = group,
 		refresh = client.detail.source == .Playlist && client.detail.id == client.stale_playlist,
 	}
-	if !queue_request(client, &request) {return false}
+	queue_request(client, &request) or_return
 	client.detail_loading = true
 	client.detail_loading_at = time.time_add(time.now(), DETAIL_LOADING_DELAY)
 	if !fresh {client.page_at = time.time_add(time.now(), PAGE_INTERVAL)}
@@ -972,7 +972,7 @@ search :: proc(client: ^Client, query: string) -> bool {
 		query  = strings.clone(trimmed),
 		serial = client.search_serial,
 	}
-	if !queue_request(client, &request) {return false}
+	queue_request(client, &request) or_return
 	client.search_loading = true
 	client.search_error = 0
 	return true

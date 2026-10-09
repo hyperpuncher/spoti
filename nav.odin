@@ -129,14 +129,14 @@ nav_can_forward :: proc(nav: ^Nav) -> bool {
 	return nav.index + 1 < len(nav.states)
 }
 
-nav_back :: proc(nav: ^Nav) -> (Nav_State, bool) {
-	if !nav_can_back(nav) {return {}, false}
+nav_back :: proc(nav: ^Nav) -> (state: Nav_State, moved: bool) {
+	nav_can_back(nav) or_return
 	nav.index -= 1
 	return nav.states[nav.index], true
 }
 
-nav_forward :: proc(nav: ^Nav) -> (Nav_State, bool) {
-	if !nav_can_forward(nav) {return {}, false}
+nav_forward :: proc(nav: ^Nav) -> (state: Nav_State, moved: bool) {
+	nav_can_forward(nav) or_return
 	nav.index += 1
 	return nav.states[nav.index], true
 }
