@@ -690,6 +690,42 @@ track_row_boxes :: proc(
 	return
 }
 
+// One virtualized run of track rows into the shared scroll container.
+// Skeletons cover the not-yet-loaded tail when the total outruns the rows.
+track_row_list :: proc(
+	detail: ^library.Detail,
+	view: View,
+	textures: ^Textures,
+	ui_state: ^ui.State,
+	visible: Visible_Items,
+	columns: bool,
+	row_text, title_max, column_box, gap: f32,
+	d: f32,
+) {
+	list_spacer(visible.before - gap)
+	for index in visible.first ..< visible.last {
+		if index >= len(detail.rows) {
+			track_skeleton(index, d)
+			continue
+		}
+		row := &detail.rows[index]
+		track_list_row(
+			row,
+			index,
+			u32(index - visible.first),
+			view,
+			textures,
+			ui_state,
+			columns,
+			row_text,
+			title_max,
+			column_box,
+			d,
+		)
+	}
+	list_spacer(visible.after - gap)
+}
+
 track_table :: proc(
 	detail: ^library.Detail,
 	view: View,
@@ -772,29 +808,19 @@ track_table :: proc(
 			viewport_height,
 			36 * d + gap,
 		)
-		list_spacer(visible.before - gap)
-		for index in visible.first ..< visible.last {
-			if index >= len(detail.rows) {
-				track_skeleton(index, d)
-				continue
-			}
-			row := &detail.rows[index]
-			slot := u32(index - visible.first)
-			track_list_row(
-				row,
-				index,
-				slot,
-				view,
-				textures,
-				ui_state,
-				columns,
-				row_text,
-				title_max,
-				column_box,
-				d,
-			)
-		}
-		list_spacer(visible.after - gap)
+		track_row_list(
+			detail,
+			view,
+			textures,
+			ui_state,
+			visible,
+			columns,
+			row_text,
+			title_max,
+			column_box,
+			gap,
+			d,
+		)
 		scroll_fades(
 			"detail_rows",
 			textures,
@@ -865,24 +891,19 @@ artist_page :: proc(
 					viewport_height,
 					popular_leading,
 				)
-				list_spacer(visible.tracks.before - track_gap)
-				for index in visible.tracks.first ..< visible.tracks.last {
-					row := &detail.rows[index]
-					track_list_row(
-						row,
-						index,
-						u32(index - visible.tracks.first),
-						view,
-						textures,
-						ui_state,
-						row_columns,
-						row_text,
-						title_max,
-						column_box,
-						d,
-					)
-				}
-				list_spacer(visible.tracks.after - track_gap)
+				track_row_list(
+					detail,
+					view,
+					textures,
+					ui_state,
+					visible.tracks,
+					row_columns,
+					row_text,
+					title_max,
+					column_box,
+					track_gap,
+					d,
+				)
 				leading =
 					clay.GetElementData(clay.ID("popular_title")).boundingBox.height +
 					track_gap +
