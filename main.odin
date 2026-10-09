@@ -829,232 +829,8 @@ main :: proc() {
 		t0 := sdl.GetTicksNS()
 		app_navigate(&app, &frame)
 		app_search(&app, &frame)
-		if preload_worker != nil && thread.is_done(preload_worker) {
-			thread.join(preload_worker)
-			thread.destroy(preload_worker)
-			preload_worker = nil
-		}
-		if library_client.worker == nil {
-			_ = library.start(&library_client)
-		}
-		if library.poll(&library_client) {redraw = true}
-		// Sort before layout so a landed revalidation or a fresh pin paints in
-		// the correct order on the same frame instead of the next one.
-		sort_library_pages(&library_client, &app_state, &page_counts, order_dirty)
-		order_dirty = false
-		library_prompt := prompt_pending(.Library)
-		if library_prompt != library_prompt_shown {
-			library_prompt_shown = library_prompt
-			redraw = true
-		}
-		playback_prompt := prompt_pending(.Playback)
-		if playback_prompt {
-			if !playback_prompt_opened {
-				playback_prompt_opened = true
-				_ = open_prompt_url(.Playback)
-				redraw = true
-			}
-		} else if playback_prompt_opened {
-			playback_prompt_opened = false
-			redraw = true
-		}
-		// Playback can start before the last page lands; newly arrived rows
-		// extend the live queue in place when it still mirrors this page.
-		if len(queue_detail) > 0 &&
-		   library_client.detail.ready &&
-		   queue_detail == detail_card_uri(library_client.detail) &&
-		   queue_gen == library_client.detail.generation &&
-		   len(play_queue) < len(library_client.detail.rows) {
-			append_play_queue_tail(
-				&play_queue,
-				library_client.detail.rows[len(play_queue):],
-				library_client.detail.image_small,
-			)
-			stamp_queue_album(&play_queue, &library_client.detail)
-			redraw = true
-		}
-		// Spread texture uploads across frames; draining a backlog at once
-		// stalls a frame for every rounded corner and GPU upload in it.
-		uploads := 6
-		for uploads > 0 {
-			cover, received := library.take_cover(&library_client)
-			if !received {break}
-			uploads -= 1
-			redraw = true
-			request := textures.requested[cover.key]
-			request.pending = false
-			textures.requested[cover.key] = request
-			if len(cover.image.pixels) > 0 {
-				ui.round_image_pixels(cover.image.pixels, cover.image.width, cover.image.height)
-				texture := ui.create_texture(
-					&state,
-					cover.image.pixels,
-					cover.image.width,
-					cover.image.height,
-				)
-				if texture != nil {textures.by_key[cover.key] = texture}
-				delete(cover.image.pixels)
-			}
-		}
-		if restore_pending && library_client.state == .Ready {
-			restore_pending = false
-			// The library root is always the first history entry, so a restored
-			// collection lands on top of it and back closes it again.
-			nav_commit(&nav, nav_capture(&library_client, filter, search_mode, search_kind, input))
-			if !library_client.detail.ready &&
-			   !library_client.detail_loading &&
-			   len(app_state.last_collection) > 0 {
-				source, id, valid := parse_card_uri(app_state.last_collection)
-				if valid {
-					preview := library.Entry {
-						name  = app_state.last_name != "" ? app_state.last_name : app_state.last_played.title,
-						uri   = app_state.last_collection,
-						image = app_state.last_played.cover,
-						saved = app_state.last_saved,
-					}
-					if library.open_detail(&library_client, source, id, preview) {
-						detail_pinned = state_is_pinned(&app_state, app_state.last_collection)
-						nav_commit(
-							&nav,
-							nav_capture(&library_client, filter, search_mode, search_kind, input),
-						)
-					}
-				}
-			}
-		}
-		if stop_pressed {
-			if preload_worker != nil {sync.atomic_store(&preload_work.cancel, true)}
-			seek_dragging, start_paused = false, false
-			seek_ms = 0
-			play_after_stop, replay_pending = false, false
-		}
-		if stop_pressed && worker != nil && stage != .Stopping {
-			cancel_worker(queue, &cancel, &closed)
-			clear_audio_stream(&stream)
-			stage = .Stopping
-		}
-		if stage == .Stopping && thread.is_done(worker) {
-			redraw = true
-			release_worker(worker, queue, &cancel, closed)
-			worker = nil
-			finished = false
-			sent_frames, sample_rate = 0, 0
-			displayed_ms = seek_ms
-			stage = .Idle
-			if play_after_stop {
-				// Cleared when the new worker starts, so the footer holds
-				// pause across the idle handoff frame instead of flickering.
-				space_pressed = true
-			}
-		}
-		if stage == .Failed && worker != nil {
-			start_paused = false
-			cancel_worker(queue, &cancel, &closed)
-			if thread.is_done(worker) {
-				release_worker(worker, queue, &cancel, closed)
-				worker = nil
-			}
-		}
-		if stage != .Paused &&
-		   stage != .Stopping &&
-		   stage != .Failed &&
-		   worker != nil &&
-		   (stream == nil || sdl.GetAudioStreamQueued(stream) < player.PCM_BYTES * 2) {
-			packet, received := chan.try_recv(queue)
-			if received {
-				redraw = true
-				switch packet.kind {
-				case .Ready:
-					diagnostic.write("playback metadata ready")
-					delete(title)
-					title = packet.name
-					duration_ms = packet.duration_ms
-					stage = .Buffering
-				case .Audio:
-					if stream == nil {
-						spec := sdl.AudioSpec {
-							format   = .S16,
-							channels = 2,
-							freq     = c.int(packet.sample_rate),
-						}
-						stream = sdl.OpenAudioDeviceStream(
-							sdl.AUDIO_DEVICE_DEFAULT_PLAYBACK,
-							&spec,
-							nil,
-							nil,
-						)
-						if stream != nil {
-							_ = sdl.SetAudioStreamGain(stream, volume)
-							if !start_paused {_ = sdl.ResumeAudioStreamDevice(stream)}
-						}
-						sent_frames = packet.position_frames
-						sample_rate = packet.sample_rate
-					}
-					if stream == nil ||
-					   !sdl.PutAudioStreamData(
-							   stream,
-							   raw_data(packet.pcm),
-							   c.int(packet.frames * 2 * size_of(i16)),
-						   ) {
-						fmt.eprintln("SDL3 audio device or stream failed:", sdl.GetError())
-						stage = .Failed
-					} else {
-						sent_frames += packet.frames
-						stage = start_paused ? .Paused : .Playing
-						start_paused = false
-					}
-					delete(packet.pcm)
-				case .End:
-					diagnostic.write("playback decoder reached end")
-					finished = true
-					if stream != nil {_ = sdl.FlushAudioStream(stream)} else {stage = .Ended}
-				case .Failed:
-					diagnostic.write("playback worker failed")
-					fmt.eprintln("sign-in, CDN stream, or Vorbis decoding failed")
-					stage = .Failed
-				}
-			}
-		}
-		if finished &&
-		   stage == .Playing &&
-		   stream != nil &&
-		   sdl.GetAudioStreamQueued(stream) == 0 {
-			stage = .Ended
-			if !seek_dragging && repeat {
-				replay_pending = true
-			} else if !seek_dragging &&
-			   advance_play_item(
-				   play_queue[:],
-				   &play_index,
-				   1,
-				   &selected,
-				   &player_cover,
-				   &artist,
-			   ) {
-				replay_pending = true
-			}
-			redraw = true
-		}
-		if replay_pending && stage == .Ended && worker != nil && thread.is_done(worker) {
-			// Cleared on worker start like play_after_stop.
-			space_pressed = true
-			redraw = true
-		}
-		if stage == .Playing && play_index >= 0 && play_index + 1 < len(play_queue) {
-			next_uri := play_queue[play_index + 1].uri
-			if preload_worker != nil && preload_work.track != next_uri {
-				sync.atomic_store(&preload_work.cancel, true)
-			}
-			if preload_worker == nil && next_uri != preload_attempted && next_uri != selected {
-				clear_preload(&preload_work)
-				delete(preload_attempted)
-				preload_attempted = strings.clone(next_uri)
-				preload_work = {
-					track = strings.clone(next_uri),
-				}
-				preload_worker = thread.create_and_start_with_data(&preload_work, preload_track)
-			}
-		}
+		library_prompt, playback_prompt := app_library(&app, &frame)
+		app_playback(&app, &frame)
 		// Glide wheel targets toward their offsets before the idle check so
 		// a settling glide keeps frames (and redraws) coming by itself.
 		smooth_dt := f32(sdl.GetTicksNS() - last) / 1e9
@@ -2381,6 +2157,237 @@ app_search :: proc(app: ^App, frame: ^Frame) {
 			search_mode = true
 			nav_save_scroll(&nav, detail_scroll_y())
 			nav_record_search(&nav, &library_client, filter, search_kind, input)
+		}
+	}
+}
+
+// Worker joins, library polling and sorting, cover uploads and the
+// reopened-collection restore.
+app_library :: proc(app: ^App, frame: ^Frame) -> (library_prompt, playback_prompt: bool) {
+	using app
+	using frame
+	if preload_worker != nil && thread.is_done(preload_worker) {
+		thread.join(preload_worker)
+		thread.destroy(preload_worker)
+		preload_worker = nil
+	}
+	if library_client.worker == nil {
+		_ = library.start(&library_client)
+	}
+	if library.poll(&library_client) {redraw = true}
+	// Sort before layout so a landed revalidation or a fresh pin paints in
+	// the correct order on the same frame instead of the next one.
+	sort_library_pages(&library_client, &app_state, &page_counts, order_dirty)
+	order_dirty = false
+	library_prompt = prompt_pending(.Library)
+	if library_prompt != library_prompt_shown {
+		library_prompt_shown = library_prompt
+		redraw = true
+	}
+	playback_prompt = prompt_pending(.Playback)
+	if playback_prompt {
+		if !playback_prompt_opened {
+			playback_prompt_opened = true
+			_ = open_prompt_url(.Playback)
+			redraw = true
+		}
+	} else if playback_prompt_opened {
+		playback_prompt_opened = false
+		redraw = true
+	}
+	// Playback can start before the last page lands; newly arrived rows
+	// extend the live queue in place when it still mirrors this page.
+	if len(queue_detail) > 0 &&
+	   library_client.detail.ready &&
+	   queue_detail == detail_card_uri(library_client.detail) &&
+	   queue_gen == library_client.detail.generation &&
+	   len(play_queue) < len(library_client.detail.rows) {
+		append_play_queue_tail(
+			&play_queue,
+			library_client.detail.rows[len(play_queue):],
+			library_client.detail.image_small,
+		)
+		stamp_queue_album(&play_queue, &library_client.detail)
+		redraw = true
+	}
+	// Spread texture uploads across frames; draining a backlog at once
+	// stalls a frame for every rounded corner and GPU upload in it.
+	uploads := 6
+	for uploads > 0 {
+		cover, received := library.take_cover(&library_client)
+		if !received {break}
+		uploads -= 1
+		redraw = true
+		request := textures.requested[cover.key]
+		request.pending = false
+		textures.requested[cover.key] = request
+		if len(cover.image.pixels) > 0 {
+			ui.round_image_pixels(cover.image.pixels, cover.image.width, cover.image.height)
+			texture := ui.create_texture(
+				&state,
+				cover.image.pixels,
+				cover.image.width,
+				cover.image.height,
+			)
+			if texture != nil {textures.by_key[cover.key] = texture}
+			delete(cover.image.pixels)
+		}
+	}
+	if restore_pending && library_client.state == .Ready {
+		restore_pending = false
+		// The library root is always the first history entry, so a restored
+		// collection lands on top of it and back closes it again.
+		nav_commit(&nav, nav_capture(&library_client, filter, search_mode, search_kind, input))
+		if !library_client.detail.ready &&
+		   !library_client.detail_loading &&
+		   len(app_state.last_collection) > 0 {
+			source, id, valid := parse_card_uri(app_state.last_collection)
+			if valid {
+				preview := library.Entry {
+					name  = app_state.last_name != "" ? app_state.last_name : app_state.last_played.title,
+					uri   = app_state.last_collection,
+					image = app_state.last_played.cover,
+					saved = app_state.last_saved,
+				}
+				if library.open_detail(&library_client, source, id, preview) {
+					detail_pinned = state_is_pinned(&app_state, app_state.last_collection)
+					nav_commit(
+						&nav,
+						nav_capture(&library_client, filter, search_mode, search_kind, input),
+					)
+				}
+			}
+		}
+	}
+	return library_prompt, playback_prompt
+}
+
+// Playback worker lifecycle, decoder packets, end-of-track advance and
+// next-track preload.
+app_playback :: proc(app: ^App, frame: ^Frame) {
+	using app
+	using frame
+	if stop_pressed {
+		if preload_worker != nil {sync.atomic_store(&preload_work.cancel, true)}
+		seek_dragging, start_paused = false, false
+		seek_ms = 0
+		play_after_stop, replay_pending = false, false
+	}
+	if stop_pressed && worker != nil && stage != .Stopping {
+		cancel_worker(queue, &cancel, &closed)
+		clear_audio_stream(&stream)
+		stage = .Stopping
+	}
+	if stage == .Stopping && thread.is_done(worker) {
+		redraw = true
+		release_worker(worker, queue, &cancel, closed)
+		worker = nil
+		finished = false
+		sent_frames, sample_rate = 0, 0
+		displayed_ms = seek_ms
+		stage = .Idle
+		if play_after_stop {
+			// Cleared when the new worker starts, so the footer holds
+			// pause across the idle handoff frame instead of flickering.
+			space_pressed = true
+		}
+	}
+	if stage == .Failed && worker != nil {
+		start_paused = false
+		cancel_worker(queue, &cancel, &closed)
+		if thread.is_done(worker) {
+			release_worker(worker, queue, &cancel, closed)
+			worker = nil
+		}
+	}
+	if stage != .Paused &&
+	   stage != .Stopping &&
+	   stage != .Failed &&
+	   worker != nil &&
+	   (stream == nil || sdl.GetAudioStreamQueued(stream) < player.PCM_BYTES * 2) {
+		packet, received := chan.try_recv(queue)
+		if received {
+			redraw = true
+			switch packet.kind {
+			case .Ready:
+				diagnostic.write("playback metadata ready")
+				delete(title)
+				title = packet.name
+				duration_ms = packet.duration_ms
+				stage = .Buffering
+			case .Audio:
+				if stream == nil {
+					spec := sdl.AudioSpec {
+						format   = .S16,
+						channels = 2,
+						freq     = c.int(packet.sample_rate),
+					}
+					stream = sdl.OpenAudioDeviceStream(
+						sdl.AUDIO_DEVICE_DEFAULT_PLAYBACK,
+						&spec,
+						nil,
+						nil,
+					)
+					if stream != nil {
+						_ = sdl.SetAudioStreamGain(stream, volume)
+						if !start_paused {_ = sdl.ResumeAudioStreamDevice(stream)}
+					}
+					sent_frames = packet.position_frames
+					sample_rate = packet.sample_rate
+				}
+				if stream == nil ||
+				   !sdl.PutAudioStreamData(
+						   stream,
+						   raw_data(packet.pcm),
+						   c.int(packet.frames * 2 * size_of(i16)),
+					   ) {
+					fmt.eprintln("SDL3 audio device or stream failed:", sdl.GetError())
+					stage = .Failed
+				} else {
+					sent_frames += packet.frames
+					stage = start_paused ? .Paused : .Playing
+					start_paused = false
+				}
+				delete(packet.pcm)
+			case .End:
+				diagnostic.write("playback decoder reached end")
+				finished = true
+				if stream != nil {_ = sdl.FlushAudioStream(stream)} else {stage = .Ended}
+			case .Failed:
+				diagnostic.write("playback worker failed")
+				fmt.eprintln("sign-in, CDN stream, or Vorbis decoding failed")
+				stage = .Failed
+			}
+		}
+	}
+	if finished && stage == .Playing && stream != nil && sdl.GetAudioStreamQueued(stream) == 0 {
+		stage = .Ended
+		if !seek_dragging && repeat {
+			replay_pending = true
+		} else if !seek_dragging &&
+		   advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover, &artist) {
+			replay_pending = true
+		}
+		redraw = true
+	}
+	if replay_pending && stage == .Ended && worker != nil && thread.is_done(worker) {
+		// Cleared on worker start like play_after_stop.
+		space_pressed = true
+		redraw = true
+	}
+	if stage == .Playing && play_index >= 0 && play_index + 1 < len(play_queue) {
+		next_uri := play_queue[play_index + 1].uri
+		if preload_worker != nil && preload_work.track != next_uri {
+			sync.atomic_store(&preload_work.cancel, true)
+		}
+		if preload_worker == nil && next_uri != preload_attempted && next_uri != selected {
+			clear_preload(&preload_work)
+			delete(preload_attempted)
+			preload_attempted = strings.clone(next_uri)
+			preload_work = {
+				track = strings.clone(next_uri),
+			}
+			preload_worker = thread.create_and_start_with_data(&preload_work, preload_track)
 		}
 	}
 }
