@@ -535,13 +535,14 @@ loading_track_table :: proc(d: f32) {
 // header-aligned columns.
 ROW_COLUMN_BREAK :: 600
 
-// One track row: number or playing bars, pre-shortened title, linked
-// artists and duration. Shared by track tables and Popular.
+// One track row: number, hover play icon, or playing bars, pre-shortened title,
+// linked artists and duration. Shared by track tables and Popular.
 track_list_row :: proc(
 	row: ^library.Track_Row,
 	index: int,
 	slot: u32,
 	view: View,
+	textures: ^Textures,
 	ui_state: ^ui.State,
 	columns: bool,
 	row_text, title_max, column_box: f32,
@@ -576,12 +577,21 @@ track_list_row :: proc(
 		if current {
 			playing_bars(view.playing, d)
 		} else if clay.UI()(
-		{layout = {sizing = {width = clay.SizingFixed(24 * d)}, childAlignment = {x = .Right}}},
+		{
+			layout = {
+				sizing = {width = clay.SizingFixed(24 * d)},
+				childAlignment = {x = .Right, y = .Center},
+			},
+		},
 		) {
-			clay.Text(
-				fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
-				clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
-			)
+			if hovered {
+				icon_element(textures, "play-filled", .White, 12 * d)
+			} else {
+				clay.Text(
+					fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
+					clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
+				)
+			}
 		}
 		// Wide rows give the title a fixed column under the header;
 		// narrow rows hug the text so the artist follows at exactly
@@ -758,6 +768,7 @@ track_table :: proc(
 				index,
 				slot,
 				view,
+				textures,
 				ui_state,
 				columns,
 				row_text,
@@ -845,6 +856,7 @@ artist_page :: proc(
 						index,
 						u32(index - visible.tracks.first),
 						view,
+						textures,
 						ui_state,
 						row_columns,
 						row_text,
