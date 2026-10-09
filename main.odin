@@ -851,14 +851,6 @@ main :: proc() {
 		app_glide(&app, &frame)
 		if !redraw && stage != .Playing {continue}
 
-		mouse_x, mouse_y: f32
-		buttons = sdl.GetMouseState(&mouse_x, &mouse_y)
-		mouse = ui.mouse_position(&state, mouse_x, mouse_y)
-		clay.SetLayoutDimensions({f32(width), f32(height)})
-		clay.SetPointerState({mouse.x, mouse.y}, .LEFT in buttons)
-		previous_density := ui.scale(&state)
-		density = ui.update_scale(&state)
-		if density != previous_density {clay.ResetMeasureTextCache()}
 		visible := app_layout(&app, &frame)
 		display_page = &library_client.pages[filter]
 		display_kind = filter
@@ -1490,6 +1482,14 @@ app_glide :: proc(app: ^App, frame: ^Frame) {
 app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	using app
 	using frame
+	mouse_x, mouse_y: f32
+	buttons = sdl.GetMouseState(&mouse_x, &mouse_y)
+	mouse = ui.mouse_position(&state, mouse_x, mouse_y)
+	clay.SetLayoutDimensions({f32(width), f32(height)})
+	clay.SetPointerState({mouse.x, mouse.y}, .LEFT in buttons)
+	previous_density := ui.scale(&state)
+	density = ui.update_scale(&state)
+	if density != previous_density {clay.ResetMeasureTextCache()}
 	progress := f32(0)
 	if duration_ms > 0 {
 		// Kept times hold the bar steady across worker swaps; live audio
@@ -1506,9 +1506,9 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	seek_enabled = duration_ms > 0 && (stage == .Playing || stage == .Paused || stage == .Ended)
 	if seek_dragging && seek_enabled {
 		box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
-		mouse_x: f32
-		_ = sdl.GetMouseState(&mouse_x, nil)
-		point := ui.mouse_position(&state, mouse_x, 0)
+		preview_x: f32
+		_ = sdl.GetMouseState(&preview_x, nil)
+		point := ui.mouse_position(&state, preview_x, 0)
 		preview := seek_position_ms(point.x, box.x, box.width, duration_ms)
 		progress = f32(preview) / f32(duration_ms)
 		shown_ms = preview
