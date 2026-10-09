@@ -649,6 +649,31 @@ App :: struct {
 	queue:                  chan.Chan(player.Packet),
 }
 
+// Per-frame scratch. Zeroed every iteration; stages share it instead of
+// threading temps through signatures.
+Frame :: struct {
+	wheel:                sdl.FPoint,
+	mouse_click:          sdl.FPoint,
+	mouse_right:          sdl.FPoint,
+	middle_click:         sdl.FPoint,
+	clicked:              bool,
+	right_clicked:        bool,
+	space_pressed:        bool,
+	stop_pressed:         bool,
+	middle_clicked:       bool,
+	input_changed:        bool,
+	track_selected:       bool,
+	hero_pressed:         bool,
+	hero_start:           bool,
+	restart_playback:     bool,
+	track_delta:          int,
+	seek_requested:       bool,
+	mpris_delta:          int,
+	mpris_seek_ms:        int,
+	mpris_seek_requested: bool,
+	redraw:               bool,
+}
+
 main :: proc() {
 	verbose := false
 	for arg in os.args[1:] {
@@ -794,279 +819,12 @@ main :: proc() {
 	running = true
 	for running {
 		defer free_all(context.temp_allocator)
-		wheel := sdl.FPoint{}
-		mouse_click := sdl.FPoint{}
-		mouse_right := sdl.FPoint{}
-		clicked, right_clicked, space_pressed, stop_pressed := false, false, false, false
-		middle_clicked := false
-		middle_click := sdl.FPoint{}
-		input_changed := false
-		event: sdl.Event
-		wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
-		fades_animating :=
-			(textures.fade_top_alpha != 0 && textures.fade_top_alpha != 1) ||
-			(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1) ||
-			(textures.fade_detail_top_alpha != 0 && textures.fade_detail_top_alpha != 1) ||
-			(textures.fade_detail_bottom_alpha != 0 && textures.fade_detail_bottom_alpha != 1)
-		// Anything animating renders at the display rate, so the idle poll
-		// below can never throttle a scroll glide or a button spring.
-		if stage == .Playing ||
-		   autoscroll_moving ||
-		   grid_smooth.active ||
-		   detail_smooth.active ||
-		   fx_animating ||
-		   fades_animating ||
-		   first_frame {
-			wait_ms = 0
-		} else {
-			// Idle work still polls for results so they appear promptly.
-			if stage == .Signing_In ||
-			   stage == .Buffering ||
-			   stage == .Stopping ||
-			   (stage == .Ended && replay_pending) ||
-			   (stage == .Failed && worker != nil) {wait_ms = 40}
-			if library_client.state == .Authorizing ||
-			   library_client.state == .Loading ||
-			   library_client.detail_loading ||
-			   library_client.search_loading ||
-			   library_client.covers_pending > 0 {wait_ms = 40}
-			for pending in library_client.pending {
-				if pending {wait_ms = 40; break}
-			}
-			if preload_worker != nil && stage != .Playing {wait_ms = 40}
-		}
-		// If the wake event could not be registered, poll the bus instead.
-		if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
-		if search_pending {
-			tick := sdl.GetTicksNS()
-			remaining_ms := i32(0)
-			if search_deadline > tick {
-				remaining_ms = i32((search_deadline - tick) / 1_000_000)
-			}
-			wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
-		}
-		has_event := sdl.WaitEventTimeout(&event, wait_ms)
-		redraw := has_event || first_frame || fx_animating || fades_animating || pending_redraw
+		frame := Frame{}
+		using frame
+		has_event, fades_animating := app_events(&app, &frame)
+		redraw = has_event || first_frame || fx_animating || fades_animating || pending_redraw
 		pending_redraw = false
 		first_frame = false
-		if has_event {
-			for {
-				#partial switch event.type {
-				case .QUIT, .WINDOW_CLOSE_REQUESTED:
-					running = false
-				case .SYSTEM_THEME_CHANGED:
-					next_dark := system_dark()
-					if next_dark != theme_dark {
-						theme_dark = next_dark
-						apply_theme(theme_dark)
-						retint_icons(&textures, theme_dark)
-						retint_fades(&textures)
-						first_frame = true
-					}
-				case .MOUSE_BUTTON_UP:
-					if event.button.button == sdl.BUTTON_LEFT {
-						if resizing {
-							app_state.sidebar_width = sidebar_width
-							state_dirty = true
-						}
-						resizing = false
-					}
-				case .KEY_DOWN:
-					if input_active {
-						key_mod := event.key.mod
-						cmd :=
-							.LCTRL in key_mod ||
-							.RCTRL in key_mod ||
-							.LGUI in key_mod ||
-							.RGUI in key_mod
-						#partial switch event.key.scancode {
-						case .ESCAPE:
-							select_all = false
-							input_active = false
-							_ = sdl.StopTextInput(state.window)
-							if len(strings.trim_space(input)) == 0 && search_mode {
-								library.clear_search(&library_client)
-								search_mode = false
-								search_pending = false
-								delete(input)
-								input = {}
-								nav_replace(
-									&nav,
-									nav_capture(&library_client, filter, false, search_kind, ""),
-								)
-							}
-						case .BACKSPACE:
-							if len(input) > 0 {
-								gui := .LGUI in key_mod || .RGUI in key_mod
-								alt := .LALT in key_mod || .RALT in key_mod
-								shorter: string
-								if select_all || (gui && !alt) {
-									shorter = {}
-								} else if cmd || alt {
-									shorter = delete_last_word(input)
-								} else {
-									_, size := utf8.decode_last_rune(input)
-									if size == 0 {size = 1}
-									shorter = strings.clone(input[:len(input) - size])
-								}
-								delete(input)
-								input = shorter
-								select_all = false
-								input_changed = true
-							}
-						case .A:
-							if cmd && len(input) > 0 {select_all = true}
-						case .U:
-							if cmd && len(input) > 0 {
-								delete(input)
-								input = {}
-								select_all = false
-								input_changed = true
-							}
-						case .W:
-							if cmd && len(input) > 0 {
-								shorter := delete_last_word(input)
-								delete(input)
-								input = shorter
-								select_all = false
-								input_changed = true
-							}
-						case .V, .INSERT:
-							shift := .LSHIFT in key_mod || .RSHIFT in key_mod
-							ctrl := .LCTRL in key_mod || .RCTRL in key_mod
-							inserting := event.key.scancode == .INSERT
-							if inserting && ctrl && !shift {
-								if len(input) > 0 {
-									c_input := strings.clone_to_cstring(input)
-									defer delete(c_input)
-									_ = sdl.SetClipboardText(c_input)
-								}
-							} else if ctrl || (inserting && shift) {
-								clipboard := sdl.GetClipboardText()
-								if clipboard != nil {
-									value := strings.trim_space(string(cstring(clipboard)))
-									if len(value) <= 512 && input_text_ok(value) {
-										delete(input)
-										input = strings.clone(value)
-										select_all = false
-										input_changed = true
-									}
-									sdl.free(rawptr(clipboard))
-								}
-							}
-						case .RETURN, .KP_ENTER:
-							select_all = false
-							_, valid := track.parse_id(input)
-							if valid {
-								delete(selected)
-								selected = strings.clone(strings.trim_space(input))
-								delete(player_cover)
-								player_cover = {}
-								delete(displayed_cover)
-								displayed_cover = {}
-								delete(artist)
-								artist = {}
-								free_play_queue(&play_queue)
-								delete(queue_detail)
-								queue_detail = ""
-								play_index = -1
-								delete(input)
-								input = {}
-								input_active = false
-								_ = sdl.StopTextInput(state.window)
-								library.clear_search(&library_client)
-								search_mode = false
-								search_pending = false
-							} else if len(strings.trim_space(input)) > 0 {
-								search_pending = false
-								if library.search(&library_client, input) {
-									search_mode = true
-									nav_save_scroll(&nav, detail_scroll_y())
-									nav_record_search(
-										&nav,
-										&library_client,
-										filter,
-										search_kind,
-										input,
-									)
-								}
-							}
-						}
-					} else if !event.key.repeat {
-						#partial switch event.key.scancode {
-						case .ESCAPE:
-							running = false
-						case .S:
-							stop_pressed = true
-						case .SPACE:
-							space_pressed = true
-						case .LEFT:
-							if .LALT in event.key.mod {nav_back_pressed = true}
-						case .RIGHT:
-							if .LALT in event.key.mod {nav_forward_pressed = true}
-						case .K:
-							mod := event.key.mod
-							if .LCTRL in mod || .RCTRL in mod || .LGUI in mod || .RGUI in mod {
-								if !input_active {
-									input_active = sdl.StartTextInput(state.window)
-								}
-							}
-						}
-					}
-				case .TEXT_INPUT:
-					if input_active &&
-					   .LCTRL not_in sdl.GetModState() &&
-					   .RCTRL not_in sdl.GetModState() &&
-					   .LGUI not_in sdl.GetModState() &&
-					   .RGUI not_in sdl.GetModState() {
-						added := string(event.text.text)
-						if select_all {
-							if len(added) <= 512 && input_text_ok(added) {
-								delete(input)
-								input = strings.clone(added)
-								select_all = false
-								input_changed = true
-							}
-						} else if len(input) + len(added) <= 512 && input_text_ok(added) {
-							updated := fmt.aprintf("%s%s", input, added)
-							delete(input)
-							input = updated
-							input_changed = true
-						}
-					}
-				case .MOUSE_WHEEL:
-					autoscroll_container = ""
-					wheel.x += event.wheel.x; wheel.y += event.wheel.y
-				case .MOUSE_BUTTON_DOWN:
-					if event.button.button == sdl.BUTTON_MIDDLE {
-						// Steering lasts while the button is held; releasing it
-						// lands the anchor. Pressing again while held re-parks.
-						if autoscroll_container == "" {
-							middle_click = ui.mouse_position(
-								&state,
-								event.button.x,
-								event.button.y,
-							)
-							middle_clicked = true
-						}
-					} else if autoscroll_container != "" {
-						// Any other button lands the anchor; the click is swallowed.
-						autoscroll_container = ""
-					} else if event.button.button == sdl.BUTTON_LEFT {
-						mouse_click = ui.mouse_position(&state, event.button.x, event.button.y)
-						clicked = true
-					} else if event.button.button == sdl.BUTTON_RIGHT {
-						mouse_right = ui.mouse_position(&state, event.button.x, event.button.y)
-						right_clicked = true
-					} else if event.button.button == sdl.BUTTON_X1 {
-						nav_back_pressed = true
-					} else if event.button.button == sdl.BUTTON_X2 {
-						nav_forward_pressed = true
-					}
-				}
-				if !sdl.PollEvent(&event) {break}
-			}
-		}
 		if !running {break}
 		t0 := sdl.GetTicksNS()
 		if nav_back_pressed || nav_forward_pressed {
@@ -1716,7 +1474,7 @@ main :: proc() {
 				&app_state,
 			)
 		}
-		track_selected := false
+		track_selected = false
 		nav_ctx := Nav_Ctx {
 			client        = &library_client,
 			nav           = &nav,
@@ -2104,9 +1862,9 @@ main :: proc() {
 			repeat = !repeat
 			replay_pending = repeat && stage == .Ended
 		}
-		mpris_delta := 0
-		mpris_seek_ms := 0
-		mpris_seek_requested := false
+		mpris_delta = 0
+		mpris_seek_ms = 0
+		mpris_seek_requested = false
 		for {
 			command, value, received := mpris.poll()
 			if !received {break}
@@ -2133,7 +1891,7 @@ main :: proc() {
 				running = false
 			}
 		}
-		seek_requested := mpris_seek_requested
+		seek_requested = mpris_seek_requested
 		if mpris_seek_requested {
 			seek_ms = clamp(mpris_seek_ms, 0, max(0, duration_ms))
 			start_paused = stage == .Paused
@@ -2152,9 +1910,9 @@ main :: proc() {
 				first_frame = true
 			}
 		}
-		hero_pressed := clicked && hit("hero_play", mouse_click)
-		hero_start := hero_pressed && detail_play_enabled(&library_client)
-		restart_playback := track_selected || hero_start
+		hero_pressed = clicked && hit("hero_play", mouse_click)
+		hero_start = hero_pressed && detail_play_enabled(&library_client)
+		restart_playback = track_selected || hero_start
 		if hero_start {
 			queue_detail_rows(&play_queue, &library_client.detail)
 			stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
@@ -2164,7 +1922,7 @@ main :: proc() {
 			order_dirty = true
 			state_dirty = true
 		}
-		track_delta := mpris_delta
+		track_delta = mpris_delta
 		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
 		if clicked && hit("footer_next", mouse_click) {track_delta = 1}
 		if clicked && hit("footer_title", mouse_click) {
@@ -2344,4 +2102,271 @@ main :: proc() {
 		}
 		if clicked {first_frame = true}
 	}
+}
+
+// Event wait plus the drain switch. Fills the frame flags the later stages
+// read and reports whether anything arrived plus whether fades animate.
+app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
+	using app
+	using frame
+	event: sdl.Event
+	wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
+	fades_animating :=
+		(textures.fade_top_alpha != 0 && textures.fade_top_alpha != 1) ||
+		(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1) ||
+		(textures.fade_detail_top_alpha != 0 && textures.fade_detail_top_alpha != 1) ||
+		(textures.fade_detail_bottom_alpha != 0 && textures.fade_detail_bottom_alpha != 1)
+	// Anything animating renders at the display rate, so the idle poll
+	// below can never throttle a scroll glide or a button spring.
+	if stage == .Playing ||
+	   autoscroll_moving ||
+	   grid_smooth.active ||
+	   detail_smooth.active ||
+	   fx_animating ||
+	   fades_animating ||
+	   first_frame {
+		wait_ms = 0
+	} else {
+		// Idle work still polls for results so they appear promptly.
+		if stage == .Signing_In ||
+		   stage == .Buffering ||
+		   stage == .Stopping ||
+		   (stage == .Ended && replay_pending) ||
+		   (stage == .Failed && worker != nil) {wait_ms = 40}
+		if library_client.state == .Authorizing ||
+		   library_client.state == .Loading ||
+		   library_client.detail_loading ||
+		   library_client.search_loading ||
+		   library_client.covers_pending > 0 {wait_ms = 40}
+		for pending in library_client.pending {
+			if pending {wait_ms = 40; break}
+		}
+		if preload_worker != nil && stage != .Playing {wait_ms = 40}
+	}
+	// If the wake event could not be registered, poll the bus instead.
+	if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
+	if search_pending {
+		tick := sdl.GetTicksNS()
+		remaining_ms := i32(0)
+		if search_deadline > tick {
+			remaining_ms = i32((search_deadline - tick) / 1_000_000)
+		}
+		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
+	}
+	has_event := sdl.WaitEventTimeout(&event, wait_ms)
+	if has_event {
+		for {
+			#partial switch event.type {
+			case .QUIT, .WINDOW_CLOSE_REQUESTED:
+				running = false
+			case .SYSTEM_THEME_CHANGED:
+				next_dark := system_dark()
+				if next_dark != theme_dark {
+					theme_dark = next_dark
+					apply_theme(theme_dark)
+					retint_icons(&textures, theme_dark)
+					retint_fades(&textures)
+					first_frame = true
+				}
+			case .MOUSE_BUTTON_UP:
+				if event.button.button == sdl.BUTTON_LEFT {
+					if resizing {
+						app_state.sidebar_width = sidebar_width
+						state_dirty = true
+					}
+					resizing = false
+				}
+			case .KEY_DOWN:
+				if input_active {
+					key_mod := event.key.mod
+					cmd :=
+						.LCTRL in key_mod ||
+						.RCTRL in key_mod ||
+						.LGUI in key_mod ||
+						.RGUI in key_mod
+					#partial switch event.key.scancode {
+					case .ESCAPE:
+						select_all = false
+						input_active = false
+						_ = sdl.StopTextInput(state.window)
+						if len(strings.trim_space(input)) == 0 && search_mode {
+							library.clear_search(&library_client)
+							search_mode = false
+							search_pending = false
+							delete(input)
+							input = {}
+							nav_replace(
+								&nav,
+								nav_capture(&library_client, filter, false, search_kind, ""),
+							)
+						}
+					case .BACKSPACE:
+						if len(input) > 0 {
+							gui := .LGUI in key_mod || .RGUI in key_mod
+							alt := .LALT in key_mod || .RALT in key_mod
+							shorter: string
+							if select_all || (gui && !alt) {
+								shorter = {}
+							} else if cmd || alt {
+								shorter = delete_last_word(input)
+							} else {
+								_, size := utf8.decode_last_rune(input)
+								if size == 0 {size = 1}
+								shorter = strings.clone(input[:len(input) - size])
+							}
+							delete(input)
+							input = shorter
+							select_all = false
+							input_changed = true
+						}
+					case .A:
+						if cmd && len(input) > 0 {select_all = true}
+					case .U:
+						if cmd && len(input) > 0 {
+							delete(input)
+							input = {}
+							select_all = false
+							input_changed = true
+						}
+					case .W:
+						if cmd && len(input) > 0 {
+							shorter := delete_last_word(input)
+							delete(input)
+							input = shorter
+							select_all = false
+							input_changed = true
+						}
+					case .V, .INSERT:
+						shift := .LSHIFT in key_mod || .RSHIFT in key_mod
+						ctrl := .LCTRL in key_mod || .RCTRL in key_mod
+						inserting := event.key.scancode == .INSERT
+						if inserting && ctrl && !shift {
+							if len(input) > 0 {
+								c_input := strings.clone_to_cstring(input)
+								defer delete(c_input)
+								_ = sdl.SetClipboardText(c_input)
+							}
+						} else if ctrl || (inserting && shift) {
+							clipboard := sdl.GetClipboardText()
+							if clipboard != nil {
+								value := strings.trim_space(string(cstring(clipboard)))
+								if len(value) <= 512 && input_text_ok(value) {
+									delete(input)
+									input = strings.clone(value)
+									select_all = false
+									input_changed = true
+								}
+								sdl.free(rawptr(clipboard))
+							}
+						}
+					case .RETURN, .KP_ENTER:
+						select_all = false
+						_, valid := track.parse_id(input)
+						if valid {
+							delete(selected)
+							selected = strings.clone(strings.trim_space(input))
+							delete(player_cover)
+							player_cover = {}
+							delete(displayed_cover)
+							displayed_cover = {}
+							delete(artist)
+							artist = {}
+							free_play_queue(&play_queue)
+							delete(queue_detail)
+							queue_detail = ""
+							play_index = -1
+							delete(input)
+							input = {}
+							input_active = false
+							_ = sdl.StopTextInput(state.window)
+							library.clear_search(&library_client)
+							search_mode = false
+							search_pending = false
+						} else if len(strings.trim_space(input)) > 0 {
+							search_pending = false
+							if library.search(&library_client, input) {
+								search_mode = true
+								nav_save_scroll(&nav, detail_scroll_y())
+								nav_record_search(
+									&nav,
+									&library_client,
+									filter,
+									search_kind,
+									input,
+								)
+							}
+						}
+					}
+				} else if !event.key.repeat {
+					#partial switch event.key.scancode {
+					case .ESCAPE:
+						running = false
+					case .S:
+						stop_pressed = true
+					case .SPACE:
+						space_pressed = true
+					case .LEFT:
+						if .LALT in event.key.mod {nav_back_pressed = true}
+					case .RIGHT:
+						if .LALT in event.key.mod {nav_forward_pressed = true}
+					case .K:
+						mod := event.key.mod
+						if .LCTRL in mod || .RCTRL in mod || .LGUI in mod || .RGUI in mod {
+							if !input_active {
+								input_active = sdl.StartTextInput(state.window)
+							}
+						}
+					}
+				}
+			case .TEXT_INPUT:
+				if input_active &&
+				   .LCTRL not_in sdl.GetModState() &&
+				   .RCTRL not_in sdl.GetModState() &&
+				   .LGUI not_in sdl.GetModState() &&
+				   .RGUI not_in sdl.GetModState() {
+					added := string(event.text.text)
+					if select_all {
+						if len(added) <= 512 && input_text_ok(added) {
+							delete(input)
+							input = strings.clone(added)
+							select_all = false
+							input_changed = true
+						}
+					} else if len(input) + len(added) <= 512 && input_text_ok(added) {
+						updated := fmt.aprintf("%s%s", input, added)
+						delete(input)
+						input = updated
+						input_changed = true
+					}
+				}
+			case .MOUSE_WHEEL:
+				autoscroll_container = ""
+				wheel.x += event.wheel.x; wheel.y += event.wheel.y
+			case .MOUSE_BUTTON_DOWN:
+				if event.button.button == sdl.BUTTON_MIDDLE {
+					// Steering lasts while the button is held; releasing it
+					// lands the anchor. Pressing again while held re-parks.
+					if autoscroll_container == "" {
+						middle_click = ui.mouse_position(&state, event.button.x, event.button.y)
+						middle_clicked = true
+					}
+				} else if autoscroll_container != "" {
+					// Any other button lands the anchor; the click is swallowed.
+					autoscroll_container = ""
+				} else if event.button.button == sdl.BUTTON_LEFT {
+					mouse_click = ui.mouse_position(&state, event.button.x, event.button.y)
+					clicked = true
+				} else if event.button.button == sdl.BUTTON_RIGHT {
+					mouse_right = ui.mouse_position(&state, event.button.x, event.button.y)
+					right_clicked = true
+				} else if event.button.button == sdl.BUTTON_X1 {
+					nav_back_pressed = true
+				} else if event.button.button == sdl.BUTTON_X2 {
+					nav_forward_pressed = true
+				}
+			}
+			if !sdl.PollEvent(&event) {break}
+		}
+	}
+	return has_event, fades_animating
 }
