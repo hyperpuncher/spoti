@@ -252,31 +252,38 @@ open_release_card :: proc(
 	return
 }
 
+// One value threads the navigation state through every click target instead
+// of eleven params per call. input rides a pointer because row presses clear
+// it mid-frame; everything else is only read.
+Nav_Ctx :: struct {
+	client:        ^library.Client,
+	nav:           ^Nav,
+	app_state:     ^State,
+	textures:      ^Textures,
+	detail_pinned: ^bool,
+	scroll_armed:  ^bool,
+	filter:        library.Kind,
+	search_mode:   bool,
+	search_kind:   library.Kind,
+	input:         ^string,
+}
+
 // Shared by card clicks and row/footer links: opens the entry page unless it
 // is already open, and records the navigation like any card click. The
 // preview is only borrowed; the detail and history own their copies.
-open_entry_page :: proc(
-	client: ^library.Client,
-	nav: ^Nav,
-	app_state: ^State,
-	textures: ^Textures,
-	detail_pinned: ^bool,
-	scroll_armed: ^bool,
-	filter: library.Kind,
-	search_mode: bool,
-	search_kind: library.Kind,
-	input: string,
-	entry: library.Entry,
-) -> bool {
-	if detail_already_open(client, entry.uri) {return true}
+open_entry_page :: proc(ctx: ^Nav_Ctx, entry: library.Entry) -> bool {
+	if detail_already_open(ctx.client, entry.uri) {return true}
 	source, id, valid := parse_card_uri(entry.uri)
 	if !valid {return false}
-	nav_save_scroll(nav, detail_scroll_y())
-	scroll_armed^ = false
-	if !library.open_detail(client, source, id, entry) {return false}
-	retry_failed_covers(textures)
-	detail_pinned^ = state_is_pinned(app_state, entry.uri)
-	nav_commit(nav, nav_capture(client, filter, search_mode, search_kind, input))
+	nav_save_scroll(ctx.nav, detail_scroll_y())
+	ctx.scroll_armed^ = false
+	if !library.open_detail(ctx.client, source, id, entry) {return false}
+	retry_failed_covers(ctx.textures)
+	ctx.detail_pinned^ = state_is_pinned(ctx.app_state, entry.uri)
+	nav_commit(
+		ctx.nav,
+		nav_capture(ctx.client, ctx.filter, ctx.search_mode, ctx.search_kind, ctx.input^),
+	)
 	return true
 }
 
@@ -1634,6 +1641,18 @@ main :: proc() {
 			)
 		}
 		track_selected := false
+		nav_ctx := Nav_Ctx {
+			client        = &library_client,
+			nav           = &nav,
+			app_state     = &app_state,
+			textures      = &textures,
+			detail_pinned = &detail_pinned,
+			scroll_armed  = &detail_scroll_armed,
+			filter        = filter,
+			search_mode   = search_mode,
+			search_kind   = search_kind,
+			input         = &input,
+		}
 		if clicked && menu.open {
 			picked := false
 			if menu.picker_open {
@@ -1798,19 +1817,7 @@ main :: proc() {
 							)
 							handled = track_selected
 						} else {
-							handled = open_entry_page(
-								&library_client,
-								&nav,
-								&app_state,
-								&textures,
-								&detail_pinned,
-								&detail_scroll_armed,
-								filter,
-								search_mode,
-								search_kind,
-								input,
-								entry,
-							)
+							handled = open_entry_page(&nav_ctx, entry)
 						}
 						break
 					}
@@ -1824,19 +1831,7 @@ main :: proc() {
 							name = link.name,
 							uri  = link.uri,
 						}
-						handled = open_entry_page(
-							&library_client,
-							&nav,
-							&app_state,
-							&textures,
-							&detail_pinned,
-							&detail_scroll_armed,
-							filter,
-							search_mode,
-							search_kind,
-							input,
-							preview,
-						)
+						handled = open_entry_page(&nav_ctx, preview)
 						break
 					}
 				}
@@ -1917,19 +1912,7 @@ main :: proc() {
 										name = link.name,
 										uri  = link.uri,
 									}
-									handled = open_entry_page(
-										&library_client,
-										&nav,
-										&app_state,
-										&textures,
-										&detail_pinned,
-										&detail_scroll_armed,
-										filter,
-										search_mode,
-										search_kind,
-										input,
-										preview,
-									)
+									handled = open_entry_page(&nav_ctx, preview)
 									break
 								}
 								if handled {break}
@@ -2118,19 +2101,7 @@ main :: proc() {
 					uri   = foot_album_uri,
 					image = player_cover,
 				}
-				_ = open_entry_page(
-					&library_client,
-					&nav,
-					&app_state,
-					&textures,
-					&detail_pinned,
-					&detail_scroll_armed,
-					filter,
-					search_mode,
-					search_kind,
-					input,
-					preview,
-				)
+				_ = open_entry_page(&nav_ctx, preview)
 			}
 		}
 		if clicked && hit("footer_artist", mouse_click) {
@@ -2145,19 +2116,7 @@ main :: proc() {
 					name = foot_first,
 					uri  = foot_first_uri,
 				}
-				_ = open_entry_page(
-					&library_client,
-					&nav,
-					&app_state,
-					&textures,
-					&detail_pinned,
-					&detail_scroll_armed,
-					filter,
-					search_mode,
-					search_kind,
-					input,
-					preview,
-				)
+				_ = open_entry_page(&nav_ctx, preview)
 			}
 		}
 		if track_delta != 0 &&
