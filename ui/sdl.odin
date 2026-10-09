@@ -38,6 +38,7 @@ State :: struct {
 	fps_started:        u64,
 	fps_frames:         u32,
 	fps:                u32,
+	text_measures:      u64,
 }
 
 open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {

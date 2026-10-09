@@ -1778,6 +1778,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 			stage_max[1],
 			stage_max[2],
 		)
+		diagnostic.writef("text measures per frame=%d", state.text_measures / u64(stage_n))
+		state.text_measures = 0
 		stage_sum, stage_max, stage_n = {}, {}, 0
 	}
 	return visible
