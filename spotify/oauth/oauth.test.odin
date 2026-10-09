@@ -42,11 +42,13 @@ web_grant_is_separate_and_write_capable :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, strings.contains(flow.url, "user-library-read"))
 	testing.expect(t, strings.contains(flow.url, "user-library-modify"))
+	testing.expect(t, strings.contains(flow.url, "user-read-playback-state"))
+	testing.expect(t, strings.contains(flow.url, "user-modify-playback-state"))
 	// Sessions approved without the newest write scope re-approve once.
 	old: string = `{"access_token":"fake","scope":"playlist-read-private user-library-read"}`
 	_, old_result := decode_token(200, transmute([]u8)old, true, grant.required_scope)
 	testing.expect(t, old_result == .Rejected)
-	fresh: string = `{"access_token":"fake","scope":"playlist-read-private user-library-read user-library-modify playlist-modify-public playlist-modify-private"}`
+	fresh: string = `{"access_token":"fake","scope":"playlist-read-private user-library-read user-library-modify playlist-modify-public playlist-modify-private user-read-playback-state user-modify-playback-state"}`
 	tokens, result := decode_token(200, transmute([]u8)fresh, true, grant.required_scope)
 	defer wipe_tokens(&tokens)
 	testing.expect(t, result == .Authorized)
@@ -119,10 +121,10 @@ callback_rejects_forgery_and_accepts_authorization :: proc(t: ^testing.T) {
 @(test)
 web_grant_requests_library_write_scopes :: proc(t: ^testing.T) {
 	grant := web_grant("0123456789abcdef0123456789abcdef")
-	for scope in ([]string{"user-library-modify", "user-follow-modify", "playlist-modify-public", "playlist-modify-private", "user-read-private", "user-read-email"}) {
+	for scope in ([]string{"user-library-modify", "user-follow-modify", "playlist-modify-public", "playlist-modify-private", "user-read-private", "user-read-email", "user-read-playback-state", "user-modify-playback-state"}) {
 		testing.expect(t, strings.contains(grant.scopes, scope), scope)
 	}
-	// Adding items requires both playlist-modify scopes, so the newest one
-	// forces a one-time re-approval of older sessions.
-	testing.expect_value(t, grant.required_scope, "playlist-modify-private")
+	// Connect control is the newest addition, so its modify scope forces a
+	// one-time re-approval of older sessions.
+	testing.expect_value(t, grant.required_scope, "user-modify-playback-state")
 }

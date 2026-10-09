@@ -198,6 +198,29 @@ post_json :: proc(
 	)
 }
 
+// Authenticated JSON PUT, e.g. transferring Connect playback. The body
+// is a plain string, never logged; POSTFIELDSIZE bounds the upload.
+put_json :: proc(
+	address, body: string,
+	options: Options = {},
+	reuse: rawptr = nil,
+) -> (
+	response: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	if len(body) == 0 {return nil, 0, false}
+	opts := options
+	opts.method = "PUT"
+	return request(
+		address,
+		opts,
+		body,
+		content_type = "Content-Type: application/json",
+		reuse = reuse,
+	)
+}
+
 // Authenticated JSON DELETE, e.g. removing items from a playlist. The body
 // is a plain string, never logged; POSTFIELDSIZE bounds the upload.
 delete_json :: proc(

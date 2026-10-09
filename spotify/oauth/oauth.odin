@@ -26,16 +26,18 @@ Grant :: struct {
 PLAYBACK_GRANT :: Grant{PLAYBACK_CLIENT_ID, REDIRECT_URI, 8898, "streaming", "streaming"}
 // The caller supplies its own registered Web API client ID. Never use the
 // playback identity or another app's shared Web API grant for account reads.
-// Writes (hero heart, add to playlist) need the modify set; sessions approved
-// without the newest scope re-approve once through the required-scope check.
-// Adding items requires both playlist-modify scopes together.
+// Writes (hero heart, add to playlist) need the modify set; Connect
+// control needs the playback pair. Sessions approved without the newest
+// scope re-approve once through the required-scope check, so the required
+// scope is always the latest addition. Adding items requires both
+// playlist-modify scopes together.
 web_grant :: proc(client_id: string) -> Grant {
 	return {
 		client_id,
 		WEB_REDIRECT_URI,
 		8989,
-		"playlist-read-private playlist-read-collaborative user-library-read user-follow-read user-library-modify user-follow-modify playlist-modify-public playlist-modify-private user-read-private user-read-email",
-		"playlist-modify-private",
+		"playlist-read-private playlist-read-collaborative user-library-read user-follow-read user-library-modify user-follow-modify playlist-modify-public playlist-modify-private user-read-private user-read-email user-read-playback-state user-modify-playback-state",
+		"user-modify-playback-state",
 	}
 }
 

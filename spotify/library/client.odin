@@ -37,6 +37,7 @@ Request_Kind :: enum {
 	Me, // result-only: the signed-in account id
 	Add_To_Playlist,
 	Remove_From_Playlist,
+	Devices,
 	Auth, // result-only: the worker could not sign in
 }
 
@@ -85,6 +86,7 @@ Result :: struct {
 	playlist_id:   string, // Add/Remove_From_Playlist; receiver frees
 	playlist_name: string, // Add/Remove_From_Playlist; receiver frees
 	track_uri:     string, // Remove_From_Playlist; receiver frees
+	devices:       [dynamic]Device, // Devices; receiver frees or adopts
 }
 
 Cover_Request :: struct {
@@ -132,6 +134,7 @@ Client :: struct {
 	search_pages:          [Kind]Page,
 	like_pending:          bool, // hero heart toggle in flight
 	me_id:                 string, // owned; the signed-in account id
+	devices:               [dynamic]Device, // owned; Connect devices
 	write_pending:         bool, // add or remove write in flight
 	write_ok:              bool, // last write result
 	write_name:            string, // owned; playlist name for the toast
@@ -252,6 +255,8 @@ fail_request :: proc(client: ^Client, request: Request) {
 		)
 	case .Me:
 		send(client, Result{kind = .Me, status = -1})
+	case .Devices:
+		send(client, Result{kind = .Devices, status = -1})
 	case .Add_To_Playlist:
 		send(
 			client,
@@ -451,6 +456,9 @@ handle :: proc(
 	case .Me:
 		id, status, ok := fetch_me(tokens.access, reuse)
 		send(client, Result{kind = .Me, me_id = id, status = status, ok = ok})
+	case .Devices:
+		devices, status, ok := fetch_devices(tokens.access, reuse)
+		send(client, Result{kind = .Devices, devices = devices, status = status, ok = ok})
 	case .Add_To_Playlist, .Remove_From_Playlist:
 		removed := request.kind == .Remove_From_Playlist
 		uris := [?]string{request.track_uri}
@@ -514,6 +522,7 @@ free_result :: proc(result: Result) {
 	delete(local.search_query)
 	delete(local.id)
 	delete(local.me_id)
+	free_devices(local.devices)
 	delete(local.playlist_id)
 	delete(local.playlist_name)
 	delete(local.track_uri)
@@ -785,6 +794,16 @@ toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) ->
 	}
 	queue_request(client, &request) or_return
 	client.like_pending = true
+	return true
+}
+
+// Queues a Connect device list refresh. The worker answers with a
+// Devices result that replaces the client's list; failures keep the old.
+refresh_devices :: proc(client: ^Client) -> bool {
+	request := Request {
+		kind = .Devices,
+	}
+	queue_request(client, &request) or_return
 	return true
 }
 
@@ -1239,6 +1258,17 @@ apply :: proc(client: ^Client, result: Result) {
 		delete(client.me_id)
 		client.me_id = local.me_id
 		local.me_id = ""
+	case .Devices:
+		diagnostic.writef(
+			"library devices status=%d ok=%v count=%d",
+			local.status,
+			local.ok,
+			len(local.devices),
+		)
+		if !local.ok {return}
+		free_devices(client.devices)
+		client.devices = local.devices
+		local.devices = nil
 	case .Add_To_Playlist, .Remove_From_Playlist:
 		removed := local.kind == .Remove_From_Playlist
 		client.write_pending = false
@@ -1302,6 +1332,7 @@ stop :: proc(client: ^Client) {
 	free_search_pages(&client.search_pages)
 	delete(client.search_query)
 	delete(client.me_id)
+	free_devices(client.devices)
 	delete(client.write_name)
 	delete(client.stale_playlist)
 	for i in 0 ..< len(client.cover_queue) {artwork.free_image(&client.cover_queue[i].image)}
