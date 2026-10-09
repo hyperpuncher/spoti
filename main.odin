@@ -894,57 +894,7 @@ main :: proc() {
 		// A track-row press arms a drag; a released press either drops the
 		// track on a playlist card or plays the row. Dragging never plays.
 		app_transport(&app, &frame, visible)
-		if order_dirty {pending_redraw = true}
-		// Persist the last played track. Title and artist arrive after the
-		// selection via the Ready packet, so every field is watched, not
-		// just the URI. The state holds the saved copy; no shadow variables.
-		collection := ""
-		if library_client.detail.ready {
-			collection = detail_card_uri(library_client.detail)
-		}
-		played_state := &app_state.last_played
-		if selected != played_state.track ||
-		   title != played_state.title ||
-		   artist != played_state.artist ||
-		   player_cover != played_state.cover ||
-		   (library_client.detail.ready &&
-				   (collection != app_state.last_collection ||
-						   app_state.last_saved != library_client.detail.liked)) {
-			replace_string(&played_state.track, selected)
-			replace_string(&played_state.title, title)
-			replace_string(&played_state.artist, artist)
-			replace_string(&played_state.cover, player_cover)
-			if library_client.detail.ready {
-				replace_string(&app_state.last_collection, collection)
-				replace_string(&app_state.last_name, library_client.detail.name)
-				app_state.last_saved = library_client.detail.liked
-			}
-			state_dirty = true
-		}
-		// Links persist only from a live queue item, never blanked by its
-		// absence: the resumed footer keeps linking until a new track lands.
-		if queue_at {
-			item := play_queue[play_index]
-			item_first, item_first_uri := "", ""
-			if len(item.artist_links) > 0 {
-				item_first, item_first_uri = item.artist_links[0].name, item.artist_links[0].uri
-			}
-			if item.album != played_state.album ||
-			   item.album_uri != played_state.album_uri ||
-			   item_first != played_state.first_artist ||
-			   item_first_uri != played_state.artist_uri {
-				replace_string(&played_state.album, item.album)
-				replace_string(&played_state.album_uri, item.album_uri)
-				replace_string(&played_state.first_artist, item_first)
-				replace_string(&played_state.artist_uri, item_first_uri)
-				state_dirty = true
-			}
-		}
-		if state_dirty {
-			state_dirty = false
-			save_state(&app_state)
-		}
-		if clicked {first_frame = true}
+		app_persist(&app, &frame)
 	}
 }
 
@@ -2431,4 +2381,62 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			},
 		)
 	}
+}
+
+// End-of-frame bookkeeping: redraw bump, last-played persist, footer link
+// carry-over, state save and the click feedback frame.
+app_persist :: proc(app: ^App, frame: ^Frame) {
+	using app
+	using frame
+	if order_dirty {pending_redraw = true}
+	// Persist the last played track. Title and artist arrive after the
+	// selection via the Ready packet, so every field is watched, not
+	// just the URI. The state holds the saved copy; no shadow variables.
+	collection := ""
+	if library_client.detail.ready {
+		collection = detail_card_uri(library_client.detail)
+	}
+	played_state := &app_state.last_played
+	if selected != played_state.track ||
+	   title != played_state.title ||
+	   artist != played_state.artist ||
+	   player_cover != played_state.cover ||
+	   (library_client.detail.ready &&
+			   (collection != app_state.last_collection ||
+					   app_state.last_saved != library_client.detail.liked)) {
+		replace_string(&played_state.track, selected)
+		replace_string(&played_state.title, title)
+		replace_string(&played_state.artist, artist)
+		replace_string(&played_state.cover, player_cover)
+		if library_client.detail.ready {
+			replace_string(&app_state.last_collection, collection)
+			replace_string(&app_state.last_name, library_client.detail.name)
+			app_state.last_saved = library_client.detail.liked
+		}
+		state_dirty = true
+	}
+	// Links persist only from a live queue item, never blanked by its
+	// absence: the resumed footer keeps linking until a new track lands.
+	if queue_at {
+		item := play_queue[play_index]
+		item_first, item_first_uri := "", ""
+		if len(item.artist_links) > 0 {
+			item_first, item_first_uri = item.artist_links[0].name, item.artist_links[0].uri
+		}
+		if item.album != played_state.album ||
+		   item.album_uri != played_state.album_uri ||
+		   item_first != played_state.first_artist ||
+		   item_first_uri != played_state.artist_uri {
+			replace_string(&played_state.album, item.album)
+			replace_string(&played_state.album_uri, item.album_uri)
+			replace_string(&played_state.first_artist, item_first)
+			replace_string(&played_state.artist_uri, item_first_uri)
+			state_dirty = true
+		}
+	}
+	if state_dirty {
+		state_dirty = false
+		save_state(&app_state)
+	}
+	if clicked {first_frame = true}
 }
