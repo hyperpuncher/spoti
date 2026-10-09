@@ -105,6 +105,7 @@ View :: struct {
 	shuffle:        bool,
 	volume:         f32,
 	input_active:   bool,
+	select_all:     bool, // the whole query is selected
 	album_linked:   bool, // footer title opens the playing album
 	artist_linked:  bool, // footer artist opens the playing artist
 	pinned:         bool,
@@ -270,14 +271,25 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 			cornerRadius = clay.CornerRadiusAll(20 * d),
 		},
 		) {
-			clay.Text(
-				view.input,
-				clay.TextElementConfig {
-					fontSize = 14,
-					textColor = view.input_active ? WHITE : MUTED,
-					wrapMode = .None,
-				},
-			)
+			// A selected query hugs a highlight box sized to the text, so
+			// the normal path keeps its exact layout; the cap matches the
+			// pill content width.
+			if clay.UI()(
+			{
+				layout = {sizing = {width = clay.SizingFit({max = 412 * d})}},
+				backgroundColor = view.select_all ? SELECTED : clay.Color{},
+				cornerRadius = clay.CornerRadiusAll(6 * d),
+			},
+			) {
+				clay.Text(
+					view.input,
+					clay.TextElementConfig {
+						fontSize = 14,
+						textColor = view.input_active ? WHITE : MUTED,
+						wrapMode = .None,
+					},
+				)
+			}
 		}
 	}
 }

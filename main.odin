@@ -307,6 +307,17 @@ input_text_ok :: proc(value: string) -> bool {
 	return true
 }
 
+// Drops one trailing whitespace-separated token plus the spaces after it.
+// Only ASCII bytes are compared, so the cut always lands on a rune boundary.
+delete_last_word :: proc(value: string) -> string {
+	end := len(value)
+	for end > 0 && (value[end - 1] == ' ' || value[end - 1] == '\t') {end -= 1}
+	for end > 0 && value[end - 1] != ' ' && value[end - 1] != '\t' {end -= 1}
+	out := make([]u8, end)
+	copy(out, value[:end])
+	return string(out)
+}
+
 // Debounce catalog searches while typing; Enter searches immediately.
 SEARCH_DEBOUNCE_NS :: u64(300_000_000)
 
@@ -578,6 +589,7 @@ main :: proc() {
 	queue_gen: uint
 	input: string
 	input_active := false
+	select_all := false
 	search_mode := false
 	search_kind := library.Kind.Playlists
 	search_pending := false
@@ -778,8 +790,15 @@ main :: proc() {
 					}
 				case .KEY_DOWN:
 					if input_active {
+						key_mod := event.key.mod
+						cmd :=
+							.LCTRL in key_mod ||
+							.RCTRL in key_mod ||
+							.LGUI in key_mod ||
+							.RGUI in key_mod
 						#partial switch event.key.scancode {
 						case .ESCAPE:
+							select_all = false
 							input_active = false
 							_ = sdl.StopTextInput(state.window)
 							if len(strings.trim_space(input)) == 0 && search_mode {
@@ -795,17 +814,43 @@ main :: proc() {
 							}
 						case .BACKSPACE:
 							if len(input) > 0 {
-								_, size := utf8.decode_last_rune(input)
-								if size == 0 {size = 1}
-								shorter := strings.clone(input[:len(input) - size])
+								gui := .LGUI in key_mod || .RGUI in key_mod
+								alt := .LALT in key_mod || .RALT in key_mod
+								shorter: string
+								if select_all || (gui && !alt) {
+									shorter = {}
+								} else if cmd || alt {
+									shorter = delete_last_word(input)
+								} else {
+									_, size := utf8.decode_last_rune(input)
+									if size == 0 {size = 1}
+									shorter = strings.clone(input[:len(input) - size])
+								}
 								delete(input)
 								input = shorter
+								select_all = false
+								input_changed = true
+							}
+						case .A:
+							if cmd && len(input) > 0 {select_all = true}
+						case .U:
+							if cmd && len(input) > 0 {
+								delete(input)
+								input = {}
+								select_all = false
+								input_changed = true
+							}
+						case .W:
+							if cmd && len(input) > 0 {
+								shorter := delete_last_word(input)
+								delete(input)
+								input = shorter
+								select_all = false
 								input_changed = true
 							}
 						case .V, .INSERT:
-							mod := event.key.mod
-							shift := .LSHIFT in mod || .RSHIFT in mod
-							ctrl := .LCTRL in mod || .RCTRL in mod
+							shift := .LSHIFT in key_mod || .RSHIFT in key_mod
+							ctrl := .LCTRL in key_mod || .RCTRL in key_mod
 							inserting := event.key.scancode == .INSERT
 							if inserting && ctrl && !shift {
 								if len(input) > 0 {
@@ -820,12 +865,14 @@ main :: proc() {
 									if len(value) <= 512 && input_text_ok(value) {
 										delete(input)
 										input = strings.clone(value)
+										select_all = false
 										input_changed = true
 									}
 									sdl.free(rawptr(clipboard))
 								}
 							}
 						case .RETURN, .KP_ENTER:
+							select_all = false
 							_, valid := track.parse_id(input)
 							if valid {
 								delete(selected)
@@ -886,9 +933,18 @@ main :: proc() {
 				case .TEXT_INPUT:
 					if input_active &&
 					   .LCTRL not_in sdl.GetModState() &&
-					   .RCTRL not_in sdl.GetModState() {
+					   .RCTRL not_in sdl.GetModState() &&
+					   .LGUI not_in sdl.GetModState() &&
+					   .RGUI not_in sdl.GetModState() {
 						added := string(event.text.text)
-						if len(input) + len(added) <= 512 && input_text_ok(added) {
+						if select_all {
+							if len(added) <= 512 && input_text_ok(added) {
+								delete(input)
+								input = strings.clone(added)
+								select_all = false
+								input_changed = true
+							}
+						} else if len(input) + len(added) <= 512 && input_text_ok(added) {
 							updated := fmt.aprintf("%s%s", input, added)
 							delete(input)
 							input = updated
@@ -1386,6 +1442,7 @@ main :: proc() {
 			shuffle        = shuffle,
 			volume         = volume,
 			input_active   = input_active,
+			select_all     = select_all,
 			pinned         = detail_pinned,
 			search_mode    = search_mode,
 			sign_in        = library_prompt,
@@ -1669,6 +1726,7 @@ main :: proc() {
 					handled = true
 				} else if hit("track_input", mouse_click) {
 					if !input_active {input_active = sdl.StartTextInput(state.window)}
+					select_all = false
 					handled = true
 				}
 				if !handled {
@@ -1896,6 +1954,7 @@ main :: proc() {
 				}
 				if !handled && input_active {
 					input_active = false
+					select_all = false
 					_ = sdl.StopTextInput(state.window)
 				}
 			}
