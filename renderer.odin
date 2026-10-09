@@ -96,8 +96,6 @@ foreign import backtrace_libc "system:c"
 
 @(default_calling_convention = "c")
 foreign backtrace_libc {
-	backtrace :: proc(buffer: [^]rawptr, size: c.int) -> c.int ---
-	backtrace_symbols :: proc(buffer: [^]rawptr, size: c.int) -> [^]cstring ---
 	@(link_name = "free")
 	libc_free :: proc(ptr: rawptr) ---
 }
