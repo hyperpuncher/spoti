@@ -777,6 +777,7 @@ layout :: proc(
 			visible.cards = sidebar(
 				client,
 				app_state,
+				ui_state,
 				page,
 				tabs,
 				labels,

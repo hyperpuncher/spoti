@@ -280,6 +280,7 @@ card_selected :: proc(entry: ^library.Entry, detail: ^library.Detail) -> bool {
 
 library_card :: proc(
 	textures: ^Textures,
+	ui_state: ^ui.State,
 	entry: ^library.Entry,
 	index: u32,
 	card_width, d: f32,
@@ -342,13 +343,22 @@ library_card :: proc(
 			clip = {horizontal = true},
 		},
 		) {
+			text_width := card_width - padding * 2
 			clay.Text(
-				entry.name,
+				hero_fit_text(ui_state, entry.name, text_width, 14, 0, 1, context.temp_allocator),
 				clay.TextElementConfig{fontSize = 14, textColor = WHITE, wrapMode = .None},
 			)
 			if len(entry.subtitle) > 0 {
 				clay.Text(
-					entry.subtitle,
+					hero_fit_text(
+						ui_state,
+						entry.subtitle,
+						text_width,
+						12,
+						0,
+						1,
+						context.temp_allocator,
+					),
 					clay.TextElementConfig{fontSize = 12, textColor = MUTED, wrapMode = .None},
 				)
 			}
@@ -383,6 +393,7 @@ sort_button :: proc(
 sidebar :: proc(
 	client: ^library.Client,
 	app_state: ^State,
+	ui_state: ^ui.State,
 	page: ^library.Page,
 	tabs: []library.Kind,
 	labels: []string,
@@ -474,6 +485,7 @@ sidebar :: proc(
 						if next >= len(page.items) {break}
 						library_card(
 							textures,
+							ui_state,
 							&page.items[next],
 							u32(next),
 							card_width,
@@ -891,6 +903,7 @@ artist_page :: proc(
 			"release_card",
 			0,
 			textures,
+			ui_state,
 			columns,
 			card_width,
 			row_height,
@@ -909,6 +922,7 @@ artist_page :: proc(
 			"single_card",
 			RELEASE_CLIP_STRIDE,
 			textures,
+			ui_state,
 			columns,
 			card_width,
 			row_height,
@@ -945,6 +959,7 @@ release_section :: proc(
 	title, title_id, card_id: string,
 	slot_base: u32,
 	textures: ^Textures,
+	ui_state: ^ui.State,
 	columns: int,
 	card_width, row_height, row_gap, usable, viewport_height, leading, dt, d: f32,
 	visible: ^Visible_Items,
@@ -981,6 +996,7 @@ release_section :: proc(
 				if next < len(group.items) {
 					library_card(
 						textures,
+						ui_state,
 						&group.items[next],
 						u32(next),
 						card_width,
