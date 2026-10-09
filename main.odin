@@ -893,278 +893,7 @@ main :: proc() {
 		app_click(&app, &frame, visible)
 		// A track-row press arms a drag; a released press either drops the
 		// track on a playlist card or plays the row. Dragging never plays.
-		if drag_candidate && .LEFT in buttons {
-			if !dragging && drag_started(mouse, drag_start, DRAG_THRESHOLD * density) {
-				dragging = true
-			}
-		}
-		if drag_candidate && .LEFT not_in buttons {
-			if dragging {
-				if display_kind == .Playlists {
-					if index := grid_card_at(display_page, visible.cards, mouse); index >= 0 {
-						entry := display_page.items[index]
-						if strings.has_prefix(entry.uri, "spotify:playlist:") {
-							_ = library.add_track_to_playlist(
-								&library_client,
-								entry.uri[len("spotify:playlist:"):],
-								entry.name,
-								drag_uri,
-							)
-						}
-					}
-				}
-			} else if drag_index >= 0 && drag_index < len(library_client.detail.rows) {
-				index := drag_index
-				queue_detail_rows(&play_queue, &library_client.detail)
-				stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
-				play_index = shuffle ? reorder_play_queue(play_queue[:], index, true) : index
-				track_selected = select_play_item(
-					play_queue[:],
-					play_index,
-					&selected,
-					&player_cover,
-					&artist,
-				)
-				if track_selected {
-					state_note_recent(&app_state, detail_card_uri(library_client.detail))
-					order_dirty = true
-					state_dirty = true
-				}
-			}
-			drag_candidate = false
-			dragging = false
-			drag_index = -1
-		}
-		if resizing {
-			if .LEFT not_in buttons {
-				resizing = false
-				state_dirty = true
-			} else {
-				sidebar_width = clamp(mouse.x / density, SIDEBAR_MIN, SIDEBAR_MAX)
-			}
-			redraw = true
-		}
-		if scrollbar_drag.container != "" {
-			if .LEFT not_in buttons {
-				scrollbar_drag = {}
-			} else if drag_scrollbar(&scrollbar_drag, mouse.y, density) {
-				smooth_cancel(
-					scrollbar_drag.container,
-					smooth_for(scrollbar_drag.container, &grid_smooth, &detail_smooth),
-				)
-				redraw = true
-			}
-		}
-		if clicked && hit("volume_slider", mouse_click) {volume_dragging = true}
-		if volume_dragging {
-			box := clay.GetElementData(clay.ID("volume_slider")).boundingBox
-			if box.width > 0 {
-				volume = clamp((mouse.x - box.x) / box.width, 0, 1)
-				app_state.volume = volume
-				state_dirty = true
-				if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
-			}
-			if .LEFT not_in buttons {volume_dragging = false}
-			first_frame = true
-		}
-		if clicked &&
-		   (hit("footer_shuffle", mouse_click) ||
-				   detail_play_enabled(&library_client) && hit("hero_shuffle", mouse_click)) {
-			shuffle = !shuffle
-			play_index = reorder_play_queue(play_queue[:], play_index, shuffle)
-		}
-		if clicked && hit("footer_repeat", mouse_click) {
-			repeat = !repeat
-			replay_pending = repeat && stage == .Ended
-		}
-		mpris_delta = 0
-		mpris_seek_ms = 0
-		mpris_seek_requested = false
-		for {
-			command, value, received := mpris.poll()
-			if !received {break}
-			switch command {
-			case .Play:
-				if stage != .Playing {space_pressed = true}
-			case .Pause:
-				if stage == .Playing {space_pressed = true}
-			case .Play_Pause:
-				space_pressed = true
-			case .Stop:
-				stop_pressed = true
-			case .Next:
-				mpris_delta += 1
-			case .Previous:
-				mpris_delta -= 1
-			case .Seek:
-				mpris_seek_ms = displayed_ms + value
-				mpris_seek_requested = true
-			case .Set_Position:
-				mpris_seek_ms = value
-				mpris_seek_requested = true
-			case .Quit:
-				running = false
-			}
-		}
-		seek_requested = mpris_seek_requested
-		if mpris_seek_requested {
-			seek_ms = clamp(mpris_seek_ms, 0, max(0, duration_ms))
-			start_paused = stage == .Paused
-			mpris.seeked(seek_ms)
-		}
-		if clicked && seek_enabled && hit("seek_slider", mouse_click) {seek_dragging = true}
-		if seek_dragging {
-			if !seek_enabled {seek_dragging = false} else {
-				if .LEFT not_in buttons {
-					box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
-					seek_ms = seek_position_ms(mouse.x, box.x, box.width, duration_ms)
-					start_paused = stage == .Paused
-					seek_requested = true
-					seek_dragging = false
-				}
-				first_frame = true
-			}
-		}
-		hero_pressed = clicked && hit("hero_play", mouse_click)
-		hero_start = hero_pressed && detail_play_enabled(&library_client)
-		restart_playback = track_selected || hero_start
-		if hero_start {
-			queue_detail_rows(&play_queue, &library_client.detail)
-			stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
-			play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
-			_ = select_play_item(play_queue[:], play_index, &selected, &player_cover, &artist)
-			state_note_recent(&app_state, detail_card_uri(library_client.detail))
-			order_dirty = true
-			state_dirty = true
-		}
-		track_delta = mpris_delta
-		if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
-		if clicked && hit("footer_next", mouse_click) {track_delta = 1}
-		if clicked && hit("footer_title", mouse_click) {
-			if !link_album {
-				// Lengths only: URIs never reach the log.
-				diagnostic.writef("footer title dead queue=%v items=%d", queue_at, len(play_queue))
-			} else {
-				preview := library.Entry {
-					name  = foot_album,
-					uri   = foot_album_uri,
-					image = player_cover,
-				}
-				_ = open_entry_page(&nav_ctx, preview)
-			}
-		}
-		if clicked && hit("footer_artist", mouse_click) {
-			if !link_artist {
-				diagnostic.writef(
-					"footer artist dead queue=%v items=%d",
-					queue_at,
-					len(play_queue),
-				)
-			} else {
-				preview := library.Entry {
-					name = foot_first,
-					uri  = foot_first_uri,
-				}
-				_ = open_entry_page(&nav_ctx, preview)
-			}
-		}
-		if track_delta != 0 &&
-		   advance_play_item(
-			   play_queue[:],
-			   &play_index,
-			   track_delta,
-			   &selected,
-			   &player_cover,
-			   &artist,
-		   ) {
-			restart_playback = true
-		}
-		if restart_playback {seek_ms = 0; start_paused = false; seek_dragging = false}
-		if restart_playback || seek_requested {
-			replay_pending = false
-			if worker != nil {
-				cancel_worker(queue, &cancel, &closed)
-				clear_audio_stream(&stream)
-				stage = .Stopping
-				play_after_stop = true
-			} else {
-				space_pressed = true
-			}
-		}
-		if space_pressed || clicked && hit("footer_play", mouse_click) {
-			#partial switch stage {
-			case .Idle, .Ended, .Failed:
-				if worker == nil || thread.is_done(worker) {
-					if worker != nil {release_worker(worker, queue, &cancel, closed); worker = nil}
-					alloc_error: runtime.Allocator_Error
-					queue, alloc_error = chan.create_buffered(
-						chan.Chan(player.Packet),
-						4,
-						context.allocator,
-					)
-					if alloc_error != nil {
-						play_after_stop, replay_pending = false, false
-						stage = .Failed
-					} else {
-						sync.atomic_store(&cancel, false)
-						closed = false
-						work = Login_Work {
-							queue     = queue,
-							cancel    = &cancel,
-							track_url = strings.clone(selected),
-							start_ms  = seek_ms,
-							source    = &play_source,
-						}
-						if preload_worker == nil &&
-						   preload_work.track == selected &&
-						   preload_work.source.url != "" {
-							work.preloaded = preload_work.source
-							preload_work.source = {}
-						} else if preload_worker != nil {
-							sync.atomic_store(&preload_work.cancel, true)
-						}
-						diagnostic.write("playback worker starting")
-						worker = thread.create_and_start_with_data(&work, login_and_decode)
-						if worker == nil {
-							delete(work.track_url)
-							session.close_source(&work.preloaded)
-							chan.destroy(queue)
-							play_after_stop, replay_pending = false, false
-							stage = .Failed
-						} else {
-							clear_audio_stream(&stream)
-							finished = false
-							play_after_stop, replay_pending = false, false
-							sent_frames, sample_rate = 0, 0
-							displayed_ms = seek_ms
-							seek_ms = 0
-							stage = .Signing_In
-						}
-					}
-				}
-			case .Playing:
-				if stream != nil && sdl.PauseAudioStreamDevice(stream) {stage = .Paused}
-			case .Paused:
-				if stream != nil && sdl.ResumeAudioStreamDevice(stream) {stage = .Playing}
-			}
-		}
-		if mpris_active {
-			mpris.update(
-				{
-					title = title,
-					artist = artist,
-					duration_ms = duration_ms,
-					position_ms = displayed_ms,
-					playing = stage == .Playing,
-					shuffle = shuffle,
-					repeat = repeat,
-					volume = volume,
-					can_seek = seek_enabled,
-					can_next = play_index >= 0 && play_index + 1 < len(play_queue),
-					can_previous = play_index > 0,
-				},
-			)
-		}
+		app_transport(&app, &frame, visible)
 		if order_dirty {pending_redraw = true}
 		// Persist the last played track. Title and artist arrive after the
 		// selection via the Ready packet, so every field is watched, not
@@ -2426,5 +2155,280 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				_ = sdl.StopTextInput(state.window)
 			}
 		}
+	}
+}
+
+// Drag and drop, volume, shuffle, repeat, MPRIS commands, footer links,
+// seeking and the play/pause/next/previous transport.
+app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
+	using app
+	using frame
+	if drag_candidate && .LEFT in buttons {
+		if !dragging && drag_started(mouse, drag_start, DRAG_THRESHOLD * density) {
+			dragging = true
+		}
+	}
+	if drag_candidate && .LEFT not_in buttons {
+		if dragging {
+			if display_kind == .Playlists {
+				if index := grid_card_at(display_page, visible.cards, mouse); index >= 0 {
+					entry := display_page.items[index]
+					if strings.has_prefix(entry.uri, "spotify:playlist:") {
+						_ = library.add_track_to_playlist(
+							&library_client,
+							entry.uri[len("spotify:playlist:"):],
+							entry.name,
+							drag_uri,
+						)
+					}
+				}
+			}
+		} else if drag_index >= 0 && drag_index < len(library_client.detail.rows) {
+			index := drag_index
+			queue_detail_rows(&play_queue, &library_client.detail)
+			stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
+			play_index = shuffle ? reorder_play_queue(play_queue[:], index, true) : index
+			track_selected = select_play_item(
+				play_queue[:],
+				play_index,
+				&selected,
+				&player_cover,
+				&artist,
+			)
+			if track_selected {
+				state_note_recent(&app_state, detail_card_uri(library_client.detail))
+				order_dirty = true
+				state_dirty = true
+			}
+		}
+		drag_candidate = false
+		dragging = false
+		drag_index = -1
+	}
+	if resizing {
+		if .LEFT not_in buttons {
+			resizing = false
+			state_dirty = true
+		} else {
+			sidebar_width = clamp(mouse.x / density, SIDEBAR_MIN, SIDEBAR_MAX)
+		}
+		redraw = true
+	}
+	if scrollbar_drag.container != "" {
+		if .LEFT not_in buttons {
+			scrollbar_drag = {}
+		} else if drag_scrollbar(&scrollbar_drag, mouse.y, density) {
+			smooth_cancel(
+				scrollbar_drag.container,
+				smooth_for(scrollbar_drag.container, &grid_smooth, &detail_smooth),
+			)
+			redraw = true
+		}
+	}
+	if clicked && hit("volume_slider", mouse_click) {volume_dragging = true}
+	if volume_dragging {
+		box := clay.GetElementData(clay.ID("volume_slider")).boundingBox
+		if box.width > 0 {
+			volume = clamp((mouse.x - box.x) / box.width, 0, 1)
+			app_state.volume = volume
+			state_dirty = true
+			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
+		}
+		if .LEFT not_in buttons {volume_dragging = false}
+		first_frame = true
+	}
+	if clicked &&
+	   (hit("footer_shuffle", mouse_click) ||
+			   detail_play_enabled(&library_client) && hit("hero_shuffle", mouse_click)) {
+		shuffle = !shuffle
+		play_index = reorder_play_queue(play_queue[:], play_index, shuffle)
+	}
+	if clicked && hit("footer_repeat", mouse_click) {
+		repeat = !repeat
+		replay_pending = repeat && stage == .Ended
+	}
+	mpris_delta = 0
+	mpris_seek_ms = 0
+	mpris_seek_requested = false
+	for {
+		command, value, received := mpris.poll()
+		if !received {break}
+		switch command {
+		case .Play:
+			if stage != .Playing {space_pressed = true}
+		case .Pause:
+			if stage == .Playing {space_pressed = true}
+		case .Play_Pause:
+			space_pressed = true
+		case .Stop:
+			stop_pressed = true
+		case .Next:
+			mpris_delta += 1
+		case .Previous:
+			mpris_delta -= 1
+		case .Seek:
+			mpris_seek_ms = displayed_ms + value
+			mpris_seek_requested = true
+		case .Set_Position:
+			mpris_seek_ms = value
+			mpris_seek_requested = true
+		case .Quit:
+			running = false
+		}
+	}
+	seek_requested = mpris_seek_requested
+	if mpris_seek_requested {
+		seek_ms = clamp(mpris_seek_ms, 0, max(0, duration_ms))
+		start_paused = stage == .Paused
+		mpris.seeked(seek_ms)
+	}
+	if clicked && seek_enabled && hit("seek_slider", mouse_click) {seek_dragging = true}
+	if seek_dragging {
+		if !seek_enabled {seek_dragging = false} else {
+			if .LEFT not_in buttons {
+				box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
+				seek_ms = seek_position_ms(mouse.x, box.x, box.width, duration_ms)
+				start_paused = stage == .Paused
+				seek_requested = true
+				seek_dragging = false
+			}
+			first_frame = true
+		}
+	}
+	hero_pressed = clicked && hit("hero_play", mouse_click)
+	hero_start = hero_pressed && detail_play_enabled(&library_client)
+	restart_playback = track_selected || hero_start
+	if hero_start {
+		queue_detail_rows(&play_queue, &library_client.detail)
+		stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
+		play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
+		_ = select_play_item(play_queue[:], play_index, &selected, &player_cover, &artist)
+		state_note_recent(&app_state, detail_card_uri(library_client.detail))
+		order_dirty = true
+		state_dirty = true
+	}
+	track_delta = mpris_delta
+	if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
+	if clicked && hit("footer_next", mouse_click) {track_delta = 1}
+	if clicked && hit("footer_title", mouse_click) {
+		if !link_album {
+			// Lengths only: URIs never reach the log.
+			diagnostic.writef("footer title dead queue=%v items=%d", queue_at, len(play_queue))
+		} else {
+			preview := library.Entry {
+				name  = foot_album,
+				uri   = foot_album_uri,
+				image = player_cover,
+			}
+			_ = open_entry_page(&nav_ctx, preview)
+		}
+	}
+	if clicked && hit("footer_artist", mouse_click) {
+		if !link_artist {
+			diagnostic.writef("footer artist dead queue=%v items=%d", queue_at, len(play_queue))
+		} else {
+			preview := library.Entry {
+				name = foot_first,
+				uri  = foot_first_uri,
+			}
+			_ = open_entry_page(&nav_ctx, preview)
+		}
+	}
+	if track_delta != 0 &&
+	   advance_play_item(
+		   play_queue[:],
+		   &play_index,
+		   track_delta,
+		   &selected,
+		   &player_cover,
+		   &artist,
+	   ) {
+		restart_playback = true
+	}
+	if restart_playback {seek_ms = 0; start_paused = false; seek_dragging = false}
+	if restart_playback || seek_requested {
+		replay_pending = false
+		if worker != nil {
+			cancel_worker(queue, &cancel, &closed)
+			clear_audio_stream(&stream)
+			stage = .Stopping
+			play_after_stop = true
+		} else {
+			space_pressed = true
+		}
+	}
+	if space_pressed || clicked && hit("footer_play", mouse_click) {
+		#partial switch stage {
+		case .Idle, .Ended, .Failed:
+			if worker == nil || thread.is_done(worker) {
+				if worker != nil {release_worker(worker, queue, &cancel, closed); worker = nil}
+				alloc_error: runtime.Allocator_Error
+				queue, alloc_error = chan.create_buffered(
+					chan.Chan(player.Packet),
+					4,
+					context.allocator,
+				)
+				if alloc_error != nil {
+					play_after_stop, replay_pending = false, false
+					stage = .Failed
+				} else {
+					sync.atomic_store(&cancel, false)
+					closed = false
+					work = Login_Work {
+						queue     = queue,
+						cancel    = &cancel,
+						track_url = strings.clone(selected),
+						start_ms  = seek_ms,
+						source    = &play_source,
+					}
+					if preload_worker == nil &&
+					   preload_work.track == selected &&
+					   preload_work.source.url != "" {
+						work.preloaded = preload_work.source
+						preload_work.source = {}
+					} else if preload_worker != nil {
+						sync.atomic_store(&preload_work.cancel, true)
+					}
+					diagnostic.write("playback worker starting")
+					worker = thread.create_and_start_with_data(&work, login_and_decode)
+					if worker == nil {
+						delete(work.track_url)
+						session.close_source(&work.preloaded)
+						chan.destroy(queue)
+						play_after_stop, replay_pending = false, false
+						stage = .Failed
+					} else {
+						clear_audio_stream(&stream)
+						finished = false
+						play_after_stop, replay_pending = false, false
+						sent_frames, sample_rate = 0, 0
+						displayed_ms = seek_ms
+						seek_ms = 0
+						stage = .Signing_In
+					}
+				}
+			}
+		case .Playing:
+			if stream != nil && sdl.PauseAudioStreamDevice(stream) {stage = .Paused}
+		case .Paused:
+			if stream != nil && sdl.ResumeAudioStreamDevice(stream) {stage = .Playing}
+		}
+	}
+	if mpris_active {
+		mpris.update(
+			{
+				title = title,
+				artist = artist,
+				duration_ms = duration_ms,
+				position_ms = displayed_ms,
+				playing = stage == .Playing,
+				shuffle = shuffle,
+				repeat = repeat,
+				volume = volume,
+				can_seek = seek_enabled,
+				can_next = play_index >= 0 && play_index + 1 < len(play_queue),
+				can_previous = play_index > 0,
+			},
+		)
 	}
 }
