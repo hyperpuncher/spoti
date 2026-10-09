@@ -407,6 +407,26 @@ load_more_near_bottom :: proc(client: ^library.Client, filter: library.Kind, d: 
 	if remaining <= 480 * d {library.more(client, filter)}
 }
 
+// Page the next detail chunk once the drawn rows reach the loaded end. Using
+// the drawn range, not the full-total spacer, keeps paging to the viewport
+// and stops a long playlist from flooding the single worker up front.
+DETAIL_LOOKAHEAD :: 20
+
+detail_needs_more :: proc(client: ^library.Client, visible: Frame_Visible) -> bool {
+	if !client.detail.ready || !client.detail.has_more || client.detail_loading {return false}
+	detail := &client.detail
+	if detail.source == .Artist {
+		if detail.albums.has_more {
+			return visible.releases.last >= len(detail.albums.items) - DETAIL_LOOKAHEAD
+		}
+		if detail.singles.has_more {
+			return visible.singles.last >= len(detail.singles.items) - DETAIL_LOOKAHEAD
+		}
+		return false
+	}
+	return visible.tracks.last >= len(detail.rows) - DETAIL_LOOKAHEAD
+}
+
 // Spend the frame's request budget only when the artwork worker accepts it.
 ensure_cover :: proc(client: ^library.Client, textures: ^Textures, url: string, budget: ^int) {
 	if budget^ == 0 || url == "" {return}
@@ -972,13 +992,6 @@ main :: proc() {
 			playback_prompt_opened = false
 			redraw = true
 		}
-		// A detail page keeps paging until the server runs dry. Rows stream
-		// into the list while the scrollbar already spans the full total.
-		if library_client.detail.ready &&
-		   library_client.detail.has_more &&
-		   !library_client.detail_loading {
-			if library.more_rows(&library_client) {redraw = true}
-		}
 		// Playback can start before the last page lands; newly arrived rows
 		// extend the live queue in place when it still mirrors this page.
 		if len(queue_detail) > 0 &&
@@ -1518,6 +1531,9 @@ main :: proc() {
 		// is loaded, exactly like the reference client. Walking the whole
 		// collection would burn the dev-mode quota bucket on every launch.
 		if !search_mode {load_more_near_bottom(&library_client, filter, density)}
+		if detail_needs_more(&library_client, visible) {
+			if library.more_rows(&library_client) {redraw = true}
+		}
 		ensure_covers(&library_client, &textures, display_page, player_cover, visible)
 		if right_clicked {
 			open_menu_at(
