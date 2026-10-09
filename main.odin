@@ -592,6 +592,7 @@ App :: struct {
 	pending_redraw:         bool,
 	detail_pinned:          bool,
 	nav:                    Nav,
+	nav_ctx:                Nav_Ctx,
 	nav_back_pressed:       bool,
 	nav_forward_pressed:    bool,
 	library_prompt_shown:   bool,
@@ -685,6 +686,8 @@ Frame :: struct {
 	foot_first_uri:       string,
 	library_prompt:       bool,
 	playback_prompt:      bool,
+	display_page:         ^library.Page,
+	display_kind:         library.Kind,
 }
 
 main :: proc() {
@@ -857,8 +860,8 @@ main :: proc() {
 		density = ui.update_scale(&state)
 		if density != previous_density {clay.ResetMeasureTextCache()}
 		visible := app_layout(&app, &frame)
-		display_page := &library_client.pages[filter]
-		display_kind := filter
+		display_page = &library_client.pages[filter]
+		display_kind = filter
 		if search_mode {
 			display_page = &library_client.search_pages[search_kind]
 			display_kind = search_kind
@@ -875,19 +878,7 @@ main :: proc() {
 			if library.more_rows(&library_client) {redraw = true}
 		}
 		ensure_covers(&library_client, &textures, display_page, player_cover, visible)
-		if right_clicked {
-			open_menu_at(
-				&menu,
-				&library_client,
-				display_page,
-				display_kind,
-				visible,
-				mouse_right,
-				&app_state,
-			)
-		}
-		track_selected = false
-		nav_ctx := Nav_Ctx {
+		nav_ctx = Nav_Ctx {
 			client        = &library_client,
 			nav           = &nav,
 			app_state     = &app_state,
@@ -899,295 +890,7 @@ main :: proc() {
 			search_kind   = search_kind,
 			input         = &input,
 		}
-		if clicked && menu.open {
-			picked := false
-			if menu.picker_open {
-				for entry, index in menu.picker_items {
-					if !hit_index("picker_item", mouse_click, u32(index)) {continue}
-					if strings.has_prefix(entry.uri, "spotify:playlist:") {
-						_ = library.add_track_to_playlist(
-							&library_client,
-							entry.uri[len("spotify:playlist:"):],
-							entry.name,
-							menu.uri,
-						)
-					}
-					picked = true
-					break
-				}
-			}
-			keep_open := false
-			if !picked {
-				for index in 0 ..< menu.count {
-					if !hit_index("menu_item", mouse_click, u32(index)) {continue}
-					switch menu.items[index] {
-					case .Pin:
-						_ = state_toggle_pin(&app_state, menu.uri)
-						if menu.uri == detail_card_uri(library_client.detail) {
-							detail_pinned = state_is_pinned(&app_state, menu.uri)
-						}
-						order_dirty = true
-						state_dirty = true
-					case .Pick_Sort:
-						app_state.sort[filter] = menu.sorts[index]
-						order_dirty = true
-						state_dirty = true
-					case .Copy_Link:
-						copy_spotify_uri(menu.uri)
-					case .Open_In_Spotify:
-						open_spotify_uri(menu.uri)
-					case .Play:
-						if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
-							queue_detail_rows(&play_queue, &library_client.detail)
-							stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
-							play_index =
-								shuffle ? reorder_play_queue(play_queue[:], menu.track, true) : menu.track
-							track_selected = select_play_item(
-								play_queue[:],
-								play_index,
-								&selected,
-								&player_cover,
-								&artist,
-							)
-						}
-					case .Add_To_Playlist:
-						menu.picker_open = true
-						keep_open = true
-					case .Remove_From_Playlist:
-						if len(library_client.detail.id) > 0 {
-							_ = library.remove_track_from_playlist(
-								&library_client,
-								library_client.detail.id,
-								library_client.detail.name,
-								menu.uri,
-							)
-						}
-					}
-					break
-				}
-			}
-			if !keep_open {menu.open = false}
-		} else if clicked {
-			if hit("library_scrollbar", mouse_click) {
-				begin_scrollbar_drag(&scrollbar_drag, "library_grid", mouse_click.y)
-			} else if hit("detail_scrollbar", mouse_click) {
-				detail_scroll_armed = false
-				begin_scrollbar_drag(&scrollbar_drag, "detail_rows", mouse_click.y)
-			} else if hit("sidebar_handle", mouse_click) {
-				resizing = true
-			} else if hit("sort_button", mouse_click) {
-				open_sort_menu(&menu, mouse_click, app_state.sort[filter])
-			} else if hit("library_sign_in", mouse_click) {
-				_ = open_prompt_url(.Library)
-			} else if hit("library_retry", mouse_click) {
-				if library.restart(&library_client) {redraw = true}
-			} else {
-				handled := false
-				if hit("toolbar_back", mouse_click) {
-					nav_back_pressed = true
-					handled = true
-				} else if hit("toolbar_forward", mouse_click) {
-					nav_forward_pressed = true
-					handled = true
-				} else if hit("track_input", mouse_click) {
-					if !input_active {input_active = sdl.StartTextInput(state.window)}
-					select_all = false
-					handled = true
-				}
-				if !handled {
-					if search_mode {
-						search_tabs := SEARCH_TABS
-						for index in 0 ..< len(search_tabs) {
-							if hit_index("chip", mouse_click, u32(index)) {
-								if search_kind != search_tabs[index] {
-									search_kind = search_tabs[index]
-									nav_save_scroll(&nav, detail_scroll_y())
-									nav_commit(
-										&nav,
-										nav_capture(
-											&library_client,
-											filter,
-											search_mode,
-											search_kind,
-											input,
-										),
-									)
-								}
-								handled = true
-								break
-							}
-						}
-					} else {
-						library_tabs := LIBRARY_TABS
-						for index in 0 ..< len(library_tabs) {
-							if hit_index("chip", mouse_click, u32(index)) {
-								if filter != library_tabs[index] {
-									filter = library_tabs[index]
-									app_state.tab = filter
-									state_dirty = true
-									nav_save_scroll(&nav, detail_scroll_y())
-									nav_commit(
-										&nav,
-										nav_capture(
-											&library_client,
-											filter,
-											search_mode,
-											search_kind,
-											input,
-										),
-									)
-								}
-								retry_failed_covers(&textures)
-								handled = true
-								break
-							}
-						}
-					}
-				}
-				if !handled {
-					for index in visible.cards.first ..< visible.cards.last {
-						entry := display_page.items[index]
-						if !hit_clipped("card", "library_grid", mouse_click, u32(index)) {continue}
-						if search_mode && display_kind == .Tracks {
-							build_play_queue_from_entries(&play_queue, display_page.items[:])
-							delete(queue_detail)
-							queue_detail = ""
-							play_index =
-								shuffle ? reorder_play_queue(play_queue[:], index, true) : index
-							track_selected = select_play_item(
-								play_queue[:],
-								play_index,
-								&selected,
-								&player_cover,
-								&artist,
-							)
-							handled = track_selected
-						} else {
-							handled = open_entry_page(&nav_ctx, entry)
-						}
-						break
-					}
-				}
-				if !handled && library_client.detail.ready {
-					for ai in 0 ..< min(len(library_client.detail.artist_links), 64) {
-						link := library_client.detail.artist_links[ai]
-						if len(link.uri) == 0 {continue}
-						if !hit_index("hero_artist_link", mouse_click, u32(ai)) {continue}
-						preview := library.Entry {
-							name = link.name,
-							uri  = link.uri,
-						}
-						handled = open_entry_page(&nav_ctx, preview)
-						break
-					}
-				}
-				if !handled && library_client.detail.ready {
-					if hit("hero_like", mouse_click) {
-						detail := library_client.detail
-						if detail.source != .Liked &&
-						   !library_client.detail_loading &&
-						   !library_client.like_pending &&
-						   library.toggle_like(
-							   &library_client,
-							   detail.source,
-							   detail.id,
-							   !detail.liked,
-						   ) {
-							handled = true
-						}
-					} else if hit("hero_pin", mouse_click) {
-						detail_pinned = state_toggle_pin(
-							&app_state,
-							detail_card_uri(library_client.detail),
-						)
-						order_dirty = true
-						state_dirty = true
-						handled = true
-					} else if hit("hero_copy_link", mouse_click) &&
-					   !library.detail_loading_visible(&library_client) {
-						copy_spotify_uri(detail_card_uri(library_client.detail))
-						handled = true
-					} else if hit("spotify_link", mouse_click) && !library_client.detail_loading {
-						open_spotify_detail(&library_client.detail)
-						handled = true
-					} else if library_client.detail.source == .Artist {
-						handled =
-							open_release_card(
-								&library_client,
-								&nav,
-								&detail_scroll_armed,
-								mouse_click,
-								"release_card",
-								library_client.detail.albums.items[:],
-								visible.releases.first,
-								visible.releases.last,
-							) ||
-							open_release_card(
-								&library_client,
-								&nav,
-								&detail_scroll_armed,
-								mouse_click,
-								"single_card",
-								library_client.detail.singles.items[:],
-								visible.singles.first,
-								visible.singles.last,
-							)
-					} else {
-						for index in visible.tracks.first ..< visible.tracks.last {
-							if !hit_clipped(
-								"track_row",
-								"detail_rows",
-								mouse_click,
-								u32(index),
-							) {continue}
-							// A linked artist opens its own page instead of
-							// playing the row. Same compound IDs as the layout.
-							if index < len(library_client.detail.rows) {
-								row := library_client.detail.rows[index]
-								slot := u32(index - visible.tracks.first)
-								for ai in 0 ..< min(len(row.artist_links), 64) {
-									link := row.artist_links[ai]
-									if len(link.uri) == 0 {continue}
-									if !hit_clipped(
-										"artist_link",
-										"detail_rows",
-										mouse_click,
-										artist_link_id(slot, ai),
-									) {continue}
-									preview := library.Entry {
-										name = link.name,
-										uri  = link.uri,
-									}
-									handled = open_entry_page(&nav_ctx, preview)
-									break
-								}
-								if handled {break}
-							}
-							// Arm a drag instead of playing: the play only fires
-							// on release without a drag, so a drop onto a
-							// playlist never also starts the track.
-							delete(input)
-							input = {}
-							drag_candidate = true
-							dragging = false
-							drag_index = index
-							drag_start = mouse_click
-							delete(drag_uri)
-							drag_uri = strings.clone(library_client.detail.rows[index].uri)
-							delete(drag_label)
-							drag_label = strings.clone(library_client.detail.rows[index].name)
-							handled = true
-							break
-						}
-					}
-				}
-				if !handled && input_active {
-					input_active = false
-					select_all = false
-					_ = sdl.StopTextInput(state.window)
-				}
-			}
-		}
+		app_click(&app, &frame, visible)
 		// A track-row press arms a drag; a released press either drops the
 		// track on a playlist card or plays the row. Dragging never plays.
 		if drag_candidate && .LEFT in buttons {
@@ -2416,4 +2119,312 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		stage_sum, stage_max, stage_n = {}, {}, 0
 	}
 	return visible
+}
+
+// Right-click menu plus the whole left-click cascade: toolbar, chips,
+// cards, hero, rows and the click-away input release.
+app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
+	using app
+	using frame
+	if right_clicked {
+		open_menu_at(
+			&menu,
+			&library_client,
+			display_page,
+			display_kind,
+			visible,
+			mouse_right,
+			&app_state,
+		)
+	}
+	track_selected = false
+	if clicked && menu.open {
+		picked := false
+		if menu.picker_open {
+			for entry, index in menu.picker_items {
+				if !hit_index("picker_item", mouse_click, u32(index)) {continue}
+				if strings.has_prefix(entry.uri, "spotify:playlist:") {
+					_ = library.add_track_to_playlist(
+						&library_client,
+						entry.uri[len("spotify:playlist:"):],
+						entry.name,
+						menu.uri,
+					)
+				}
+				picked = true
+				break
+			}
+		}
+		keep_open := false
+		if !picked {
+			for index in 0 ..< menu.count {
+				if !hit_index("menu_item", mouse_click, u32(index)) {continue}
+				switch menu.items[index] {
+				case .Pin:
+					_ = state_toggle_pin(&app_state, menu.uri)
+					if menu.uri == detail_card_uri(library_client.detail) {
+						detail_pinned = state_is_pinned(&app_state, menu.uri)
+					}
+					order_dirty = true
+					state_dirty = true
+				case .Pick_Sort:
+					app_state.sort[filter] = menu.sorts[index]
+					order_dirty = true
+					state_dirty = true
+				case .Copy_Link:
+					copy_spotify_uri(menu.uri)
+				case .Open_In_Spotify:
+					open_spotify_uri(menu.uri)
+				case .Play:
+					if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
+						queue_detail_rows(&play_queue, &library_client.detail)
+						stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
+						play_index =
+							shuffle ? reorder_play_queue(play_queue[:], menu.track, true) : menu.track
+						track_selected = select_play_item(
+							play_queue[:],
+							play_index,
+							&selected,
+							&player_cover,
+							&artist,
+						)
+					}
+				case .Add_To_Playlist:
+					menu.picker_open = true
+					keep_open = true
+				case .Remove_From_Playlist:
+					if len(library_client.detail.id) > 0 {
+						_ = library.remove_track_from_playlist(
+							&library_client,
+							library_client.detail.id,
+							library_client.detail.name,
+							menu.uri,
+						)
+					}
+				}
+				break
+			}
+		}
+		if !keep_open {menu.open = false}
+	} else if clicked {
+		if hit("library_scrollbar", mouse_click) {
+			begin_scrollbar_drag(&scrollbar_drag, "library_grid", mouse_click.y)
+		} else if hit("detail_scrollbar", mouse_click) {
+			detail_scroll_armed = false
+			begin_scrollbar_drag(&scrollbar_drag, "detail_rows", mouse_click.y)
+		} else if hit("sidebar_handle", mouse_click) {
+			resizing = true
+		} else if hit("sort_button", mouse_click) {
+			open_sort_menu(&menu, mouse_click, app_state.sort[filter])
+		} else if hit("library_sign_in", mouse_click) {
+			_ = open_prompt_url(.Library)
+		} else if hit("library_retry", mouse_click) {
+			if library.restart(&library_client) {redraw = true}
+		} else {
+			handled := false
+			if hit("toolbar_back", mouse_click) {
+				nav_back_pressed = true
+				handled = true
+			} else if hit("toolbar_forward", mouse_click) {
+				nav_forward_pressed = true
+				handled = true
+			} else if hit("track_input", mouse_click) {
+				if !input_active {input_active = sdl.StartTextInput(state.window)}
+				select_all = false
+				handled = true
+			}
+			if !handled {
+				if search_mode {
+					search_tabs := SEARCH_TABS
+					for index in 0 ..< len(search_tabs) {
+						if hit_index("chip", mouse_click, u32(index)) {
+							if search_kind != search_tabs[index] {
+								search_kind = search_tabs[index]
+								nav_save_scroll(&nav, detail_scroll_y())
+								nav_commit(
+									&nav,
+									nav_capture(
+										&library_client,
+										filter,
+										search_mode,
+										search_kind,
+										input,
+									),
+								)
+							}
+							handled = true
+							break
+						}
+					}
+				} else {
+					library_tabs := LIBRARY_TABS
+					for index in 0 ..< len(library_tabs) {
+						if hit_index("chip", mouse_click, u32(index)) {
+							if filter != library_tabs[index] {
+								filter = library_tabs[index]
+								app_state.tab = filter
+								state_dirty = true
+								nav_save_scroll(&nav, detail_scroll_y())
+								nav_commit(
+									&nav,
+									nav_capture(
+										&library_client,
+										filter,
+										search_mode,
+										search_kind,
+										input,
+									),
+								)
+							}
+							retry_failed_covers(&textures)
+							handled = true
+							break
+						}
+					}
+				}
+			}
+			if !handled {
+				for index in visible.cards.first ..< visible.cards.last {
+					entry := display_page.items[index]
+					if !hit_clipped("card", "library_grid", mouse_click, u32(index)) {continue}
+					if search_mode && display_kind == .Tracks {
+						build_play_queue_from_entries(&play_queue, display_page.items[:])
+						delete(queue_detail)
+						queue_detail = ""
+						play_index =
+							shuffle ? reorder_play_queue(play_queue[:], index, true) : index
+						track_selected = select_play_item(
+							play_queue[:],
+							play_index,
+							&selected,
+							&player_cover,
+							&artist,
+						)
+						handled = track_selected
+					} else {
+						handled = open_entry_page(&nav_ctx, entry)
+					}
+					break
+				}
+			}
+			if !handled && library_client.detail.ready {
+				for ai in 0 ..< min(len(library_client.detail.artist_links), 64) {
+					link := library_client.detail.artist_links[ai]
+					if len(link.uri) == 0 {continue}
+					if !hit_index("hero_artist_link", mouse_click, u32(ai)) {continue}
+					preview := library.Entry {
+						name = link.name,
+						uri  = link.uri,
+					}
+					handled = open_entry_page(&nav_ctx, preview)
+					break
+				}
+			}
+			if !handled && library_client.detail.ready {
+				if hit("hero_like", mouse_click) {
+					detail := library_client.detail
+					if detail.source != .Liked &&
+					   !library_client.detail_loading &&
+					   !library_client.like_pending &&
+					   library.toggle_like(
+						   &library_client,
+						   detail.source,
+						   detail.id,
+						   !detail.liked,
+					   ) {
+						handled = true
+					}
+				} else if hit("hero_pin", mouse_click) {
+					detail_pinned = state_toggle_pin(
+						&app_state,
+						detail_card_uri(library_client.detail),
+					)
+					order_dirty = true
+					state_dirty = true
+					handled = true
+				} else if hit("hero_copy_link", mouse_click) &&
+				   !library.detail_loading_visible(&library_client) {
+					copy_spotify_uri(detail_card_uri(library_client.detail))
+					handled = true
+				} else if hit("spotify_link", mouse_click) && !library_client.detail_loading {
+					open_spotify_detail(&library_client.detail)
+					handled = true
+				} else if library_client.detail.source == .Artist {
+					handled =
+						open_release_card(
+							&library_client,
+							&nav,
+							&detail_scroll_armed,
+							mouse_click,
+							"release_card",
+							library_client.detail.albums.items[:],
+							visible.releases.first,
+							visible.releases.last,
+						) ||
+						open_release_card(
+							&library_client,
+							&nav,
+							&detail_scroll_armed,
+							mouse_click,
+							"single_card",
+							library_client.detail.singles.items[:],
+							visible.singles.first,
+							visible.singles.last,
+						)
+				} else {
+					for index in visible.tracks.first ..< visible.tracks.last {
+						if !hit_clipped(
+							"track_row",
+							"detail_rows",
+							mouse_click,
+							u32(index),
+						) {continue}
+						// A linked artist opens its own page instead of
+						// playing the row. Same compound IDs as the layout.
+						if index < len(library_client.detail.rows) {
+							row := library_client.detail.rows[index]
+							slot := u32(index - visible.tracks.first)
+							for ai in 0 ..< min(len(row.artist_links), 64) {
+								link := row.artist_links[ai]
+								if len(link.uri) == 0 {continue}
+								if !hit_clipped(
+									"artist_link",
+									"detail_rows",
+									mouse_click,
+									artist_link_id(slot, ai),
+								) {continue}
+								preview := library.Entry {
+									name = link.name,
+									uri  = link.uri,
+								}
+								handled = open_entry_page(&nav_ctx, preview)
+								break
+							}
+							if handled {break}
+						}
+						// Arm a drag instead of playing: the play only fires
+						// on release without a drag, so a drop onto a
+						// playlist never also starts the track.
+						delete(input)
+						input = {}
+						drag_candidate = true
+						dragging = false
+						drag_index = index
+						drag_start = mouse_click
+						delete(drag_uri)
+						drag_uri = strings.clone(library_client.detail.rows[index].uri)
+						delete(drag_label)
+						drag_label = strings.clone(library_client.detail.rows[index].name)
+						handled = true
+						break
+					}
+				}
+			}
+			if !handled && input_active {
+				input_active = false
+				select_all = false
+				_ = sdl.StopTextInput(state.window)
+			}
+		}
+	}
 }
