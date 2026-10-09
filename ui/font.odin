@@ -2,13 +2,71 @@ package ui
 
 import "core:fmt"
 import "core:os"
+import filepath "core:path/filepath"
 import "core:strconv"
 import "core:strings"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
-// Fontconfig returns both the file and FreeType face index. Variable-font named
-// instances share one file, so dropping the index silently opens regular.
+// Product typography is the vendored Geist pair in assets/fonts, so every
+// platform renders the same faces. The variable font carries the weights
+// as named instances; the ids below are properties of that file.
+Font_Role :: enum {
+	Regular,
+	Numeric,
+	Bold,
+	Medium,
+}
+
+GEIST_VAR :: "Geist[wght].ttf"
+GEIST_MONO :: "GeistMono-Regular.ttf"
+GEIST_FACE_REGULAR :: 0
+GEIST_FACE_MEDIUM :: (5 << 16)
+GEIST_FACE_BOLD :: (7 << 16)
+
+// First existing file wins: an override dir, the install layout around
+// the binary, then the dev checkout. The caller owns the returned path.
+resolve_bundled :: proc(file: string) -> (path: string, ok: bool) {
+	candidates := make([dynamic]string, context.temp_allocator)
+	if override, found := os.lookup_env("SPOTI_FONTS", context.temp_allocator); found {
+		append(&candidates, fmt.aprintf("%s/%s", override, file))
+	}
+	if exe, err := os.get_executable_path(context.temp_allocator); err == nil {
+		dir := filepath.dir(string(exe))
+		append(&candidates, fmt.aprintf("%s/../share/spoti/fonts/%s", dir, file))
+		append(&candidates, fmt.aprintf("%s/fonts/%s", dir, file))
+	}
+	append(&candidates, fmt.aprintf("assets/fonts/%s", file))
+	for candidate in candidates {
+		if os.exists(candidate) {return strings.clone(candidate), true}
+	}
+	return "", false
+}
+
+// Bundled faces first; Linux falls back to fontconfig when the checkout
+// ships without them. Other platforms have no system fallback: without
+// the bundle there is nothing legible to fall back to.
+resolve_role :: proc(role: Font_Role) -> (path: string, index: int, ok: bool) {
+	file := GEIST_VAR
+	face := GEIST_FACE_REGULAR
+	pattern := "sans-serif"
+	switch role {
+	case .Regular:
+	case .Numeric:
+		file, face, pattern = GEIST_MONO, 0, "monospace"
+	case .Bold:
+		face, pattern = GEIST_FACE_BOLD, "sans-serif:style=Bold"
+	case .Medium:
+		face, pattern = GEIST_FACE_MEDIUM, "sans-serif:style=Medium"
+	}
+	if bundled, found := resolve_bundled(file); found {return bundled, face, true}
+	when ODIN_OS == .Linux {
+		return resolve_font(pattern)
+	} else {
+		fmt.eprintln("missing bundled font:", file)
+		return "", 0, false
+	}
+}
 resolve_font :: proc(pattern: string) -> (path: string, index: int, ok: bool) {
 	state, output, errors, err := os.process_exec(
 		{command = {"fc-match", "-f", "%{file}\n%{index}\n", pattern}},
@@ -34,6 +92,8 @@ resolve_font :: proc(pattern: string) -> (path: string, index: int, ok: bool) {
 // (rgba) has no SDL GPU-text equivalent, so system text stays slightly
 // darker; shapes and spacing follow the configured hinter.
 system_hinting :: proc() -> ttf.Hinting {
+	// Only Linux desktops expose fontconfig; elsewhere SDL's default stands.
+	when ODIN_OS != .Linux {return .NORMAL}
 	state, output, errors, err := os.process_exec(
 		{command = {"fc-match", "-f", "%{hinting} %{hintstyle} %{antialias}\n", "sans-serif"}},
 		context.allocator,

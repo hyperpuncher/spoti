@@ -81,13 +81,13 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 	_ = sdl.SetRenderDrawBlendMode(state.renderer, sdl.BLENDMODE_BLEND)
 	if !state.vsync {fmt.eprintln("SDL3 vsync unavailable; limiting frames to about 60 fps")}
 	state.fps_started = sdl.GetTicks()
-	state.font_path, state.font_index, ok = resolve_font("sans-serif")
+	state.font_path, state.font_index, ok = resolve_role(.Regular)
 	if !ok {close(&state); return}
-	state.numeric_font_path, state.numeric_font_index, ok = resolve_font("monospace")
+	state.numeric_font_path, state.numeric_font_index, ok = resolve_role(.Numeric)
 	if !ok {close(&state); return}
-	state.bold_font_path, state.bold_font_index, ok = resolve_font("sans-serif:style=Bold")
+	state.bold_font_path, state.bold_font_index, ok = resolve_role(.Bold)
 	if !ok {close(&state); return}
-	state.medium_font_path, state.medium_font_index, ok = resolve_font("sans-serif:style=Medium")
+	state.medium_font_path, state.medium_font_index, ok = resolve_role(.Medium)
 	if !ok {close(&state); return}
 	state.hinting = system_hinting()
 	state.fonts = make(map[int]^ttf.Font)
