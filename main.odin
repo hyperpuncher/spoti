@@ -672,6 +672,19 @@ Frame :: struct {
 	mpris_seek_ms:        int,
 	mpris_seek_requested: bool,
 	redraw:               bool,
+	mouse:                sdl.FPoint,
+	buttons:              sdl.MouseButtonFlags,
+	density:              f32,
+	seek_enabled:         bool,
+	link_album:           bool,
+	link_artist:          bool,
+	queue_at:             bool,
+	foot_album:           string,
+	foot_album_uri:       string,
+	foot_first:           string,
+	foot_first_uri:       string,
+	library_prompt:       bool,
+	playback_prompt:      bool,
 }
 
 main :: proc() {
@@ -826,340 +839,24 @@ main :: proc() {
 		pending_redraw = false
 		first_frame = false
 		if !running {break}
-		t0 := sdl.GetTicksNS()
 		app_navigate(&app, &frame)
 		app_search(&app, &frame)
-		library_prompt, playback_prompt := app_library(&app, &frame)
+		app_library(&app, &frame)
 		app_playback(&app, &frame)
 		// Glide wheel targets toward their offsets before the idle check so
 		// a settling glide keeps frames (and redraws) coming by itself.
-		smooth_dt := f32(sdl.GetTicksNS() - last) / 1e9
-		if smooth_step("playlist_picker", &picker_smooth, smooth_dt) {redraw = true}
-		if smooth_step("library_grid", &grid_smooth, smooth_dt) {redraw = true}
-		if smooth_step("detail_rows", &detail_smooth, smooth_dt) {redraw = true}
-		// The autoscroll step runs after layout, so a gliding frame must
-		// not take the idle continue. Last frame's flag keeps held-still
-		// autoscroll advancing until it parks in the dead zone.
-		if autoscroll_moving {redraw = true}
+		app_glide(&app, &frame)
 		if !redraw && stage != .Playing {continue}
 
-		progress := f32(0)
-		if duration_ms > 0 {
-			// Kept times hold the bar steady across worker swaps; live audio
-			// refines it below.
-			progress = f32(displayed_ms) / f32(duration_ms)
-			if sample_rate > 0 && stream != nil {
-				queued := max(0, sdl.GetAudioStreamQueued(stream))
-				measured_ms := (sent_frames - int(queued) / 4) * 1000 / sample_rate
-				displayed_ms = max(displayed_ms, clamp(measured_ms, 0, duration_ms))
-				progress = f32(displayed_ms) / f32(duration_ms)
-			}
-		}
-		shown_ms := displayed_ms
-		seek_enabled :=
-			duration_ms > 0 && (stage == .Playing || stage == .Paused || stage == .Ended)
-		if seek_dragging && seek_enabled {
-			box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
-			mouse_x: f32
-			_ = sdl.GetMouseState(&mouse_x, nil)
-			point := ui.mouse_position(&state, mouse_x, 0)
-			preview := seek_position_ms(point.x, box.x, box.width, duration_ms)
-			progress = f32(preview) / f32(duration_ms)
-			shown_ms = preview
-		}
-		button := "play"
-		if stage == .Paused {button = "resume"}
-		// Transitional stages keep the pause icon while a (re)start is in
-		// flight, so next/previous never flicker through the play triangle.
-		if stage == .Playing ||
-		   stage == .Signing_In ||
-		   stage == .Buffering ||
-		   (play_after_stop && (stage == .Stopping || stage == .Idle)) ||
-		   (replay_pending && stage == .Ended) {button = "pause"}
-		// A seek from paused lands back on paused, so its handoff keeps
-		// the resume icon instead of flashing pause.
-		if start_paused && button == "pause" {button = "resume"}
-		status := "Ready to play"
-		switch stage {
-		case .Signing_In:
-			status = playback_prompt ? "Approve playback in your browser" : "Loading track..."
-		case .Buffering:
-			status = "Buffering audio..."
-		case .Playing:
-			status = "Playing from Spotify"
-		case .Paused:
-			status = "Paused"
-		case .Ended:
-			status = "Track ended. Press play to replay."
-		case .Failed:
-			status = "Could not play. Press play to retry."
-		case .Stopping:
-			status = "Stopping..."
-		case .Idle:
-			// No history yet shows nothing, not a placeholder.
-			status = len(title) > 0 ? "Ready to play" : ""
-		}
-		shown_title := title
-		// The footer names the artist like spotifast; the status line only
-		// surfaces while nothing is known or when playback failed.
-		shown_status := status
-		if stage != .Failed && len(artist) > 0 && !(stage == .Signing_In && playback_prompt) {
-			shown_status = artist
-		}
-		shown_input := input
-		if len(shown_input) == 0 {
-			shown_input = input_active ? "" : "Search Spotify or paste a track link"
-		}
-		if input_active {shown_input = fmt.aprintf("%s|", shown_input, allocator = context.temp_allocator)}
-		times: [2][16]u8
-		retain_player_cover(&displayed_cover, player_cover, &textures)
-		// The footer links the playing collection: the title its album, the
-		// artist its artist. Search queues carry no URIs and stay silent.
-		// The live queue is the truth, even when it links nothing; the
-		// persisted record only serves the queue-less resumed footer.
-		queue_at := play_index >= 0 && play_index < len(play_queue)
-		foot_album, foot_album_uri := "", ""
-		foot_first, foot_first_uri := "", ""
-		if queue_at {
-			item := play_queue[play_index]
-			foot_album, foot_album_uri = item.album, item.album_uri
-			if len(item.artist_links) > 0 {
-				foot_first, foot_first_uri = item.artist_links[0].name, item.artist_links[0].uri
-			}
-		} else {
-			foot_album, foot_album_uri =
-				app_state.last_played.album, app_state.last_played.album_uri
-			foot_first, foot_first_uri =
-				app_state.last_played.first_artist, app_state.last_played.artist_uri
-		}
-		link_album := len(foot_album_uri) > 0
-		link_artist := len(foot_first_uri) > 0
-		// A finished write shows its outcome for a moment; the toast is the
-		// only signal that a change the user cannot see actually landed.
-		if last_write_pending && !library_client.write_pending {
-			verb := library_client.write_removed ? "Removed from" : "Added to"
-			if !library_client.write_ok {
-				verb = library_client.write_removed ? "Couldn't remove from" : "Couldn't add to"
-			}
-			delete(toast)
-			toast = fmt.aprintf("%s %s", verb, library_client.write_name)
-			toast_until = sdl.GetTicksNS() + 2_500_000_000
-		}
-		last_write_pending = library_client.write_pending
-		if len(toast) > 0 && sdl.GetTicksNS() > toast_until {
-			delete(toast)
-			toast = ""
-		}
-		width, height = ui.size(&state)
 		mouse_x, mouse_y: f32
-		buttons := sdl.GetMouseState(&mouse_x, &mouse_y)
-		mouse := ui.mouse_position(&state, mouse_x, mouse_y)
-		now := sdl.GetTicksNS()
-		dt := f32(now - last) / 1e9
-		last = now
+		buttons = sdl.GetMouseState(&mouse_x, &mouse_y)
+		mouse = ui.mouse_position(&state, mouse_x, mouse_y)
 		clay.SetLayoutDimensions({f32(width), f32(height)})
 		clay.SetPointerState({mouse.x, mouse.y}, .LEFT in buttons)
 		previous_density := ui.scale(&state)
-		density := ui.update_scale(&state)
+		density = ui.update_scale(&state)
 		if density != previous_density {clay.ResetMeasureTextCache()}
-		// The picker submenu opens while the pointer is over the add row and
-		// stays open while it is over the menu or the panel, so the pointer
-		// can cross the small gap between them. Boxes are one frame old.
-		if menu.open {
-			add_index := menu_add_index(&menu)
-			add_box :=
-				clay.GetElementData(clay.ID("menu_item", u32(max(add_index, 0)))).boundingBox
-			menu_box := clay.GetElementData(clay.ID("context_menu")).boundingBox
-			panel_box := clay.GetElementData(clay.ID("playlist_picker_panel")).boundingBox
-			corridor := menu_box
-			corridor.width += 8 * density
-			over_add := add_index >= 0 && point_in_box(mouse, add_box)
-			over_picker := point_in_box(mouse, panel_box) || point_in_box(mouse, corridor)
-			menu.picker_open = over_add || (menu.picker_open && over_picker)
-		} else {
-			menu.picker_open = false
-		}
-		if menu.picker_open {rebuild_picker_items(&menu, &library_client)}
-		// A picker is an explicit ask for the full list, so keep paging the
-		// sidebar's playlist tab while it is open; the page interval paces it.
-		if menu.picker_open {library.more(&library_client, .Playlists)}
-		view := View {
-			title          = shown_title,
-			status         = shown_status,
-			album_linked   = link_album,
-			artist_linked  = link_artist,
-			button         = button,
-			progress       = progress,
-			elapsed        = duration_text(shown_ms, times[0][:]),
-			total          = duration_text(duration_ms, times[1][:]),
-			input          = shown_input,
-			cover          = displayed_cover,
-			repeat         = repeat,
-			shuffle        = shuffle,
-			volume         = volume,
-			input_active   = input_active,
-			select_all     = select_all,
-			pinned         = detail_pinned,
-			search_mode    = search_mode,
-			sign_in        = library_prompt,
-			can_back       = nav_can_back(&nav),
-			can_forward    = nav_can_forward(&nav),
-			search_kind    = search_kind,
-			menu_open      = menu.open,
-			menu_x         = menu.point.x,
-			menu_y         = menu.point.y,
-			menu_count     = menu.count,
-			menu_selected  = menu.selected,
-			menu_labels    = menu.labels,
-			menu_add_index = menu_add_index(&menu),
-			picker_open    = menu.picker_open,
-			picker_rows    = menu.picker_items[:],
-			drag_active    = dragging,
-			drag_x         = mouse.x,
-			drag_y         = mouse.y,
-			drag_label     = drag_label,
-			drop_target    = drop_target,
-			toast          = toast,
-			scroll_active  = autoscroll_container != "",
-			scroll_x       = autoscroll_anchor.x,
-			scroll_y       = autoscroll_anchor.y,
-			current_uri    = selected,
-			playing        = stage == .Playing,
-		}
-		wheel_used := scroll_wheel("playlist_picker", wheel.y, density, &picker_smooth)
-		if !wheel_used {wheel_used = scroll_wheel("library_grid", wheel.y, density, &grid_smooth)}
-		if !wheel_used {
-			wheel_used = scroll_wheel("detail_rows", wheel.y, density, &detail_smooth)
-			if wheel_used {detail_scroll_armed = false}
-		}
-		clay.UpdateScrollContainers(false, {}, dt)
-		card_text_height :=
-			f32(ttf.GetFontHeight(ui.font_for_size(&state, 14 * density))) +
-			f32(ttf.GetFontHeight(ui.font_for_size(&state, 12 * density)))
-		t1 := sdl.GetTicksNS()
-		fx := Button_Fx_Ctx {
-			anims      = &button_anims,
-			mouse_down = .LEFT in buttons,
-		}
-		// Fresh pages start at the top. Warm opens keep the scroll
-		// container alive across the switch, so without this the
-		// previous page's offset (and glide) would carry over and a
-		// long playlist would reopen at its bottom skeleton tail.
-		current_detail_uri := detail_card_uri(library_client.detail)
-		if current_detail_uri != last_detail_uri {
-			delete(last_detail_uri)
-			last_detail_uri = strings.clone(current_detail_uri)
-			if data := clay.GetScrollContainerData(clay.ID("detail_rows"));
-			   data.found && data.scrollPosition != nil {
-				data.scrollPosition.y = 0
-			}
-			detail_smooth.target = 0
-			detail_smooth.active = false
-		}
-		commands, visible := layout(
-			view,
-			&library_client,
-			&app_state,
-			filter,
-			&textures,
-			&fx,
-			sidebar_width,
-			f32(width),
-			f32(height),
-			card_text_height,
-			dt,
-			density,
-			&state,
-		)
-		fx_animating = fx.animating
-		// A banked history offset rides the growing content down as pages
-		// stream in, then snaps in once reached or fully loaded. Any direct
-		// scroll input cancels it so it never fights the user.
-		if detail_scroll_armed && library_client.detail.ready {
-			scroll_data := clay.GetScrollContainerData(clay.ID("detail_rows"))
-			if scroll_data.found && scroll_data.scrollPosition != nil {
-				viewport := scroll_data.scrollContainerDimensions.height
-				content := scroll_data.contentDimensions.height
-				loaded := !library_client.detail_loading && !library_client.detail.has_more
-				if viewport > 0 && content > viewport {
-					pos := clamp(detail_scroll_target, viewport - content, 0)
-					scroll_data.scrollPosition.y = pos
-					detail_smooth.target = pos
-					detail_smooth.active = false
-					if pos == detail_scroll_target || loaded {detail_scroll_armed = false}
-					redraw = true
-				} else if loaded || content <= viewport {
-					detail_scroll_armed = false
-				}
-			}
-		}
-		if middle_clicked {
-			middle_clicked = false
-			for id in ([]string{"library_grid", "detail_rows"}) {
-				if !hit(id, middle_click) {continue}
-				data := clay.GetScrollContainerData(clay.ID(id))
-				if data.found &&
-				   data.contentDimensions.height > data.scrollContainerDimensions.height {
-					autoscroll_container = id
-					autoscroll_anchor = middle_click
-					if id == "detail_rows" {detail_scroll_armed = false}
-					break
-				}
-			}
-		}
-		if autoscroll_container != "" {
-			smooth_cancel(
-				autoscroll_container,
-				smooth_for(autoscroll_container, &grid_smooth, &detail_smooth),
-			)
-			data := clay.GetScrollContainerData(clay.ID(autoscroll_container))
-			if !data.found || .MIDDLE not_in buttons {
-				autoscroll_container = ""
-				autoscroll_moving = false
-			} else {
-				autoscroll_moving = autoscroll_step(
-					autoscroll_container,
-					mouse.y - autoscroll_anchor.y,
-					dt,
-					density,
-				)
-				if autoscroll_moving {redraw = true}
-			}
-		} else {autoscroll_moving = false}
-		t2 := sdl.GetTicksNS()
-		update_cursor(
-			&state,
-			&library_client,
-			resizing,
-			visible,
-			seek_enabled,
-			search_mode,
-			link_album,
-			link_artist,
-		)
-		_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
-		_ = sdl.RenderClear(state.renderer)
-		render(&commands, &state, &textures)
-		ui.frame_done(&state)
-		t3 := sdl.GetTicksNS()
-		stage_sum[0] += f64(t1 - t0) / 1e6
-		stage_sum[1] += f64(t2 - t1) / 1e6
-		stage_sum[2] += f64(t3 - t2) / 1e6
-		stage_max[0] = max(stage_max[0], f64(t1 - t0) / 1e6)
-		stage_max[1] = max(stage_max[1], f64(t2 - t1) / 1e6)
-		stage_max[2] = max(stage_max[2], f64(t3 - t2) / 1e6)
-		stage_n += 1
-		if stage_n >= 240 {
-			diagnostic.frame(
-				stage_sum[0] / f64(stage_n),
-				stage_sum[1] / f64(stage_n),
-				stage_sum[2] / f64(stage_n),
-				stage_max[0],
-				stage_max[1],
-				stage_max[2],
-			)
-			stage_sum, stage_max, stage_n = {}, {}, 0
-		}
+		visible := app_layout(&app, &frame)
 		display_page := &library_client.pages[filter]
 		display_kind := filter
 		if search_mode {
@@ -2163,7 +1860,7 @@ app_search :: proc(app: ^App, frame: ^Frame) {
 
 // Worker joins, library polling and sorting, cover uploads and the
 // reopened-collection restore.
-app_library :: proc(app: ^App, frame: ^Frame) -> (library_prompt, playback_prompt: bool) {
+app_library :: proc(app: ^App, frame: ^Frame) {
 	using app
 	using frame
 	if preload_worker != nil && thread.is_done(preload_worker) {
@@ -2259,7 +1956,6 @@ app_library :: proc(app: ^App, frame: ^Frame) -> (library_prompt, playback_promp
 			}
 		}
 	}
-	return library_prompt, playback_prompt
 }
 
 // Playback worker lifecycle, decoder packets, end-of-track advance and
@@ -2390,4 +2086,334 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 			preload_worker = thread.create_and_start_with_data(&preload_work, preload_track)
 		}
 	}
+}
+
+// Wheel glides ease toward their targets before the idle check so a
+// settling glide keeps frames coming by itself.
+app_glide :: proc(app: ^App, frame: ^Frame) {
+	using app
+	using frame
+	smooth_dt := f32(sdl.GetTicksNS() - last) / 1e9
+	if smooth_step("playlist_picker", &picker_smooth, smooth_dt) {redraw = true}
+	if smooth_step("library_grid", &grid_smooth, smooth_dt) {redraw = true}
+	if smooth_step("detail_rows", &detail_smooth, smooth_dt) {redraw = true}
+	// The autoscroll step runs after layout, so a gliding frame must
+	// not take the idle continue. Last frame's flag keeps held-still
+	// autoscroll advancing until it parks in the dead zone.
+	if autoscroll_moving {redraw = true}
+}
+
+// Progress, view assembly, layout, cursor and render. Returns what the
+// click and cover stages walk.
+app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
+	using app
+	using frame
+	progress := f32(0)
+	if duration_ms > 0 {
+		// Kept times hold the bar steady across worker swaps; live audio
+		// refines it below.
+		progress = f32(displayed_ms) / f32(duration_ms)
+		if sample_rate > 0 && stream != nil {
+			queued := max(0, sdl.GetAudioStreamQueued(stream))
+			measured_ms := (sent_frames - int(queued) / 4) * 1000 / sample_rate
+			displayed_ms = max(displayed_ms, clamp(measured_ms, 0, duration_ms))
+			progress = f32(displayed_ms) / f32(duration_ms)
+		}
+	}
+	shown_ms := displayed_ms
+	seek_enabled = duration_ms > 0 && (stage == .Playing || stage == .Paused || stage == .Ended)
+	if seek_dragging && seek_enabled {
+		box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
+		mouse_x: f32
+		_ = sdl.GetMouseState(&mouse_x, nil)
+		point := ui.mouse_position(&state, mouse_x, 0)
+		preview := seek_position_ms(point.x, box.x, box.width, duration_ms)
+		progress = f32(preview) / f32(duration_ms)
+		shown_ms = preview
+	}
+	button := "play"
+	if stage == .Paused {button = "resume"}
+	// Transitional stages keep the pause icon while a (re)start is in
+	// flight, so next/previous never flicker through the play triangle.
+	if stage == .Playing ||
+	   stage == .Signing_In ||
+	   stage == .Buffering ||
+	   (play_after_stop && (stage == .Stopping || stage == .Idle)) ||
+	   (replay_pending && stage == .Ended) {button = "pause"}
+	// A seek from paused lands back on paused, so its handoff keeps
+	// the resume icon instead of flashing pause.
+	if start_paused && button == "pause" {button = "resume"}
+	status := "Ready to play"
+	switch stage {
+	case .Signing_In:
+		status = playback_prompt ? "Approve playback in your browser" : "Loading track..."
+	case .Buffering:
+		status = "Buffering audio..."
+	case .Playing:
+		status = "Playing from Spotify"
+	case .Paused:
+		status = "Paused"
+	case .Ended:
+		status = "Track ended. Press play to replay."
+	case .Failed:
+		status = "Could not play. Press play to retry."
+	case .Stopping:
+		status = "Stopping..."
+	case .Idle:
+		// No history yet shows nothing, not a placeholder.
+		status = len(title) > 0 ? "Ready to play" : ""
+	}
+	shown_title := title
+	// The footer names the artist like spotifast; the status line only
+	// surfaces while nothing is known or when playback failed.
+	shown_status := status
+	if stage != .Failed && len(artist) > 0 && !(stage == .Signing_In && playback_prompt) {
+		shown_status = artist
+	}
+	shown_input := input
+	if len(shown_input) == 0 {
+		shown_input = input_active ? "" : "Search Spotify or paste a track link"
+	}
+	if input_active {shown_input = fmt.aprintf("%s|", shown_input, allocator = context.temp_allocator)}
+	times: [2][16]u8
+	retain_player_cover(&displayed_cover, player_cover, &textures)
+	// The footer links the playing collection: the title its album, the
+	// artist its artist. Search queues carry no URIs and stay silent.
+	// The live queue is the truth, even when it links nothing; the
+	// persisted record only serves the queue-less resumed footer.
+	queue_at = play_index >= 0 && play_index < len(play_queue)
+	foot_album, foot_album_uri = "", ""
+	foot_first, foot_first_uri = "", ""
+	if queue_at {
+		item := play_queue[play_index]
+		foot_album, foot_album_uri = item.album, item.album_uri
+		if len(item.artist_links) > 0 {
+			foot_first, foot_first_uri = item.artist_links[0].name, item.artist_links[0].uri
+		}
+	} else {
+		foot_album, foot_album_uri = app_state.last_played.album, app_state.last_played.album_uri
+		foot_first, foot_first_uri =
+			app_state.last_played.first_artist, app_state.last_played.artist_uri
+	}
+	link_album = len(foot_album_uri) > 0
+	link_artist = len(foot_first_uri) > 0
+	// A finished write shows its outcome for a moment; the toast is the
+	// only signal that a change the user cannot see actually landed.
+	if last_write_pending && !library_client.write_pending {
+		verb := library_client.write_removed ? "Removed from" : "Added to"
+		if !library_client.write_ok {
+			verb = library_client.write_removed ? "Couldn't remove from" : "Couldn't add to"
+		}
+		delete(toast)
+		toast = fmt.aprintf("%s %s", verb, library_client.write_name)
+		toast_until = sdl.GetTicksNS() + 2_500_000_000
+	}
+	last_write_pending = library_client.write_pending
+	if len(toast) > 0 && sdl.GetTicksNS() > toast_until {
+		delete(toast)
+		toast = ""
+	}
+	width, height = ui.size(&state)
+	// The picker submenu opens while the pointer is over the add row and
+	// stays open while it is over the menu or the panel, so the pointer
+	// can cross the small gap between them. Boxes are one frame old.
+	if menu.open {
+		add_index := menu_add_index(&menu)
+		add_box := clay.GetElementData(clay.ID("menu_item", u32(max(add_index, 0)))).boundingBox
+		menu_box := clay.GetElementData(clay.ID("context_menu")).boundingBox
+		panel_box := clay.GetElementData(clay.ID("playlist_picker_panel")).boundingBox
+		corridor := menu_box
+		corridor.width += 8 * density
+		over_add := add_index >= 0 && point_in_box(mouse, add_box)
+		over_picker := point_in_box(mouse, panel_box) || point_in_box(mouse, corridor)
+		menu.picker_open = over_add || (menu.picker_open && over_picker)
+	} else {
+		menu.picker_open = false
+	}
+	if menu.picker_open {rebuild_picker_items(&menu, &library_client)}
+	// A picker is an explicit ask for the full list, so keep paging the
+	// sidebar's playlist tab while it is open; the page interval paces it.
+	if menu.picker_open {library.more(&library_client, .Playlists)}
+	view := View {
+		title          = shown_title,
+		status         = shown_status,
+		album_linked   = link_album,
+		artist_linked  = link_artist,
+		button         = button,
+		progress       = progress,
+		elapsed        = duration_text(shown_ms, times[0][:]),
+		total          = duration_text(duration_ms, times[1][:]),
+		input          = shown_input,
+		cover          = displayed_cover,
+		repeat         = repeat,
+		shuffle        = shuffle,
+		volume         = volume,
+		input_active   = input_active,
+		select_all     = select_all,
+		pinned         = detail_pinned,
+		search_mode    = search_mode,
+		sign_in        = library_prompt,
+		can_back       = nav_can_back(&nav),
+		can_forward    = nav_can_forward(&nav),
+		search_kind    = search_kind,
+		menu_open      = menu.open,
+		menu_x         = menu.point.x,
+		menu_y         = menu.point.y,
+		menu_count     = menu.count,
+		menu_selected  = menu.selected,
+		menu_labels    = menu.labels,
+		menu_add_index = menu_add_index(&menu),
+		picker_open    = menu.picker_open,
+		picker_rows    = menu.picker_items[:],
+		drag_active    = dragging,
+		drag_x         = mouse.x,
+		drag_y         = mouse.y,
+		drag_label     = drag_label,
+		drop_target    = drop_target,
+		toast          = toast,
+		scroll_active  = autoscroll_container != "",
+		scroll_x       = autoscroll_anchor.x,
+		scroll_y       = autoscroll_anchor.y,
+		current_uri    = selected,
+		playing        = stage == .Playing,
+	}
+	wheel_used := scroll_wheel("playlist_picker", wheel.y, density, &picker_smooth)
+	if !wheel_used {wheel_used = scroll_wheel("library_grid", wheel.y, density, &grid_smooth)}
+	if !wheel_used {
+		wheel_used = scroll_wheel("detail_rows", wheel.y, density, &detail_smooth)
+		if wheel_used {detail_scroll_armed = false}
+	}
+	t0 := sdl.GetTicksNS()
+	now := sdl.GetTicksNS()
+	dt := f32(now - last) / 1e9
+	last = now
+	clay.UpdateScrollContainers(false, {}, dt)
+	card_text_height :=
+		f32(ttf.GetFontHeight(ui.font_for_size(&state, 14 * density))) +
+		f32(ttf.GetFontHeight(ui.font_for_size(&state, 12 * density)))
+	t1 := sdl.GetTicksNS()
+	fx := Button_Fx_Ctx {
+		anims      = &button_anims,
+		mouse_down = .LEFT in buttons,
+	}
+	// Fresh pages start at the top. Warm opens keep the scroll
+	// container alive across the switch, so without this the
+	// previous page's offset (and glide) would carry over and a
+	// long playlist would reopen at its bottom skeleton tail.
+	current_detail_uri := detail_card_uri(library_client.detail)
+	if current_detail_uri != last_detail_uri {
+		delete(last_detail_uri)
+		last_detail_uri = strings.clone(current_detail_uri)
+		if data := clay.GetScrollContainerData(clay.ID("detail_rows"));
+		   data.found && data.scrollPosition != nil {
+			data.scrollPosition.y = 0
+		}
+		detail_smooth.target = 0
+		detail_smooth.active = false
+	}
+	commands, visible := layout(
+		view,
+		&library_client,
+		&app_state,
+		filter,
+		&textures,
+		&fx,
+		sidebar_width,
+		f32(width),
+		f32(height),
+		card_text_height,
+		dt,
+		density,
+		&state,
+	)
+	fx_animating = fx.animating
+	// A banked history offset rides the growing content down as pages
+	// stream in, then snaps in once reached or fully loaded. Any direct
+	// scroll input cancels it so it never fights the user.
+	if detail_scroll_armed && library_client.detail.ready {
+		scroll_data := clay.GetScrollContainerData(clay.ID("detail_rows"))
+		if scroll_data.found && scroll_data.scrollPosition != nil {
+			viewport := scroll_data.scrollContainerDimensions.height
+			content := scroll_data.contentDimensions.height
+			loaded := !library_client.detail_loading && !library_client.detail.has_more
+			if viewport > 0 && content > viewport {
+				pos := clamp(detail_scroll_target, viewport - content, 0)
+				scroll_data.scrollPosition.y = pos
+				detail_smooth.target = pos
+				detail_smooth.active = false
+				if pos == detail_scroll_target || loaded {detail_scroll_armed = false}
+				redraw = true
+			} else if loaded || content <= viewport {
+				detail_scroll_armed = false
+			}
+		}
+	}
+	if middle_clicked {
+		middle_clicked = false
+		for id in ([]string{"library_grid", "detail_rows"}) {
+			if !hit(id, middle_click) {continue}
+			data := clay.GetScrollContainerData(clay.ID(id))
+			if data.found &&
+			   data.contentDimensions.height > data.scrollContainerDimensions.height {
+				autoscroll_container = id
+				autoscroll_anchor = middle_click
+				if id == "detail_rows" {detail_scroll_armed = false}
+				break
+			}
+		}
+	}
+	if autoscroll_container != "" {
+		smooth_cancel(
+			autoscroll_container,
+			smooth_for(autoscroll_container, &grid_smooth, &detail_smooth),
+		)
+		data := clay.GetScrollContainerData(clay.ID(autoscroll_container))
+		if !data.found || .MIDDLE not_in buttons {
+			autoscroll_container = ""
+			autoscroll_moving = false
+		} else {
+			autoscroll_moving = autoscroll_step(
+				autoscroll_container,
+				mouse.y - autoscroll_anchor.y,
+				dt,
+				density,
+			)
+			if autoscroll_moving {redraw = true}
+		}
+	} else {autoscroll_moving = false}
+	t2 := sdl.GetTicksNS()
+	update_cursor(
+		&state,
+		&library_client,
+		resizing,
+		visible,
+		seek_enabled,
+		search_mode,
+		link_album,
+		link_artist,
+	)
+	_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
+	_ = sdl.RenderClear(state.renderer)
+	render(&commands, &state, &textures)
+	ui.frame_done(&state)
+	t3 := sdl.GetTicksNS()
+	stage_sum[0] += f64(t1 - t0) / 1e6
+	stage_sum[1] += f64(t2 - t1) / 1e6
+	stage_sum[2] += f64(t3 - t2) / 1e6
+	stage_max[0] = max(stage_max[0], f64(t1 - t0) / 1e6)
+	stage_max[1] = max(stage_max[1], f64(t2 - t1) / 1e6)
+	stage_max[2] = max(stage_max[2], f64(t3 - t2) / 1e6)
+	stage_n += 1
+	if stage_n >= 240 {
+		diagnostic.frame(
+			stage_sum[0] / f64(stage_n),
+			stage_sum[1] / f64(stage_n),
+			stage_sum[2] / f64(stage_n),
+			stage_max[0],
+			stage_max[1],
+			stage_max[2],
+		)
+		stage_sum, stage_max, stage_n = {}, {}, 0
+	}
+	return visible
 }
