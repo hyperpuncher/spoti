@@ -1,5 +1,6 @@
 // Keep Spotify refresh credentials in the desktop Secret Service. Never
 // write them to an app state file or pass them in process arguments.
+#+build linux
 package credential
 
 import c "core:c/libc"
