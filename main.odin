@@ -852,24 +852,7 @@ main :: proc() {
 		if !redraw && stage != .Playing {continue}
 
 		visible := app_layout(&app, &frame)
-		display_page = &library_client.pages[filter]
-		display_kind = filter
-		if search_mode {
-			display_page = &library_client.search_pages[search_kind]
-			display_kind = search_kind
-		}
-		drop_target = -1
-		if dragging && display_kind == .Playlists {
-			drop_target = grid_card_at(display_page, visible.cards, mouse)
-		}
-		// Pages stream in as the grid nears the bottom; sorting applies to what
-		// is loaded, exactly like the reference client. Walking the whole
-		// collection would burn the dev-mode quota bucket on every launch.
-		if !search_mode {load_more_near_bottom(&library_client, filter, density)}
-		if detail_needs_more(&library_client, visible) {
-			if library.more_rows(&library_client) {redraw = true}
-		}
-		ensure_covers(&library_client, &textures, display_page, player_cover, visible)
+		app_covers(&app, &frame, visible)
 		nav_ctx = Nav_Ctx {
 			client        = &library_client,
 			nav           = &nav,
@@ -2439,4 +2422,29 @@ app_persist :: proc(app: ^App, frame: ^Frame) {
 		save_state(&app_state)
 	}
 	if clicked {first_frame = true}
+}
+
+// Display page selection, drag target, on-demand paging and cover uploads
+// for what layout made visible.
+app_covers :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
+	using app
+	using frame
+	display_page = &library_client.pages[filter]
+	display_kind = filter
+	if search_mode {
+		display_page = &library_client.search_pages[search_kind]
+		display_kind = search_kind
+	}
+	drop_target = -1
+	if dragging && display_kind == .Playlists {
+		drop_target = grid_card_at(display_page, visible.cards, mouse)
+	}
+	// Pages stream in as the grid nears the bottom; sorting applies to what
+	// is loaded, exactly like the reference client. Walking the whole
+	// collection would burn the dev-mode quota bucket on every launch.
+	if !search_mode {load_more_near_bottom(&library_client, filter, density)}
+	if detail_needs_more(&library_client, visible) {
+		if library.more_rows(&library_client) {redraw = true}
+	}
+	ensure_covers(&library_client, &textures, display_page, player_cover, visible)
 }
