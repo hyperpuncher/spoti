@@ -1,3 +1,7 @@
+# The prepare scripts are POSIX shell. On Windows they run under the sh
+# that ships with Git for Windows (or msys2).
+set windows-shell := ["sh", "-cu"]
+
 vet_flags := "-vet -vet-cast -vet-style -vet-semicolon -vet-tabs"
 project_packages := "main,ap,artwork,audio,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui"
 
