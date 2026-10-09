@@ -7,7 +7,6 @@ import "core:encoding/hex"
 import "core:fmt"
 import "core:net"
 import "core:sync"
-import linux "core:sys/linux"
 import "core:thread"
 import "core:time"
 
@@ -119,10 +118,7 @@ handle_keep_alive :: proc(c: ^AP_Connection, command: u8, payload: []u8) -> bool
 poll_connection :: proc(c: ^AP_Connection, stop: ^bool) {
 	if !c.connected {return}
 	if service_keep_alive(c) {
-		fds := [1]linux.Poll_Fd{{fd = linux.Fd(c.socket), events = {.IN}}}
-		ready, err := linux.poll(fds[:], 0)
-		if err != .NONE {c.broken = true}
-		if ready > 0 {
+		if socket_readable(c.socket) {
 			command, payload, ok := ap.read_packet(c.socket, &c.receiver, stop)
 			defer {crypto.zero_explicit(raw_data(payload), len(payload)); delete(payload)}
 			if !ok {c.broken = true} else {_ = handle_keep_alive(c, command, payload)}
