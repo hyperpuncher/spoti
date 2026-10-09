@@ -802,8 +802,18 @@ main :: proc() {
 								input = shorter
 								input_changed = true
 							}
-						case .V:
-							if .LCTRL in event.key.mod || .RCTRL in event.key.mod {
+						case .V, .INSERT:
+							mod := event.key.mod
+							shift := .LSHIFT in mod || .RSHIFT in mod
+							ctrl := .LCTRL in mod || .RCTRL in mod
+							inserting := event.key.scancode == .INSERT
+							if inserting && ctrl && !shift {
+								if len(input) > 0 {
+									c_input := strings.clone_to_cstring(input)
+									defer delete(c_input)
+									_ = sdl.SetClipboardText(c_input)
+								}
+							} else if ctrl || (inserting && shift) {
 								clipboard := sdl.GetClipboardText()
 								if clipboard != nil {
 									value := strings.trim_space(string(cstring(clipboard)))
