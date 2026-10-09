@@ -39,6 +39,8 @@ Request_Kind :: enum {
 	Remove_From_Playlist,
 	Devices,
 	Transfer,
+	Command,
+	Player_State,
 	Auth, // result-only: the worker could not sign in
 }
 
@@ -60,6 +62,9 @@ Request :: struct {
 	track_uri:     string, // Add/Remove_From_Playlist; worker frees
 	device_id:     string, // Transfer; worker frees
 	play:          bool, // Transfer; start playback on the target
+	command:       Command, // Command; the player command to send
+	command_value: int, // Command; seek ms, volume percent or shuffle bit
+	command_state: string, // Command; worker frees, the repeat mode
 }
 
 Result :: struct {
@@ -91,6 +96,8 @@ Result :: struct {
 	track_uri:     string, // Remove_From_Playlist; receiver frees
 	devices:       [dynamic]Device, // Devices; receiver frees or adopts
 	device_id:     string, // Transfer; receiver frees
+	command:       Command, // Command; echoes the sent command
+	player:        Player_State, // Player_State; receiver frees or adopts
 }
 
 Cover_Request :: struct {
@@ -142,6 +149,10 @@ Client :: struct {
 	transfer_pending:      bool, // Connect transfer in flight
 	transfer_ok:           bool, // Connect transfer outcome for the toast
 	transfer_name:         string, // owned; transfer target for the toast
+	remote_playing:        bool, // polled; the API-active playback plays
+	remote_progress:       int, // polled; its position in milliseconds
+	remote_device:         string, // owned; polled active device name
+	remote_gone:           bool, // the last poll found nothing active
 	write_pending:         bool, // add or remove write in flight
 	write_ok:              bool, // last write result
 	write_name:            string, // owned; playlist name for the toast
@@ -185,6 +196,7 @@ free_request :: proc(request: Request) {
 	delete(request.playlist_name)
 	delete(request.track_uri)
 	delete(request.device_id)
+	delete(request.command_state)
 }
 
 // Sends a worker request; drops and frees it when the queue is full.
@@ -291,6 +303,10 @@ fail_request :: proc(client: ^Client, request: Request) {
 			client,
 			Result{kind = .Transfer, device_id = strings.clone(request.device_id), status = -1},
 		)
+	case .Command:
+		send(client, Result{kind = .Command, command = request.command, status = -1})
+	case .Player_State:
+		send(client, Result{kind = .Player_State, status = -1})
 	}
 }
 
@@ -483,14 +499,26 @@ handle :: proc(
 				ok = ok,
 			},
 		)
+	case .Command:
+		status, ok := send_command(
+			tokens.access,
+			request.command,
+			request.command_value,
+			request.command_state,
+			reuse,
+		)
+		send(client, Result{kind = .Command, command = request.command, status = status, ok = ok})
+	case .Player_State:
+		state, status, ok := fetch_player_state(tokens.access, reuse)
+		send(client, Result{kind = .Player_State, player = state, status = status, ok = ok})
 	case .Add_To_Playlist, .Remove_From_Playlist:
 		removed := request.kind == .Remove_From_Playlist
 		uris := [?]string{request.track_uri}
 		result := Result {
-				kind          = request.kind,
-				playlist_id   = strings.clone(request.playlist_id),
-				playlist_name = strings.clone(request.playlist_name),
-			}
+			kind          = request.kind,
+			playlist_id   = strings.clone(request.playlist_id),
+			playlist_name = strings.clone(request.playlist_name),
+		}
 		if removed {
 			status, ok := remove_from_playlist(tokens.access, request.playlist_id, uris[:], reuse)
 			result.status, result.ok, result.track_uri =
@@ -524,9 +552,9 @@ run_covers :: proc(pointer: rawptr) {
 		}
 		diagnostic.cover_decode_result(len(image.pixels) > 0)
 		result := Cover_Result {
-				key   = request.key,
-				image = image,
-			}
+			key   = request.key,
+			image = image,
+		}
 		if !chan.send(client.cover_results, result) {artwork.free_image(&result.image)}
 	}
 }
@@ -548,6 +576,7 @@ free_result :: proc(result: Result) {
 	delete(local.me_id)
 	free_devices(local.devices)
 	delete(local.device_id)
+	free_player_state(local.player)
 	delete(local.playlist_id)
 	delete(local.playlist_name)
 	delete(local.track_uri)
@@ -830,6 +859,25 @@ transfer_device_name :: proc(client: ^Client, device_id: string) -> string {
 	}
 	return ""
 }
+// Queues one player command at the API-active device. Fire-and-forget:
+// the worker answers with a Command result that only reaches the log.
+// A full request channel drops the send, which throttles volume drags.
+send_player_command :: proc(
+	client: ^Client,
+	command: Command,
+	value: int = 0,
+	state: string = "",
+) -> bool {
+	request := Request {
+		kind          = .Command,
+		command       = command,
+		command_value = value,
+		command_state = strings.clone(state),
+	}
+	queue_request(client, &request) or_return
+	return true
+}
+
 // with a Like result that flips the detail and syncs the sidebar grids.
 toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) -> bool {
 	if len(id) == 0 {return false}
@@ -849,6 +897,16 @@ toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) ->
 refresh_devices :: proc(client: ^Client) -> bool {
 	request := Request {
 		kind = .Devices,
+	}
+	queue_request(client, &request) or_return
+	return true
+}
+
+// Queues a playback-state poll for the API-active device. The worker
+// answers with a Player_State result that refreshes the remote footer.
+refresh_player_state :: proc(client: ^Client) -> bool {
+	request := Request {
+		kind = .Player_State,
 	}
 	queue_request(client, &request) or_return
 	return true
@@ -1327,6 +1385,26 @@ apply :: proc(client: ^Client, result: Result) {
 		client.transfer_ok = local.ok
 		delete(client.transfer_name)
 		client.transfer_name = strings.clone(transfer_device_name(client, local.device_id))
+	case .Command:
+		diagnostic.writef(
+			"library command=%v status=%d ok=%v",
+			local.command,
+			local.status,
+			local.ok,
+		)
+	case .Player_State:
+		if !local.ok {
+			free_player_state(local.player)
+			local.player = {}
+			client.remote_playing = false
+			client.remote_gone = local.status == 204
+			return
+		}
+		client.remote_playing = local.player.playing
+		client.remote_progress = local.player.progress
+		delete(client.remote_device)
+		client.remote_device = local.player.device
+		local.player.device = ""
 	case .Add_To_Playlist, .Remove_From_Playlist:
 		removed := local.kind == .Remove_From_Playlist
 		client.write_pending = false
@@ -1392,6 +1470,7 @@ stop :: proc(client: ^Client) {
 	delete(client.me_id)
 	free_devices(client.devices)
 	delete(client.transfer_name)
+	delete(client.remote_device)
 	delete(client.write_name)
 	delete(client.stale_playlist)
 	for i in 0 ..< len(client.cover_queue) {artwork.free_image(&client.cover_queue[i].image)}

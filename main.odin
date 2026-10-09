@@ -615,6 +615,8 @@ App :: struct {
 	toast_until:            u64,
 	last_write_pending:     bool,
 	last_transfer_pending:  bool,
+	remote_control:         bool, // the footer commands the API-active device
+	remote_polled_at:       u64, // last player-state poll, ticks
 	drag_candidate:         bool,
 	dragging:               bool,
 	drag_index:             int,
@@ -847,6 +849,17 @@ main :: proc() {
 		app_navigate(&app, &frame)
 		app_search(&app, &frame)
 		app_library(&app, &frame)
+		if remote_control {
+			now := sdl.GetTicksNS()
+			if now - remote_polled_at >= 5_000_000_000 {
+				remote_polled_at = now
+				_ = library.refresh_player_state(&library_client)
+			}
+		}
+		if library_client.remote_gone {
+			library_client.remote_gone = false
+			remote_control = false
+		}
 		app_playback(&app, &frame)
 		// Glide wheel targets toward their offsets before the idle check so
 		// a settling glide keeps frames (and redraws) coming by itself.
@@ -1488,7 +1501,15 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		}
 	}
 	shown_ms := displayed_ms
-	seek_enabled = duration_ms > 0 && (stage == .Playing || stage == .Paused || stage == .Ended)
+	if remote_control {
+		// The bar tracks the polled remote position; the drag preview
+		// below still wins while scrubbing.
+		shown_ms = library_client.remote_progress
+		if duration_ms > 0 {progress = f32(shown_ms) / f32(duration_ms)}
+	}
+	seek_enabled =
+		duration_ms > 0 &&
+		(remote_control || stage == .Playing || stage == .Paused || stage == .Ended)
 	if seek_dragging && seek_enabled {
 		box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
 		preview_x: f32
@@ -1510,6 +1531,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	// A seek from paused lands back on paused, so its handoff keeps
 	// the resume icon instead of flashing pause.
 	if start_paused && button == "pause" {button = "resume"}
+	if remote_control {button = library_client.remote_playing ? "pause" : "play"}
 	status := "Ready to play"
 	switch stage {
 	case .Signing_In:
@@ -1536,6 +1558,13 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	shown_status := status
 	if stage != .Failed && len(artist) > 0 && !(stage == .Signing_In && playback_prompt) {
 		shown_status = artist
+	}
+	if remote_control && len(library_client.remote_device) > 0 {
+		shown_status = fmt.aprintf(
+			"Controlling %s",
+			library_client.remote_device,
+			allocator = context.temp_allocator,
+		)
 	}
 	shown_input := input
 	if len(shown_input) == 0 {
@@ -1594,6 +1623,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		} else {
 			toast = strings.clone("Couldn't transfer playback")
 		}
+		if library_client.transfer_ok {remote_control = true}
 		toast_until = sdl.GetTicksNS() + 2_500_000_000
 	}
 	last_transfer_pending = library_client.transfer_pending
@@ -2194,6 +2224,9 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			app_state.volume = volume
 			state_dirty = true
 			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
+			if remote_control {
+				_ = library.send_player_command(&library_client, .Volume, int(volume * 100))
+			}
 		}
 		if .LEFT not_in buttons {volume_dragging = false}
 		first_frame = true
@@ -2203,10 +2236,21 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			   detail_play_enabled(&library_client) && hit("hero_shuffle", mouse_click)) {
 		shuffle = !shuffle
 		play_index = reorder_play_queue(play_queue[:], play_index, shuffle)
+		if remote_control {
+			_ = library.send_player_command(&library_client, .Shuffle, shuffle ? 1 : 0)
+		}
 	}
 	if clicked && hit("footer_repeat", mouse_click) {
 		repeat = !repeat
 		replay_pending = repeat && stage == .Ended
+		if remote_control {
+			_ = library.send_player_command(
+				&library_client,
+				.Repeat,
+				0,
+				repeat ? "context" : "off",
+			)
+		}
 	}
 	if clicked && hit("footer_devices", mouse_click) {
 		device_open = !device_open
@@ -2234,9 +2278,17 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		if !received {break}
 		switch command {
 		case .Play:
-			if stage != .Playing {space_pressed = true}
+			if remote_control && worker == nil {
+				if !library_client.remote_playing {
+					_ = library.send_player_command(&library_client, .Play)
+				}
+			} else if stage != .Playing {space_pressed = true}
 		case .Pause:
-			if stage == .Playing {space_pressed = true}
+			if remote_control && worker == nil {
+				if library_client.remote_playing {
+					_ = library.send_player_command(&library_client, .Pause)
+				}
+			} else if stage == .Playing {space_pressed = true}
 		case .Play_Pause:
 			space_pressed = true
 		case .Stop:
@@ -2255,11 +2307,19 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			running = false
 		}
 	}
+	if remote_control && stop_pressed {
+		_ = library.send_player_command(&library_client, .Pause)
+		stop_pressed = false
+	}
 	seek_requested = mpris_seek_requested
 	if mpris_seek_requested {
 		seek_ms = clamp(mpris_seek_ms, 0, max(0, duration_ms))
 		start_paused = stage == .Paused
 		mpris.seeked(seek_ms)
+		if remote_control {
+			_ = library.send_player_command(&library_client, .Seek, seek_ms)
+			seek_requested = false
+		}
 	}
 	if clicked && seek_enabled && hit("seek_slider", mouse_click) {seek_dragging = true}
 	if seek_dragging {
@@ -2268,7 +2328,11 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
 				seek_ms = seek_position_ms(mouse.x, box.x, box.width, duration_ms)
 				start_paused = stage == .Paused
-				seek_requested = true
+				if remote_control {
+					_ = library.send_player_command(&library_client, .Seek, seek_ms)
+				} else {
+					seek_requested = true
+				}
 				seek_dragging = false
 			}
 			first_frame = true
@@ -2277,6 +2341,11 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	hero_pressed = clicked && hit("hero_play", mouse_click)
 	hero_start = hero_pressed && detail_play_enabled(&library_client)
 	restart_playback = track_selected || hero_start
+	if remote_control && (track_selected || hero_start) {
+		// An explicit local pick takes the room back; quiet the remote first.
+		_ = library.send_player_command(&library_client, .Pause)
+		remote_control = false
+	}
 	if hero_start {
 		queue_detail_rows(&play_queue, &library_client.detail)
 		stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
@@ -2289,6 +2358,10 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	track_delta = mpris_delta
 	if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
 	if clicked && hit("footer_next", mouse_click) {track_delta = 1}
+	if remote_control && track_delta != 0 {
+		_ = library.send_player_command(&library_client, track_delta > 0 ? .Next : .Previous)
+		track_delta = 0
+	}
 	if clicked && hit("footer_title", mouse_click) {
 		if !link_album {
 			// Lengths only: URIs never reach the log.
@@ -2336,7 +2409,18 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			space_pressed = true
 		}
 	}
-	if space_pressed || clicked && hit("footer_play", mouse_click) {
+	play_pressed := space_pressed || clicked && hit("footer_play", mouse_click)
+	if remote_control && worker == nil && play_pressed {
+		// The room plays elsewhere; the button resumes or pauses it.
+		// Local worker starts always go through the switch below.
+		_ = library.send_player_command(
+			&library_client,
+			library_client.remote_playing ? .Pause : .Play,
+		)
+		space_pressed = false
+		play_pressed = false
+	}
+	if play_pressed {
 		#partial switch stage {
 		case .Idle, .Ended, .Failed:
 			if worker == nil || thread.is_done(worker) {

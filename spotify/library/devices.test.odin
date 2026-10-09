@@ -27,3 +27,19 @@ devices_parse_keeps_valid_entries_with_volume_fallback :: proc(t: ^testing.T) {
 	testing.expect(t, !valid_device_id(""))
 	testing.expect(t, !valid_device_id("bad\"id"))
 }
+
+PLAYER_FIXTURE :: `{"device":{"id":"74ASZWbe4lXaubB36ztrGX","is_active":true,"name":"Kitchen speaker","type":"speaker","volume_percent":59},"is_playing":true,"progress_ms":61234}`
+
+@(test)
+player_parse_reads_playing_progress_and_device :: proc(t: ^testing.T) {
+	body := PLAYER_FIXTURE
+	state, ok := parse_player_state(transmute([]u8)body)
+	defer free_player_state(state)
+	testing.expect(t, ok)
+	testing.expect(t, state.playing)
+	testing.expect_value(t, state.progress, 61234)
+	testing.expect_value(t, state.device, "Kitchen speaker")
+	idle := `{"is_playing":false}`
+	_, ok = parse_player_state(transmute([]u8)idle)
+	testing.expect(t, !ok, "a payload without an active device fails")
+}

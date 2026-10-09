@@ -126,8 +126,8 @@ get :: proc(
 	return request(address, options, reuse = reuse)
 }
 
-// Authenticated library writes: PUT and DELETE with an empty body.
-// The method is restricted to the two verbs the library needs.
+// Authenticated player and library writes: PUT, POST and DELETE with an
+// empty body. The method is restricted to the verbs the app needs.
 write :: proc(
 	method, address: string,
 	options: Options = {},
@@ -136,7 +136,7 @@ write :: proc(
 	status: int,
 	ok: bool,
 ) {
-	if method != "PUT" && method != "DELETE" {return 0, false}
+	if method != "PUT" && method != "POST" && method != "DELETE" {return 0, false}
 	opts := options
 	opts.method = method
 	_, status, ok = request(address, opts, reuse = reuse)

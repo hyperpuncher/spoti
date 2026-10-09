@@ -10,6 +10,7 @@ import "core:strings"
 
 DEVICES_ADDRESS :: "https://api.spotify.com/v1/me/player/devices"
 TRANSFER_ADDRESS :: "https://api.spotify.com/v1/me/player"
+PLAYER_ADDRESS :: "https://api.spotify.com/v1/me/player"
 
 // One Connect device. Strings are caller-owned; volume is -1 when the
 // device reports none.
@@ -110,6 +111,72 @@ fetch_devices :: proc(
 		return nil, code, false
 	}
 	return devices, code, true
+}
+
+// Live state of the API-active playback: whether it plays, where it is,
+// and on which device. A 204 means nothing is active anywhere.
+Player_State :: struct {
+	playing:  bool,
+	progress: int,
+	device:   string, // owned; active device name, empty when none
+}
+
+player_wire :: struct {
+	is_playing:  bool,
+	progress_ms: int,
+	device:      player_device_wire,
+}
+
+player_device_wire :: struct {
+	name:      string,
+	is_active: bool,
+}
+
+// Parses a playback-state payload into a caller-owned state. Entries
+// without an active device fail the parse.
+parse_player_state :: proc(body: []u8) -> (state: Player_State, ok: bool) {
+	wire: player_wire
+	if json.unmarshal(body, &wire, allocator = context.temp_allocator) != nil {return {}, false}
+	if len(wire.device.name) == 0 || !wire.device.is_active {return {}, false}
+	return Player_State {
+			playing = wire.is_playing,
+			progress = max(wire.progress_ms, 0),
+			device = strings.clone(wire.device.name),
+		},
+		true
+}
+
+fetch_player_state :: proc(
+	access: string,
+	reuse: rawptr = nil,
+) -> (
+	state: Player_State,
+	status: int,
+	ok: bool,
+) {
+	body, code, fetched := http.get(PLAYER_ADDRESS, {bearer = access, limit = 64 * 1024}, reuse)
+	defer delete(body)
+	if !fetched || (code != 200 && code != 204) {
+		diagnostic.writef("connect player fetch status=%d fetched=%v", code, fetched)
+		return {}, code, false
+	}
+	if code == 204 {return {}, code, false}
+	state, ok = parse_player_state(body[:])
+	if !ok {
+		diagnostic.writef("connect player parse status=%d bytes=%d", code, len(body))
+		return {}, code, false
+	}
+	diagnostic.writef(
+		"connect player status=%d playing=%v progress=%d",
+		code,
+		state.playing,
+		state.progress,
+	)
+	return state, code, true
+}
+// Frees an owned player state.
+free_player_state :: proc(state: Player_State) {
+	delete(state.device)
 }
 
 // Moves playback to one device. Play starts it there when true, otherwise
