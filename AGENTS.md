@@ -3,6 +3,7 @@
 ## workflow
 
 - run `just fmt`, `just check`, and `just test` after code changes
+- read the relevant doc or schema in full before writing code; never grep for one operation name and take the first match
 - never open UI probes or manipulate the desktop without permission
 - native Wayland only, with direct SDL3 and Clay
 - use arenas from `core:mem/virtual` for grouped library response lifetimes
@@ -45,6 +46,7 @@
 ## product rules
 
 - use the official OpenAPI schema as endpoint authority
+- before adding or changing an endpoint, read its whole path block: list every method, read each `operationId`, and reject anything marked `deprecated: true`; prefer `/playlists/{id}/items` over the deprecated `/playlists/{id}/tracks`, and `/me/library` over the deprecated `/me/tracks`, `/me/albums`, `/me/episodes` and `/me/shows` writes and contains checks
 - supported Vorbis preference is 320, then 160, then 96 kbps
 - library grids use 2 to 4 columns and load more automatically near the bottom
 - virtualize library cards, discography, and track rows with full-height spacers; Clay culls drawing, not layout, and tracks only 100 clip containers
