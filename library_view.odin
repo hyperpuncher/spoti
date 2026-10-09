@@ -1187,6 +1187,167 @@ detail_play_enabled :: proc(client: ^library.Client) -> bool {
 	return client.detail.ready && client.detail.rows_error == 0 && len(client.detail.rows) > 0
 }
 
+detail_hero :: proc(
+	detail: ^library.Detail,
+	textures: ^Textures,
+	ui_state: ^ui.State,
+	available_width, d: f32,
+) {
+	// Spotify-style hero: substantial artwork and a strong, bold title.
+	// No panel behind it; the cover floats on the page with a soft shadow.
+	hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
+	// A density unit of slack keeps knife-edge words from spilling a third
+	// line over floating-point summation order.
+	title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d - d)
+	title_size := hero_title_size(ui_state, detail.name, title_width)
+	title_text := hero_fit_text(
+		ui_state,
+		detail.name,
+		title_width,
+		title_size,
+		HERO_TITLE_FONT,
+		HERO_TITLE_LINES,
+		context.temp_allocator,
+	)
+	if clay.UI()(
+	{
+		layout = {
+			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(hero_cover + 48 * d)},
+			padding = clay.PaddingAll(u16(24 * d)),
+			childGap = u16(24 * d),
+			childAlignment = {y = .Center},
+		},
+	},
+	) {
+		cover := detail.image
+		if textures.by_key[cover_key(cover)] == nil && len(detail.image_preview) > 0 {
+			cover = detail.image_preview
+		}
+		if clay.UI()(
+		{
+			layout = {
+				sizing = {
+					width = clay.SizingFixed(hero_cover),
+					height = clay.SizingFixed(hero_cover),
+				},
+			},
+		},
+		) {
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {
+						width = clay.SizingFixed(hero_cover + 28 * d),
+						height = clay.SizingFixed(hero_cover + 28 * d),
+					},
+				},
+				backgroundColor = {0, 0, 0, 60},
+				cornerRadius = clay.CornerRadiusAll(18 * d),
+				floating = {
+					offset = {-14 * d, -6 * d},
+					zIndex = -1,
+					pointerCaptureMode = .Passthrough,
+					attachTo = .Parent,
+				},
+			},
+			) {}
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {
+						width = clay.SizingFixed(hero_cover + 12 * d),
+						height = clay.SizingFixed(hero_cover + 12 * d),
+					},
+				},
+				backgroundColor = {0, 0, 0, 120},
+				cornerRadius = clay.CornerRadiusAll(14 * d),
+				floating = {
+					offset = {-6 * d, 0},
+					zIndex = -1,
+					pointerCaptureMode = .Passthrough,
+					attachTo = .Parent,
+				},
+			},
+			) {}
+			cover_element(textures, cover, hero_cover, 10 * d)
+		}
+		if clay.UI()(
+		{
+			layout = {
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+				childGap = u16(8 * d),
+				childAlignment = {y = .Center},
+			},
+		},
+		) {
+			clay.Text(detail.label, clay.TextElementConfig{fontSize = 13, textColor = WHITE})
+			clay.Text(
+				title_text,
+				clay.TextElementConfig{fontId = 2, fontSize = title_size, textColor = WHITE},
+			)
+			count_label := detail.source == .Artist ? "releases" : "songs"
+			parts := make([dynamic]string, 0, 3, context.temp_allocator)
+			// Album artists render as their own clickable segments, so the
+			// joined subtitle only serves sources that carry no links.
+			if len(detail.subtitle) > 0 && len(detail.artist_links) == 0 {
+				append(&parts, detail.subtitle)
+			}
+			if len(detail.year) >= 4 {append(&parts, detail.year)}
+			if detail.source == .Playlist && detail.rows_error != 0 {
+				append(&parts, "tracks unavailable")
+			} else {
+				append(
+					&parts,
+					fmt.aprintf(
+						"%d %s",
+						detail.total,
+						count_label,
+						allocator = context.temp_allocator,
+					),
+				)
+			}
+			metadata := strings.join(parts[:], " · ", context.temp_allocator)
+			if len(detail.artist_links) > 0 {
+				tail := fmt.aprintf(" · %s", metadata, allocator = context.temp_allocator)
+				tail_width := hero_text_width(ui_state, tail, 14, 0)
+				if clay.UI()(
+				{
+					layout = {
+						sizing = {width = clay.SizingGrow({})},
+						childAlignment = {y = .Center},
+					},
+					clip = {horizontal = true},
+				},
+				) {
+					artist_links_row(
+						ui_state,
+						detail.artist_links,
+						max(0, title_width - tail_width),
+						"hero_artist_link",
+						0,
+					)
+					clay.Text(
+						tail,
+						clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
+					)
+				}
+			} else {
+				metadata_text := hero_fit_text(
+					ui_state,
+					metadata,
+					title_width,
+					14,
+					0,
+					1,
+					context.temp_allocator,
+				)
+				clay.Text(metadata_text, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+			}
+		}
+	}
+}
+
 detail_page :: proc(
 	view: View,
 	client: ^library.Client,
@@ -1236,169 +1397,7 @@ detail_page :: proc(
 			}
 			return
 		}
-		// Spotify-style hero: substantial artwork and a strong, bold title.
-		// No panel behind it; the cover floats on the page with a soft shadow.
-		hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
-		// A density unit of slack keeps knife-edge words from spilling a third
-		// line over floating-point summation order.
-		title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d - d)
-		title_size := hero_title_size(ui_state, detail.name, title_width)
-		title_text := hero_fit_text(
-			ui_state,
-			detail.name,
-			title_width,
-			title_size,
-			HERO_TITLE_FONT,
-			HERO_TITLE_LINES,
-			context.temp_allocator,
-		)
-		if clay.UI()(
-		{
-			layout = {
-				sizing = {
-					width = clay.SizingGrow({}),
-					height = clay.SizingFixed(hero_cover + 48 * d),
-				},
-				padding = clay.PaddingAll(u16(24 * d)),
-				childGap = u16(24 * d),
-				childAlignment = {y = .Center},
-			},
-		},
-		) {
-			cover := detail.image
-			if textures.by_key[cover_key(cover)] == nil && len(detail.image_preview) > 0 {
-				cover = detail.image_preview
-			}
-			if clay.UI()(
-			{
-				layout = {
-					sizing = {
-						width = clay.SizingFixed(hero_cover),
-						height = clay.SizingFixed(hero_cover),
-					},
-				},
-			},
-			) {
-				if clay.UI()(
-				{
-					layout = {
-						sizing = {
-							width = clay.SizingFixed(hero_cover + 28 * d),
-							height = clay.SizingFixed(hero_cover + 28 * d),
-						},
-					},
-					backgroundColor = {0, 0, 0, 60},
-					cornerRadius = clay.CornerRadiusAll(18 * d),
-					floating = {
-						offset = {-14 * d, -6 * d},
-						zIndex = -1,
-						pointerCaptureMode = .Passthrough,
-						attachTo = .Parent,
-					},
-				},
-				) {}
-				if clay.UI()(
-				{
-					layout = {
-						sizing = {
-							width = clay.SizingFixed(hero_cover + 12 * d),
-							height = clay.SizingFixed(hero_cover + 12 * d),
-						},
-					},
-					backgroundColor = {0, 0, 0, 120},
-					cornerRadius = clay.CornerRadiusAll(14 * d),
-					floating = {
-						offset = {-6 * d, 0},
-						zIndex = -1,
-						pointerCaptureMode = .Passthrough,
-						attachTo = .Parent,
-					},
-				},
-				) {}
-				cover_element(textures, cover, hero_cover, 10 * d)
-			}
-			if clay.UI()(
-			{
-				layout = {
-					layoutDirection = .TopToBottom,
-					sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
-					childGap = u16(8 * d),
-					childAlignment = {y = .Center},
-				},
-			},
-			) {
-				clay.Text(detail.label, clay.TextElementConfig{fontSize = 13, textColor = WHITE})
-				clay.Text(
-					title_text,
-					clay.TextElementConfig{fontId = 2, fontSize = title_size, textColor = WHITE},
-				)
-				count_label := detail.source == .Artist ? "releases" : "songs"
-				parts := make([dynamic]string, 0, 3, context.temp_allocator)
-				// Album artists render as their own clickable segments, so the
-				// joined subtitle only serves sources that carry no links.
-				if len(detail.subtitle) > 0 && len(detail.artist_links) == 0 {
-					append(&parts, detail.subtitle)
-				}
-				if len(detail.year) >= 4 {append(&parts, detail.year)}
-				if detail.source == .Playlist && detail.rows_error != 0 {
-					append(&parts, "tracks unavailable")
-				} else {
-					append(
-						&parts,
-						fmt.aprintf(
-							"%d %s",
-							detail.total,
-							count_label,
-							allocator = context.temp_allocator,
-						),
-					)
-				}
-				metadata := strings.join(parts[:], " · ", context.temp_allocator)
-				if len(detail.artist_links) > 0 {
-					tail := fmt.aprintf(" · %s", metadata, allocator = context.temp_allocator)
-					tail_width := hero_text_width(ui_state, tail, 14, 0)
-					if clay.UI()(
-					{
-						layout = {
-							sizing = {width = clay.SizingGrow({})},
-							childAlignment = {y = .Center},
-						},
-						clip = {horizontal = true},
-					},
-					) {
-						artist_links_row(
-							ui_state,
-							detail.artist_links,
-							max(0, title_width - tail_width),
-							"hero_artist_link",
-							0,
-						)
-						clay.Text(
-							tail,
-							clay.TextElementConfig {
-								fontSize = 14,
-								textColor = MUTED,
-								wrapMode = .None,
-							},
-						)
-					}
-				} else {
-					metadata_text := hero_fit_text(
-						ui_state,
-						metadata,
-						title_width,
-						14,
-						0,
-						1,
-						context.temp_allocator,
-					)
-					clay.Text(
-						metadata_text,
-						clay.TextElementConfig{fontSize = 14, textColor = MUTED},
-					)
-				}
-			}
-		}
+		detail_hero(detail, textures, ui_state, available_width, d)
 		if clay.UI()(
 		{
 			layout = {
