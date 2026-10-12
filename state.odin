@@ -10,6 +10,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import connect "spotify/connect"
 import library "spotify/library"
 
 DEFAULT_SIDEBAR_WIDTH :: f32(360)
@@ -32,6 +33,7 @@ Last_Played :: struct {
 }
 
 State :: struct {
+	connect_device:  string, // public persistent device identity, not a credential
 	sidebar_width:   f32,
 	volume:          f32,
 	tab:             library.Kind,
@@ -59,6 +61,7 @@ free_state :: proc(app_state: ^State) {
 	delete(app_state.last_played.artist_uri)
 	delete(app_state.last_collection)
 	delete(app_state.last_name)
+	delete(app_state.connect_device)
 	app_state^ = {}
 }
 
@@ -95,6 +98,10 @@ parse_state :: proc(data: string, allocator := context.allocator) -> State {
 // Unknown enum names already decode as their zero values, which match the
 // historical defaults.
 sanitize_state :: proc(app_state: ^State) {
+	if !connect.valid_id(app_state.connect_device) {
+		delete(app_state.connect_device)
+		app_state.connect_device = ""
+	}
 	app_state.sidebar_width = clamp(app_state.sidebar_width, SIDEBAR_MIN, SIDEBAR_MAX)
 	app_state.volume = clamp(app_state.volume, 0, 1)
 	prune_strings(&app_state.pinned, MAX_PINNED)

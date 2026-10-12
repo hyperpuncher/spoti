@@ -10,13 +10,14 @@ import "core:sync"
 import "core:time"
 
 Options :: struct {
-	bearer:      string, // empty for signed CDN URLs; never forward account tokens
-	range:       string, // optional HTTP byte range, e.g. "0-65535"
-	method:      string, // PUT or DELETE with an empty body; empty keeps GET/POST
-	limit:       int,
-	range_info:  ^Range_Info, // optional validated Content-Range from a ranged GET
-	retry_after: ^int, // optional Retry-After seconds from a 429
-	cancel:      ^bool, // optional worker cancellation, observed by curl during transfer
+	bearer:        string, // empty for signed CDN URLs; never forward account tokens
+	connection_id: string, // Dealer connection header; never logged
+	range:         string, // optional HTTP byte range, e.g. "0-65535"
+	method:        string, // PUT or DELETE with an empty body; empty keeps GET/POST
+	limit:         int,
+	range_info:    ^Range_Info, // optional validated Content-Range from a ranged GET
+	retry_after:   ^int, // optional Retry-After seconds from a 429
+	cancel:        ^bool, // optional worker cancellation, observed by curl during transfer
 }
 
 Range_Info :: struct {
@@ -177,6 +178,27 @@ post_protobuf :: proc(
 	)
 }
 
+put_protobuf :: proc(
+	address: string,
+	body: []u8,
+	options: Options = {},
+	reuse: rawptr = nil,
+) -> (
+	response: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	opts := options
+	opts.method = "PUT"
+	return request(
+		address,
+		opts,
+		transmute(string)body,
+		content_type = "Content-Type: application/x-protobuf",
+		reuse = reuse,
+	)
+}
+
 // Authenticated JSON POST, e.g. adding items to a playlist. The body is a
 // plain string, never logged; POSTFIELDSIZE bounds the upload.
 post_json :: proc(
@@ -267,6 +289,9 @@ request :: proc(
 	   strings.contains(options.bearer, "\r") ||
 	   strings.contains(options.bearer, "\n") ||
 	   strings.contains(options.bearer, "\x00") ||
+	   strings.contains(options.connection_id, "\r") ||
+	   strings.contains(options.connection_id, "\n") ||
+	   strings.contains(options.connection_id, "\x00") ||
 	   strings.contains(options.range, "\r") ||
 	   strings.contains(options.range, "\n") ||
 	   strings.contains(options.range, "\x00") ||
@@ -360,6 +385,17 @@ request :: proc(
 			crypto.zero_explicit(rawptr(c_line), len(line))
 			delete(c_line)
 		}
+		extended := slist_append(headers, c_line)
+		if extended == nil {return nil, 0, false}
+		headers = extended
+	}
+	if options.connection_id != "" {
+		line := fmt.aprintf(
+			"X-Spotify-Connection-Id: %s",
+			options.connection_id,
+			allocator = context.temp_allocator,
+		)
+		c_line := strings.clone_to_cstring(line, context.temp_allocator)
 		extended := slist_append(headers, c_line)
 		if extended == nil {return nil, 0, false}
 		headers = extended

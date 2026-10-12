@@ -9,6 +9,9 @@
 - use arenas from `core:mem/virtual` for grouped library response lifetimes
 - after moving an arena-owning struct, rebind its dynamic arrays' `.allocator` to the destination arena before resizing
 - keep network, cover decoding, and playback work off the UI thread
+- Connect and AP must use the same persistent device identity
+- acknowledge Connect requests only after the UI accepts them; reject unknown commands
+- never log Dealer addresses, connection keys, device IDs or command bodies
 - do not log credentials, tokens, redirect URLs, audio keys, or signed CDN URLs
 - retain only Lucide SVG sources in `assets/icons/`; `scripts/build-icons.sh` generates ignored PNGs
 
@@ -34,6 +37,8 @@
 - `library_view.odin`: virtualized library grids, detail pages and track rows
 - `renderer.odin`: Clay text measurement, SDL render commands and image elements
 - `playback.odin`: owned play queue and login/decode worker
+- `connect.odin`: UI-thread playback snapshots for the Connect worker
+- `spotify/connect/`: native Dealer worker, Connect state encoding and incoming commands
 - `diagnostic/`: privacy-safe crash breadcrumbs in `~/.local/state/spoti/spoti.log`
 - `ui/sdl.odin`: Wayland SDL setup and rendering
 - `ui/font.odin`: fontconfig and per-size SDL_ttf cache

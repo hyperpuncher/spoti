@@ -20,6 +20,8 @@ foreign libcurl {
 	easy_getinfo :: proc(handle: rawptr, info: c.int, #c_vararg args: ..any) -> c.int ---
 	slist_append :: proc(list: ^Slist, line: cstring) -> ^Slist ---
 	slist_free_all :: proc(list: ^Slist) ---
+	ws_recv :: proc(handle: rawptr, buffer: rawptr, capacity: uint, received: ^uint, frame: ^^WS_Frame) -> c.int ---
+	ws_send :: proc(handle: rawptr, buffer: rawptr, length: uint, sent: ^uint, frame_size: i64, flags: c.uint) -> c.int ---
 }
 
 Slist :: struct {
@@ -27,6 +29,15 @@ Slist :: struct {
 	next: ^Slist,
 }
 
+WS_Frame :: struct {
+	age:       c.int,
+	flags:     c.uint,
+	offset:    i64,
+	bytesleft: i64,
+	len:       uint,
+}
+
+CURL_CONNECT_ONLY :: c.int(141)
 CURL_URL :: c.int(10002)
 CURL_POSTFIELDS :: c.int(10015)
 CURL_POSTFIELDSIZE :: c.int(60)

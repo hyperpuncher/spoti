@@ -26,6 +26,14 @@ AP_Connection :: struct {
 	keep_alive:        Keep_Alive,
 	deadline:          time.Tick,
 }
+// Set once before workers start. Connect and AP must use the same identity.
+connection_device_id: [40]u8
+
+set_device_id :: proc(id: string) {
+	assert(len(id) == len(connection_device_id))
+	copy(connection_device_id[:], transmute([]u8)id)
+}
+
 connection: AP_Connection
 connection_mutex: sync.Mutex
 connection_worker: ^thread.Thread
@@ -161,12 +169,15 @@ connect_connection :: proc(c: ^AP_Connection, access: string, cancel: ^bool) -> 
 	defer crypto.zero_explicit(&keys, size_of(keys))
 	c.sender, c.receiver = ap.packet_cipher(keys.send[:]), ap.packet_cipher(keys.receive[:])
 	defer if !ok {crypto.zero_explicit(c, size_of(c^))}
-	device_bytes: [20]u8
-	crypto.rand_bytes(device_bytes[:])
-	device_id := hex.encode(device_bytes[:])
-	crypto.zero_explicit(&device_bytes, size_of(device_bytes))
-	defer delete(device_id)
-	body := ap.client_login_token(access, string(device_id))
+	if connection_device_id == {} {
+		device_bytes: [20]u8
+		crypto.rand_bytes(device_bytes[:])
+		encoded := hex.encode(device_bytes[:])
+		copy(connection_device_id[:], encoded)
+		delete(encoded)
+		crypto.zero_explicit(&device_bytes, size_of(device_bytes))
+	}
+	body := ap.client_login_token(access, string(connection_device_id[:]))
 	defer {crypto.zero_explicit(raw_data(body), len(body)); delete(body)}
 	c.socket = socket
 	if cancelled(cancel) || !send_connection_packet(c, 0xab, body[:]) {return false}

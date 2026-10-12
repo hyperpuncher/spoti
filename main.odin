@@ -11,6 +11,7 @@ import "core:sync/chan"
 import "core:thread"
 import "core:unicode/utf8"
 import diagnostic "diagnostic"
+import connect "spotify/connect"
 import library "spotify/library"
 import mpris "spotify/mpris"
 import oauth "spotify/oauth"
@@ -22,7 +23,7 @@ import clay "vendor/clay"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
-// The MPRIS worker pushes this event to wake the otherwise idle frame loop.
+// MPRIS and Connect workers use this event to wake the idle frame loop.
 WAKE_EVENT: u32
 
 // Browser approval URLs arrive from worker threads. Playback sign-in opens
@@ -51,7 +52,7 @@ open_prompt_url :: proc(kind: oauth.Prompt) -> bool {
 }
 
 @(private = "file")
-wake_mpris :: proc "c" (_: rawptr) {
+wake_app :: proc "c" (_: rawptr) {
 	event := sdl.Event {
 		type = sdl.EventType(WAKE_EVENT),
 	}
@@ -591,6 +592,11 @@ App :: struct {
 	theme_dark:             bool,
 	mpris_active:           bool,
 	library_client:         library.Client,
+	connect_client:         connect.Client,
+	connect_snapshot:       connect.Snapshot,
+	connect_published_at:   u64,
+	connect_repeat_context: bool,
+	transfer_here:          bool,
 	app_state:              State,
 	filter:                 library.Kind,
 	sidebar_width:          f32,
@@ -750,9 +756,15 @@ main :: proc() {
 	load_icons(&state, &textures, theme_dark)
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
-	mpris_active = mpris.start(WAKE_EVENT != 0 ? wake_mpris : nil)
+	mpris_active = mpris.start(WAKE_EVENT != 0 ? wake_app : nil)
 	oauth.set_prompt_handler(prompt_arrived)
 	app_state = load_state()
+	if app_state.connect_device == "" {
+		app_state.connect_device = connect.new_id()
+		save_state(&app_state)
+	}
+	session.set_device_id(app_state.connect_device)
+	_ = connect.start(&connect_client, app_state.connect_device, WAKE_EVENT != 0 ? wake_app : nil)
 	filter = app_state.tab
 	sidebar_width = app_state.sidebar_width
 	state_dirty = false
@@ -814,6 +826,8 @@ main :: proc() {
 		clear_play_source(&play_source)
 		clear_audio_stream(&stream)
 		library.stop(&library_client)
+		connect.stop(&connect_client)
+		delete(connect_snapshot.uri)
 		session.clear_authorization()
 		for _, texture in textures.by_key {sdl.DestroyTexture(texture)}
 		delete(textures.by_key)
@@ -892,6 +906,7 @@ main :: proc() {
 		// A track-row press arms a drag; a released press either drops the
 		// track on a playlist card or plays the row. Dragging never plays.
 		app_transport(&app, &frame, visible)
+		app_connect_publish(&app)
 		app_persist(&app, &frame)
 	}
 }
@@ -936,7 +951,10 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		}
 		if preload_worker != nil && stage != .Playing {wait_ms = 40}
 	}
-	if library_client.devices_pending || library_client.transfer_pending || remote_control {
+	if (connect_client.worker != nil && WAKE_EVENT == 0) ||
+	   library_client.devices_pending ||
+	   library_client.transfer_pending ||
+	   remote_control {
 		wait_ms = wait_ms < 0 ? 40 : min(wait_ms, 40)
 	}
 	// If the wake event could not be registered, poll the bus instead.
@@ -1256,11 +1274,12 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 		_ = library.start(&library_client)
 	}
 	if library.poll(&library_client) {redraw = true}
+	if sync.atomic_exchange(&connect_client.pending, false) {redraw = true}
 	// Stop local audio before entering remote control. This must happen
 	// before app_playback, not in layout, where the frame flag is lost.
 	if last_transfer_pending && !library_client.transfer_pending {
 		delete(toast)
-		if library_client.transfer_ok {
+		if library_client.transfer_ok && !transfer_here {
 			toast = strings.clone("Playback transferred")
 			if preload_worker != nil {sync.atomic_store(&preload_work.cancel, true)}
 			play_after_stop, replay_pending = false, false
@@ -1275,7 +1294,9 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 			remote_polled_at = 0
 			_ = library.refresh_devices(&library_client)
 		} else {
-			toast = strings.clone("Couldn't transfer playback")
+			toast = strings.clone(
+				library_client.transfer_ok ? "Playback transferred" : "Couldn't transfer playback",
+			)
 		}
 		toast_until = sdl.GetTicksNS() + 2_500_000_000
 	}
@@ -1471,6 +1492,15 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 		} else if !seek_dragging &&
 		   advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover, &artist) {
 			replay_pending = true
+		} else if !seek_dragging && connect_repeat_context && len(play_queue) > 0 {
+			play_index = 0
+			replay_pending = select_play_item(
+				play_queue[:],
+				play_index,
+				&selected,
+				&player_cover,
+				&artist,
+			)
 		}
 		redraw = true
 	}
@@ -2176,6 +2206,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	using app
 	using frame
+	incoming_load := false
 	if drag_candidate && .LEFT in buttons {
 		if !dragging && drag_started(mouse, drag_start, DRAG_THRESHOLD * density) {
 			dragging = true
@@ -2283,6 +2314,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			if device.restricted ||
 			   !hit_clipped("device_item", "device_picker", mouse_click, u32(index)) {continue}
 			if !library.transfer_to_device(&library_client, device.id, stage == .Playing) {break}
+			transfer_here = device.id == app_state.connect_device
 			device_open = false
 			break
 		}
@@ -2333,6 +2365,76 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	if remote_control && stop_pressed {
 		_ = library.send_player_command(&library_client, .Pause)
 		stop_pressed = false
+	}
+	for {
+		event, received := connect.take_event(&connect_client)
+		if !received {break}
+		accepted := true
+		switch event.action {
+		case .Load:
+			remote_control = false
+			free_play_queue(&play_queue)
+			for uri, index in event.tracks {
+				append(&play_queue, Play_Item{uri = strings.clone(uri), order = index})
+			}
+			replace_string(&queue_detail, "")
+			play_index = 0
+			track_selected = select_play_item(
+				play_queue[:],
+				play_index,
+				&selected,
+				&player_cover,
+				&artist,
+			)
+			incoming_load = track_selected
+			replace_string(&title, "")
+			seek_ms, start_paused = event.position, event.paused
+			shuffle, repeat, connect_repeat_context =
+				event.shuffle, event.repeat_track, event.repeat_context
+			accepted = track_selected
+		case .Resume:
+			if incoming_load {start_paused = false} else if remote_control || stage == .Idle && len(play_queue) == 0 {accepted = false} else if stage != .Playing {space_pressed = true}
+		case .Pause:
+			if incoming_load {start_paused = true} else if remote_control {accepted = false} else if stage == .Playing && stream != nil {
+				accepted = sdl.PauseAudioStreamDevice(stream)
+				if accepted {stage = .Paused}
+			} else if stage == .Buffering || stage == .Signing_In {start_paused = true}
+		case .Seek:
+			accepted = !remote_control && duration_ms > 0
+			if accepted {mpris_seek_ms, mpris_seek_requested = event.position, true}
+		case .Next, .Previous:
+			if !remote_control && event.action == .Previous && displayed_ms >= 3000 {
+				mpris_seek_ms, mpris_seek_requested = 0, true
+			} else {
+				accepted =
+					!remote_control &&
+					play_index >= 0 &&
+					(event.action == .Next ? play_index + 1 < len(play_queue) : play_index > 0)
+				if accepted {mpris_delta = event.action == .Next ? 1 : -1}
+			}
+		case .Volume:
+			volume = event.volume
+			app_state.volume = volume
+			state_dirty = true
+			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
+		case .Options:
+			if event.set_shuffle {
+				shuffle = event.shuffle
+				play_index = reorder_play_queue(play_queue[:], play_index, shuffle)
+			}
+			if event.set_repeat_track {repeat = event.repeat_track}
+			if event.set_repeat_context {connect_repeat_context = event.repeat_context}
+		case .Inactive:
+			if worker != nil && stage != .Stopping {
+				cancel_worker(queue, &cancel, &closed)
+				clear_audio_stream(&stream)
+				stage = .Stopping
+			}
+			play_after_stop, replay_pending = false, false
+			remote_control = false
+		}
+		connect.acknowledge(&connect_client, event, accepted)
+		connect.free_event(event)
 	}
 	seek_requested = mpris_seek_requested
 	if mpris_seek_requested {
@@ -2420,7 +2522,10 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	   ) {
 		restart_playback = true
 	}
-	if restart_playback {seek_ms = 0; start_paused = false; seek_dragging = false}
+	if restart_playback {
+		if !incoming_load {seek_ms = 0; start_paused = false}
+		seek_dragging = false
+	}
 	if restart_playback || seek_requested {
 		replay_pending = false
 		if worker != nil {
