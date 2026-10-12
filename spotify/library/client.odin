@@ -146,6 +146,8 @@ Client :: struct {
 	like_pending:          bool, // hero heart toggle in flight
 	me_id:                 string, // owned; the signed-in account id
 	devices:               [dynamic]Device, // owned; Connect devices
+	devices_pending:       bool,
+	devices_error:         bool,
 	transfer_pending:      bool, // Connect transfer in flight
 	transfer_ok:           bool, // Connect transfer outcome for the toast
 	transfer_name:         string, // owned; transfer target for the toast
@@ -895,10 +897,16 @@ toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) ->
 // Queues a Connect device list refresh. The worker answers with a
 // Devices result that replaces the client's list; failures keep the old.
 refresh_devices :: proc(client: ^Client) -> bool {
+	if client.devices_pending {return true}
 	request := Request {
 		kind = .Devices,
 	}
-	queue_request(client, &request) or_return
+	if !queue_request(client, &request) {
+		client.devices_error = true
+		return false
+	}
+	client.devices_pending = true
+	client.devices_error = false
 	return true
 }
 
@@ -1364,6 +1372,8 @@ apply :: proc(client: ^Client, result: Result) {
 		client.me_id = local.me_id
 		local.me_id = ""
 	case .Devices:
+		client.devices_pending = false
+		client.devices_error = !local.ok
 		diagnostic.writef(
 			"library devices status=%d ok=%v count=%d",
 			local.status,

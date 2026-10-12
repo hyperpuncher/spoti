@@ -280,6 +280,8 @@ playlist_picker :: proc(view: View, d: f32) {
 	}
 }
 
+DEVICE_ROW :: 54
+
 // Connect device panel: the fetched devices with the active one checked.
 // It floats above the footer speaker button; a pick transfers playback.
 // Boxes are one frame old, like every other floating panel.
@@ -287,7 +289,7 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 	if !view.device_open {return}
 	rows := view.device_rows
 	panel_height :=
-		len(rows) == 0 ? 44 * d : min(f32(len(rows)) * PICKER_ROW * d + 12 * d, PICKER_MAX_HEIGHT * d)
+		len(rows) == 0 ? 64 * d : min(f32(len(rows)) * DEVICE_ROW * d + 12 * d, PICKER_MAX_HEIGHT * d)
 	anchor := clay.GetElementData(clay.ID("footer_devices")).boundingBox
 	panel_x := anchor.x + anchor.width - PICKER_WIDTH * d
 	panel_y := anchor.y - panel_height - 8 * d
@@ -307,7 +309,19 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 	},
 	) {
 		if len(rows) == 0 {
-			clay.Text("No devices found", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+			label :=
+				view.device_loading ? "Finding devices..." : view.device_error ? "Could not load devices" : "No devices found"
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+					padding = {left = u16(10 * d), right = u16(10 * d)},
+					childAlignment = {y = .Center},
+				},
+			},
+			) {
+				clay.Text(label, clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+			}
 			return
 		}
 		if clay.UI_WithId(clay.ID("device_picker"))(
@@ -321,16 +335,17 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 		},
 		) {
 			for device, index in rows {
-				hovered := clay.PointerOver(clay.ID("device_item", u32(index)))
+				hovered :=
+					!device.restricted && clay.PointerOver(clay.ID("device_item", u32(index)))
 				if clay.UI_WithId(clay.ID("device_item", u32(index)))(
 				{
 					layout = {
 						sizing = {
 							width = clay.SizingGrow({}),
-							height = clay.SizingFixed((PICKER_ROW - 2) * d),
+							height = clay.SizingFixed((DEVICE_ROW - 2) * d),
 						},
-						padding = {left = u16(8 * d), right = u16(8 * d)},
-						childGap = u16(8 * d),
+						padding = {left = u16(10 * d), right = u16(10 * d)},
+						childGap = u16(10 * d),
 						childAlignment = {y = .Center},
 					},
 					backgroundColor = hovered ? HOVER : clay.Color{},
@@ -346,6 +361,7 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 						layout = {
 							layoutDirection = .TopToBottom,
 							sizing = {width = clay.SizingGrow({})},
+							childGap = u16(3 * d),
 						},
 						clip = {horizontal = true},
 					},

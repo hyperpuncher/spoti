@@ -136,6 +136,13 @@ update_cursor :: proc(
 	link_album: bool,
 	link_artist: bool,
 ) {
+	if pointer_over("footer_devices") {ui.set_cursor(state, .Pointer); return}
+	for device, index in client.devices {
+		if !device.restricted && pointer_over("device_item", u32(index)) {
+			ui.set_cursor(state, .Pointer)
+			return
+		}
+	}
 	if seek_enabled && pointer_over("seek_slider") {ui.set_cursor(state, .Pointer); return}
 	if pointer_over("library_scrollbar") || pointer_over("detail_scrollbar") {
 		ui.set_cursor(state, .Pointer)
@@ -611,6 +618,7 @@ App :: struct {
 	grid_smooth:            Smooth,
 	detail_smooth:          Smooth,
 	picker_smooth:          Smooth,
+	device_smooth:          Smooth,
 	toast:                  string,
 	toast_until:            u64,
 	last_write_pending:     bool,
@@ -906,6 +914,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	   autoscroll_moving ||
 	   grid_smooth.active ||
 	   detail_smooth.active ||
+	   device_smooth.active ||
 	   fx_animating ||
 	   fades_animating ||
 	   first_frame {
@@ -926,6 +935,9 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 			if pending {wait_ms = 40; break}
 		}
 		if preload_worker != nil && stage != .Playing {wait_ms = 40}
+	}
+	if library_client.devices_pending || library_client.transfer_pending || remote_control {
+		wait_ms = wait_ms < 0 ? 40 : min(wait_ms, 40)
 	}
 	// If the wake event could not be registered, poll the bus instead.
 	if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
@@ -1244,6 +1256,30 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 		_ = library.start(&library_client)
 	}
 	if library.poll(&library_client) {redraw = true}
+	// Stop local audio before entering remote control. This must happen
+	// before app_playback, not in layout, where the frame flag is lost.
+	if last_transfer_pending && !library_client.transfer_pending {
+		delete(toast)
+		if library_client.transfer_ok {
+			toast = strings.clone("Playback transferred")
+			if preload_worker != nil {sync.atomic_store(&preload_work.cancel, true)}
+			play_after_stop, replay_pending = false, false
+			seek_dragging, start_paused = false, false
+			seek_ms = 0
+			if worker != nil && stage != .Stopping {
+				cancel_worker(queue, &cancel, &closed)
+				clear_audio_stream(&stream)
+				stage = .Stopping
+			}
+			remote_control = true
+			remote_polled_at = 0
+			_ = library.refresh_devices(&library_client)
+		} else {
+			toast = strings.clone("Couldn't transfer playback")
+		}
+		toast_until = sdl.GetTicksNS() + 2_500_000_000
+	}
+	last_transfer_pending = library_client.transfer_pending
 	// Sort before layout so a landed revalidation or a fresh pin paints in
 	// the correct order on the same frame instead of the next one.
 	sort_library_pages(&library_client, &app_state, &page_counts, order_dirty)
@@ -1467,6 +1503,7 @@ app_glide :: proc(app: ^App, frame: ^Frame) {
 	using frame
 	smooth_dt := f32(sdl.GetTicksNS() - last) / 1e9
 	if smooth_step("playlist_picker", &picker_smooth, smooth_dt) {redraw = true}
+	if smooth_step("device_picker", &device_smooth, smooth_dt) {redraw = true}
 	if smooth_step("library_grid", &grid_smooth, smooth_dt) {redraw = true}
 	if smooth_step("detail_rows", &detail_smooth, smooth_dt) {redraw = true}
 	// The autoscroll step runs after layout, so a gliding frame must
@@ -1609,24 +1646,6 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		toast_until = sdl.GetTicksNS() + 2_500_000_000
 	}
 	last_write_pending = library_client.write_pending
-	// A finished transfer names its target; the local worker stops so the
-	// room does not play twice. The stop lands on the next playback stage.
-	if last_transfer_pending && !library_client.transfer_pending {
-		delete(toast)
-		if library_client.transfer_ok {
-			if len(library_client.transfer_name) > 0 {
-				toast = fmt.aprintf("Playing on %s", library_client.transfer_name)
-			} else {
-				toast = strings.clone("Playback transferred")
-			}
-			stop_pressed = true
-		} else {
-			toast = strings.clone("Couldn't transfer playback")
-		}
-		if library_client.transfer_ok {remote_control = true}
-		toast_until = sdl.GetTicksNS() + 2_500_000_000
-	}
-	last_transfer_pending = library_client.transfer_pending
 	if len(toast) > 0 && sdl.GetTicksNS() > toast_until {
 		delete(toast)
 		toast = ""
@@ -1686,6 +1705,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		device_open    = device_open,
 		device_active  = devices_active,
 		device_rows    = library_client.devices[:],
+		device_loading = library_client.devices_pending,
+		device_error   = library_client.devices_error,
 		drag_active    = dragging,
 		drag_x         = mouse.x,
 		drag_y         = mouse.y,
@@ -1698,7 +1719,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		current_uri    = selected,
 		playing        = stage == .Playing,
 	}
-	wheel_used := scroll_wheel("playlist_picker", wheel.y, density, &picker_smooth)
+	wheel_used := scroll_wheel("device_picker", wheel.y, density, &device_smooth)
+	if !wheel_used {wheel_used = scroll_wheel("playlist_picker", wheel.y, density, &picker_smooth)}
 	if !wheel_used {wheel_used = scroll_wheel("library_grid", wheel.y, density, &grid_smooth)}
 	if !wheel_used {
 		wheel_used = scroll_wheel("detail_rows", wheel.y, density, &detail_smooth)
@@ -2258,9 +2280,10 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	}
 	if device_open && clicked {
 		for device, index in library_client.devices {
-			if !hit_index("device_item", mouse_click, u32(index)) {continue}
+			if device.restricted ||
+			   !hit_clipped("device_item", "device_picker", mouse_click, u32(index)) {continue}
+			if !library.transfer_to_device(&library_client, device.id, stage == .Playing) {break}
 			device_open = false
-			_ = library.transfer_to_device(&library_client, device.id, stage == .Playing)
 			break
 		}
 		if device_open {
@@ -2410,7 +2433,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		}
 	}
 	play_pressed := space_pressed || clicked && hit("footer_play", mouse_click)
-	if remote_control && worker == nil && play_pressed {
+	if remote_control && play_pressed {
 		// The room plays elsewhere; the button resumes or pauses it.
 		// Local worker starts always go through the switch below.
 		_ = library.send_player_command(

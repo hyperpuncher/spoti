@@ -126,6 +126,8 @@ View :: struct {
 	device_open:    bool, // the Connect device panel is showing
 	device_active:  bool, // a Connect device is the API-active one
 	device_rows:    []library.Device, // borrowed; the last fetched list
+	device_loading: bool,
+	device_error:   bool,
 	drag_active:    bool, // a track is being dragged onto a playlist card
 	drag_x:         f32,
 	drag_y:         f32,
