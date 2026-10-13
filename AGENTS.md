@@ -3,6 +3,7 @@
 ## workflow
 
 - run `just fmt`, `just check`, and `just test` after code changes
+- keep the README short; put setup, architecture, and decisions in tracked `docs/` files
 - read the relevant doc or schema in full before writing code; never grep for one operation name and take the first match
 - never open UI probes or manipulate the desktop without permission
 - native Wayland only, with direct SDL3 and Clay
@@ -42,7 +43,7 @@
 - `diagnostic/`: privacy-safe crash breadcrumbs in `~/.local/state/spoti/spoti.log`
 - `ui/sdl.odin`: Wayland SDL setup and rendering
 - `ui/font.odin`: fontconfig and per-size SDL_ttf cache
-- `spotify/library/`: Web API auth, pagination, detail pages, cache, cover worker
+- `spotify/library/`: Web API auth, native playlist discovery, pagination, detail pages, cache, cover worker
 - `spotify/player/stream.odin`: bounded decode worker
 - `spotify/session/connection.odin`: shared AP connection, serialized requests, idle ping handling and reconnect
 - `ui/text.odin`: SDL_ttf text pool bounded by the visible frame
