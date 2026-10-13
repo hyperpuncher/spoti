@@ -356,6 +356,8 @@ detail_scroll_y :: proc() -> f32 {
 	return data.scrollPosition.y
 }
 
+SCROLL_WHEEL_STEP :: 120.0
+
 scroll_wheel :: proc(id: string, amount, d: f32, smooth: ^Smooth) -> bool {
 	if amount == 0 || !pointer_over(id) {return false}
 	scroll := clay.GetScrollContainerData(clay.ID(id))
@@ -368,7 +370,7 @@ scroll_wheel :: proc(id: string, amount, d: f32, smooth: ^Smooth) -> bool {
 		f32(0),
 		scroll.scrollContainerDimensions.height - scroll.contentDimensions.height,
 	)
-	smooth.target = clamp(smooth.target + amount * 40 * d, minimum, 0)
+	smooth.target = clamp(smooth.target + amount * SCROLL_WHEEL_STEP * d, minimum, 0)
 	return true
 }
 

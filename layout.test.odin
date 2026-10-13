@@ -479,7 +479,7 @@ wheel_target_glides_to_rest :: proc(t: ^testing.T) {
 		"wheel over the rows must arm a glide",
 	)
 	testing.expect(t, smooth.active)
-	testing.expect_value(t, smooth.target, -40 * d)
+	testing.expect_value(t, smooth.target, -120 * d)
 	steps := 0
 	for smooth.active && steps < 600 {
 		testing.expect(t, smooth_step("detail_rows", &smooth, 1.0 / 60))
