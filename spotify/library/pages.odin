@@ -37,6 +37,7 @@ Entry :: struct {
 
 Page :: struct {
 	arena:       virtual.Arena,
+	account:     string, // rootlist pagination belongs to this streaming account
 	ready:       bool,
 	items:       [dynamic]Entry,
 	total:       int,
@@ -118,7 +119,7 @@ Playlist_Ref :: struct {
 	owner:         Owner,
 	description:   string,
 	collaborative: bool,
-	items:         Count `json:"tracks"`,
+	items:         Count,
 }
 
 Saved_Track :: struct {
@@ -219,9 +220,8 @@ joined_artists :: proc(artists: []Artist, allocator: runtime.Allocator) -> strin
 	return strings.to_string(builder)
 }
 
-// Shared card builder for library and search grids. Each skips entries
-// without a usable name, URI or cover; track rows stay separate since an
-// imageless track still plays.
+// Shared card builder for library and search grids. Missing artwork does
+// not remove a saved collection; the grid draws its normal placeholder.
 append_card_entry :: proc(
 	items: ^[dynamic]Entry,
 	name, uri, image, subtitle, year: string,
@@ -230,7 +230,10 @@ append_card_entry :: proc(
 	owner_id: string = "",
 	collaborative: bool = false,
 ) {
-	if len(name) == 0 || len(uri) > 128 || image == "" {return}
+	if len(name) == 0 ||
+	   len(uri) == 0 ||
+	   len(uri) > 128 ||
+	   !strings.has_prefix(uri, "spotify:") {return}
 	append(
 		items,
 		Entry {

@@ -5,7 +5,7 @@ import "core:testing"
 
 @(test)
 playlist_and_album_cards_keep_cover_and_metadata :: proc(t: ^testing.T) {
-	playlists: string = `{"items":[{"name":"My list","uri":"spotify:playlist:abc","owner":{"display_name":"igor"},"tracks":{"total":14},"images":[{"url":"https://i.scdn.co/image/big","width":640},{"url":"https://i.scdn.co/image/mid","width":300}]},null,{"name":"broken","uri":"https://example.com/"}],"offset":0,"total":14,"next":"https://api.spotify.com/v1/me/playlists?offset=10"}`
+	playlists: string = `{"items":[{"name":"My list","uri":"spotify:playlist:abc","owner":{"display_name":"igor"},"items":{"total":14},"images":[{"url":"https://i.scdn.co/image/big","width":640},{"url":"https://i.scdn.co/image/mid","width":300}]},null,{"name":"broken","uri":"https://example.com/"}],"offset":0,"total":14,"next":"https://api.spotify.com/v1/me/playlists?offset=10"}`
 	playlist_page, playlist_ok := parse_index(transmute([]u8)playlists, .Playlists)
 	defer free_page(&playlist_page)
 	testing.expect(t, playlist_ok && len(playlist_page.items) == 1)

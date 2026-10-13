@@ -50,6 +50,7 @@ Request :: struct {
 	offset:        int,
 	group:         Album_Group, // More; which artist section to page
 	cursor:        string, // Index; worker frees
+	account:       string, // Index; native rootlist account, worker frees
 	source:        Source,
 	id:            string, // Detail, More; worker frees
 	query:         string, // Search; worker frees
@@ -192,6 +193,7 @@ run :: proc(pointer: rawptr) {
 
 free_request :: proc(request: Request) {
 	delete(request.cursor)
+	delete(request.account)
 	delete(request.id)
 	delete(request.query)
 	delete(request.playlist_id)
@@ -326,15 +328,31 @@ handle :: proc(
 	#partial switch request.kind {
 	case .Index:
 		retry_after: int
-		page, status, ok := fetch_index(
-			tokens.access,
-			request.list,
-			request.offset,
-			request.cursor,
-			reuse,
-			&retry_after,
-			refresh = request.refresh,
-		)
+		page: Page
+		status: int
+		ok := false
+		if request.list == .Playlists && (request.offset == 0 || request.account != "") {
+			page, status, ok = read_session_rootlist(client, streaming, request, reuse)
+			diagnostic.writef(
+				"library rootlist offset=%d status=%d ok=%v rows=%d",
+				request.offset,
+				status,
+				ok,
+				len(page.items),
+			)
+		}
+		// Never mix native rootlist offsets with Web API offsets.
+		if !ok && request.account == "" {
+			page, status, ok = fetch_index(
+				tokens.access,
+				request.list,
+				request.offset,
+				request.cursor,
+				reuse,
+				&retry_after,
+				refresh = request.refresh,
+			)
+		}
 		send(
 			client,
 			Result {
@@ -348,13 +366,26 @@ handle :: proc(
 			},
 		)
 	case .Detail:
-		detail, status, ok := fetch_detail(
-			tokens.access,
-			request.source,
-			request.id,
-			reuse = reuse,
-			refresh = request.refresh,
-		)
+		detail: Detail
+		status: int
+		ok: bool
+		if request.source == .Playlist &&
+		   authorize_session(client, streaming, interactive = false) {
+			detail, status, ok = fetch_session_playlist_detail(
+				streaming.access,
+				request.id,
+				reuse,
+				request.refresh,
+			)
+		} else {
+			detail, status, ok = fetch_detail(
+				tokens.access,
+				request.source,
+				request.id,
+				reuse = reuse,
+				refresh = request.refresh,
+			)
+		}
 		if ok && request.source == .Playlist && detail.rows_error == 403 {
 			rows, total, next, more, rows_status, rows_ok := read_session_playlist(
 				client,
@@ -445,6 +476,17 @@ handle :: proc(
 					request.group,
 					allocator,
 					reuse,
+				)
+		} else if request.source == .Playlist &&
+		   authorize_session(client, streaming, interactive = false) {
+			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
+				fetch_playlist_rows(
+					streaming.access,
+					request.id,
+					request.offset,
+					allocator,
+					reuse,
+					request.refresh,
 				)
 		} else {
 			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
@@ -697,10 +739,11 @@ more :: proc(client: ^Client, kind: Kind) {
 	if page.ready && !page.has_more {return}
 	if client.pending[i] || time.since(client.page_at) < 0 {return}
 	request := Request {
-		kind   = .Index,
-		list   = kind,
-		offset = page.next_offset,
-		cursor = strings.clone(page.cursor),
+		kind    = .Index,
+		list    = kind,
+		offset  = page.next_offset,
+		cursor  = strings.clone(page.cursor),
+		account = strings.clone(page.account),
 	}
 	if queue_request(client, &request) {
 		client.pending[i] = true
@@ -1225,6 +1268,7 @@ apply :: proc(client: ^Client, result: Result) {
 				append(&destination.items, clone_entry(entry, allocator))
 			}
 			destination.cursor = strings.clone(local.page.cursor, allocator)
+			destination.account = strings.clone(local.page.account, allocator)
 			destination.has_more = local.page.has_more
 			destination.next_offset = local.page.next_offset
 			destination.total = local.page.total

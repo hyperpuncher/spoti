@@ -8,9 +8,8 @@ import "core:sync"
 
 PLAYLIST_AUTH_REQUIRED :: -3
 
-// interactive=false never starts a browser sign-in; it only reuses a live or
-// stored streaming grant. Sections that ride along with a page use it so an
-// open never blocks on approval.
+// interactive=false never starts browser approval. It reuses a live or
+// saved grant, or waits for a grant another worker is already obtaining.
 authorize_session :: proc(
 	client: ^Client,
 	tokens: ^oauth.Tokens,
@@ -30,6 +29,27 @@ authorize_session :: proc(
 	oauth.wipe_tokens(tokens)
 	tokens^ = fresh
 	return !sync.atomic_load(&client.cancel)
+}
+
+// Keep an initial account name alive through the request. Later pages
+// borrow the account carried by their request and must not free it here.
+read_session_rootlist :: proc(
+	client: ^Client,
+	tokens: ^oauth.Tokens,
+	request: Request,
+	reuse: rawptr = nil,
+	get_account: type_of(session.account_name) = session.account_name,
+	fetch: type_of(fetch_rootlist) = fetch_rootlist,
+) -> (
+	page: Page,
+	status: int,
+	ok: bool,
+) {
+	if !authorize_session(client, tokens, interactive = false) {return}
+	account := request.account
+	if account == "" {account = get_account(tokens.access, &client.cancel)}
+	defer if request.account == "" {delete(account)}
+	return fetch(tokens.access, account, request.offset, reuse, request.refresh)
 }
 
 // Artist top tracks, non-interactive: the section is optional, so it never
@@ -77,6 +97,7 @@ read_session_playlist :: proc(
 		id,
 		offset,
 		allocator,
+		reuse,
 	)
 	if status == 401 && !sync.atomic_load(&client.cancel) {
 		if !authorize_session(
@@ -84,7 +105,7 @@ read_session_playlist :: proc(
 			tokens,
 			true,
 		) {return nil, 0, 0, false, PLAYLIST_AUTH_REQUIRED, false}
-		return fetch_playlist_rows(tokens.access, id, offset, allocator)
+		return fetch_playlist_rows(tokens.access, id, offset, allocator, reuse)
 	}
 	return
 }

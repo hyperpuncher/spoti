@@ -25,7 +25,8 @@ search_results_split_into_four_relevance_pages :: proc(t: ^testing.T) {
 	testing.expect(
 		t,
 		pages[.Playlists].items[0].name == "My list" &&
-		pages[.Playlists].items[0].subtitle == "igor",
+		pages[.Playlists].items[0].subtitle == "igor" &&
+		pages[.Playlists].items[0].total == 14,
 	)
 }
 

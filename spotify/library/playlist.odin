@@ -11,6 +11,7 @@ import track "../track"
 import "base:runtime"
 import "core:encoding/hex"
 import "core:fmt"
+import "core:mem/virtual"
 import "core:strings"
 import "core:time"
 
@@ -50,14 +51,7 @@ fetch_playlist_rows :: proc(
 			return cached_rows, cached_total, cached_next, cached_more, 200, true
 		}
 	}
-	address := fmt.aprintf(
-		"https://spclient.wg.spotify.com/playlist/v2/playlist/%s?decorate=revision,length,attributes,owner&from=%d&length=%d",
-		id,
-		offset,
-		PLAYLIST_PAGE_SIZE,
-	)
-	defer delete(address)
-	body, code, fetched := http.get(address, {bearer = access, limit = 512 * 1024}, reuse)
+	body, code, fetched := fetch_playlist_body(access, id, offset, reuse, refresh)
 	defer delete(body)
 	if !fetched || code != 200 {
 		if cached_rows, cached_total, cached_next, cached_more, cached := read_playlist_cache(
@@ -76,6 +70,9 @@ fetch_playlist_rows :: proc(
 	request := playlist_metadata_request(window.uris)
 	defer delete(request)
 	if len(request) == 0 {
+		window_key := playlist_cache_key("ap-playlist-window", id, offset)
+		defer delete(window_key)
+		cache_write("api", window_key, body[:])
 		return nil, window.total, window.next_offset, window.next_offset < window.total, 200, true
 	}
 	metadata, metadata_code, received := http.post_protobuf(
@@ -103,6 +100,70 @@ fetch_playlist_rows :: proc(
 	return rows, window.total, window.next_offset, window.next_offset < window.total, 200, true
 }
 
+fetch_playlist_body :: proc(
+	access, id: string,
+	offset: int,
+	reuse: rawptr = nil,
+	refresh: bool = false,
+) -> (
+	body: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	address := fmt.aprintf(
+		"https://spclient.wg.spotify.com/playlist/v2/playlist/%s?decorate=revision,length,attributes,owner&from=%d&length=%d",
+		id,
+		offset,
+		PLAYLIST_PAGE_SIZE,
+		allocator = context.temp_allocator,
+	)
+	return api_get(access, address, 512 * 1024, reuse, ttl = PAGE_TTL, refresh = refresh)
+}
+
+// Read the title, artwork and rows from the same session. The row cache
+// already retains this header body, so opening a warm page adds no request.
+fetch_session_playlist_detail :: proc(
+	access, id: string,
+	reuse: rawptr = nil,
+	refresh: bool = false,
+) -> (
+	detail: Detail,
+	status: int,
+	ok: bool,
+) {
+	if virtual.arena_init_growing(&detail.arena) != nil {return}
+	defer if !ok {free_detail(&detail)}
+	allocator := virtual.arena_allocator(&detail.arena)
+	rows_ok: bool
+	detail.rows, detail.total, detail.next_offset, detail.has_more, status, rows_ok =
+		fetch_playlist_rows(access, id, 0, allocator, reuse, refresh)
+	if !rows_ok {return}
+	key := playlist_cache_key("ap-playlist-window", id, 0)
+	defer delete(key)
+	body, hit := cache_read("api", key, API_STALE)
+	if !hit {
+		fetched: bool
+		body, status, fetched = fetch_playlist_body(access, id, 0, reuse)
+		if !fetched || status != 200 {delete(body); return}
+	}
+	defer delete(body)
+	attributes, _, valid := ap.get_bytes(body[:], 3)
+	owner, _, owner_valid := ap.get_bytes(body[:], 16)
+	if !valid || !owner_valid {status = PLAYLIST_INVALID_RESPONSE; return}
+	header, parsed := playlist_attributes(attributes)
+	if !parsed || header.name == "" {status = PLAYLIST_INVALID_RESPONSE; return}
+	detail.ready, detail.source = true, .Playlist
+	detail.id = strings.clone(id, allocator)
+	detail.label = strings.clone("Playlist", allocator)
+	detail.name = strings.clone(header.name, allocator)
+	detail.owner_id, detail.subtitle =
+		strings.clone(string(owner), allocator), strings.clone(string(owner), allocator)
+	detail.collaborative = header.collaborative
+	detail.image = strings.clone(cover_url_largest(header.images), allocator)
+	detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
+	return detail, 200, true
+}
+
 playlist_cache_key :: proc(prefix, id: string, offset: int) -> string {
 	return fmt.aprintf("%s:%s:%d", prefix, id, offset)
 }
@@ -123,13 +184,20 @@ read_playlist_cache :: proc(
 	window_body, window_hit := cache_read("api", window_key, ttl)
 	if !window_hit {return}
 	defer delete(window_body)
+	window, valid := parse_playlist_window(window_body[:], offset)
+	if !valid {return {}, 0, 0, false, false}
+	playable := false
+	for uri in window.uris {
+		if _, supported := playlist_track_id(uri); supported {playable = true; break}
+	}
+	if !playable {
+		return nil, window.total, window.next_offset, window.next_offset < window.total, true
+	}
 	meta_key := playlist_cache_key("ap-playlist-meta", id, offset)
 	defer delete(meta_key)
 	meta_body, meta_hit := cache_read("api", meta_key, ttl)
 	if !meta_hit {return}
 	defer delete(meta_body)
-	window, valid := parse_playlist_window(window_body[:], offset)
-	if !valid {return {}, 0, 0, false, false}
 	parsed, parsed_ok := parse_playlist_metadata(meta_body[:], window.uris, allocator)
 	if !parsed_ok {return {}, 0, 0, false, false}
 	return parsed, window.total, window.next_offset, window.next_offset < window.total, true
@@ -273,10 +341,10 @@ playlist_track_row :: proc(
 	duration, _, decoded := ap.get_number(body, 7)
 	if !decoded || duration & 1 != 0 || duration >> 1 > u64(max(i32)) {return}
 	ref := Track_Ref {
-		uri         = uri,
-		name        = string(name),
-		duration_ms = int(duration >> 1),
-	}
+			uri         = uri,
+			name        = string(name),
+			duration_ms = int(duration >> 1),
+		}
 	artists := make([dynamic]Artist, context.temp_allocator)
 	images := make([dynamic]Image, context.temp_allocator)
 	album_name, album_uri := "", ""

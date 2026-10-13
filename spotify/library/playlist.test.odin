@@ -103,7 +103,7 @@ web_playlist_items_parse_track_objects :: proc(t: ^testing.T) {
 
 @(test)
 web_playlist_header_reads_track_total :: proc(t: ^testing.T) {
-	body := `{"id":"x","name":"Noice","uri":"spotify:playlist:x","images":[],"owner":{"id":"hyper_puncher","display_name":"hyper_puncher"},"tracks":{"total":1512}}`
+	body := `{"id":"x","name":"Noice","uri":"spotify:playlist:x","images":[],"owner":{"id":"hyper_puncher","display_name":"hyper_puncher"},"items":{"total":1512}}`
 	header: Playlist_Ref
 	if !testing.expect(
 		t,

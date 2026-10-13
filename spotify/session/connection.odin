@@ -6,6 +6,7 @@ import "core:crypto"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:net"
+import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
@@ -23,6 +24,7 @@ AP_Connection :: struct {
 	sender, receiver:  ap.Packet_Cipher,
 	connected, broken: bool,
 	sequence:          u32,
+	username:          string,
 	keep_alive:        Keep_Alive,
 	deadline:          time.Tick,
 }
@@ -49,6 +51,16 @@ cached_country :: proc() -> string {
 	return string(connection_country[:])
 }
 
+// Returns an owned account name from the authenticated AP welcome.
+// This is a worker call; it can connect but never requests an audio key.
+account_name :: proc(access: string, cancel: ^bool = nil) -> string {
+	if !lock_connection(cancel) {return ""}
+	defer sync.unlock(&connection_mutex)
+	if !start_connection_worker() {return ""}
+	if !connection.connected && !connect_connection(&connection, access, cancel) {return ""}
+	return strings.clone(connection.username)
+}
+
 cancelled :: proc(cancel: ^bool) -> bool {
 	return cancel != nil && sync.atomic_load(cancel)
 }
@@ -64,6 +76,7 @@ lock_connection :: proc(cancel: ^bool) -> bool {
 
 close_connection :: proc(c: ^AP_Connection) {
 	if c.connected {net.close(c.socket)}
+	delete(c.username)
 	crypto.zero_explicit(c, size_of(c^))
 }
 
@@ -184,8 +197,9 @@ connect_connection :: proc(c: ^AP_Connection, access: string, cancel: ^bool) -> 
 	command, response, received := ap.read_packet(socket, &c.receiver, cancel)
 	defer {crypto.zero_explicit(raw_data(response), len(response)); delete(response)}
 	if !received {fmt.eprintln("AP login response missing or invalid MAC"); return false}
-	_, failure, kind := ap.parse_login_reply(command, response)
+	username, failure, kind := ap.parse_login_reply(command, response)
 	if kind != .Welcome {fmt.eprintln("AP login refused or invalid:", failure); return false}
+	c.username = strings.clone(username)
 	c.connected, c.broken = true, false
 	c.keep_alive = .Ping
 	c.deadline = time.tick_add(time.tick_now(), 20 * time.Second)

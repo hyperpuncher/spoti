@@ -50,6 +50,7 @@ test: _prepare
 	odin test spotify/artwork {{curl_flags}}
 	odin test spotify/http {{curl_flags}}
 	odin test ui {{curl_flags}}
+	odin test diagnostic {{curl_flags}}
 
 # Network diagnostic: connects to a Spotify AP without signing in.
 probe:

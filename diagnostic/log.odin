@@ -144,11 +144,15 @@ sanitize_endpoint :: proc(
 		paging = paging_offset(path[index:], allocator)
 		path = path[:index]
 	}
+	skip_account := false
 	for segment in strings.split(path, "/", context.temp_allocator) {
+		if skip_account {skip_account = false; continue}
+		if segment == "user" || segment == "users" || segment == "profile" {skip_account = true}
 		if count >= len(parts) {break}
 		if keep_segment(segment) {parts[count] = segment; count += 1}
 	}
 	joined := strings.join(parts[:count], "-", allocator)
+	defer delete(joined, allocator)
 	return fmt.aprintf("%s %s", host, joined, allocator = allocator), paging
 }
 
