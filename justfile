@@ -5,7 +5,7 @@ set windows-shell := ["sh", "-cu"]
 vet_flags := "-vet -vet-cast -vet-style -vet-semicolon -vet-tabs"
 # macOS system curl has no WebSocket API. Use the Homebrew library.
 curl_flags := if os() == "macos" { '-extra-linker-flags:"-L$(brew --prefix curl)/lib"' } else { "" }
-project_packages := "main,ap,artwork,audio,connect,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui"
+project_packages := "main,ap,artwork,audio,connect,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui,fontconfig"
 
 default: run
 

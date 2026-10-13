@@ -5,6 +5,8 @@ import "core:os"
 import filepath "core:path/filepath"
 import "core:strconv"
 import "core:strings"
+import "core:unicode"
+import fontconfig "fontconfig"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
@@ -24,10 +26,24 @@ GEIST_FACE_REGULAR :: 0
 GEIST_FACE_MEDIUM :: (5 << 16)
 GEIST_FACE_BOLD :: (7 << 16)
 
+FONT_ROLE_COUNT :: u16(4)
+
+Font_Source :: struct {
+	path:  string,
+	index: int,
+}
+
+resolve_fallbacks :: proc(state: ^State) {
+	state.font_config = fontconfig.InitLoadConfigAndFonts()
+	state.fallback_sources = make([dynamic]Font_Source)
+	state.fallback_matches = make(map[u64]int)
+}
+
 // First existing file wins: an override dir, the install layout around
 // the binary, then the dev checkout. The caller owns the returned path.
 resolve_bundled :: proc(file: string) -> (path: string, ok: bool) {
 	candidates := make([dynamic]string, context.temp_allocator)
+	defer {for candidate in candidates {delete(candidate)}}
 	if override, found := os.lookup_env("SPOTI_FONTS", context.temp_allocator); found {
 		append(&candidates, fmt.aprintf("%s/%s", override, file))
 	}
@@ -78,7 +94,7 @@ resolve_font :: proc(pattern: string) -> (path: string, index: int, ok: bool) {
 		fmt.eprintln("could not find a system font with fc-match:", err)
 		return
 	}
-	fields := strings.fields(string(output))
+	fields := strings.split_lines(string(output))
 	defer delete(fields)
 	if len(fields) < 2 {return}
 	face, parsed := strconv.parse_int(fields[1])
@@ -125,20 +141,81 @@ font_for_size :: proc(state: ^State, size: f32, font_id: u16 = 0) -> ^ttf.Font {
 	case 3:
 		path, face = state.medium_font_path, state.medium_font_index
 	}
-	c_path := strings.clone_to_cstring(path)
+	if font_id >= FONT_ROLE_COUNT {
+		index := int(font_id - FONT_ROLE_COUNT)
+		if index >= len(state.fallback_sources) {return nil}
+		source := state.fallback_sources[index]
+		path, face = source.path, source.index
+	}
+	font := open_font({path, face}, f32(size_key) / 8, state.hinting)
+	if font != nil {state.fonts[key] = font}
+	return font
+}
+
+// The caller owns the font. The source path is only borrowed while opening.
+open_font :: proc(source: Font_Source, size: f32, hinting: ttf.Hinting = .NORMAL) -> ^ttf.Font {
+	if source.path == "" {return nil}
+	c_path := strings.clone_to_cstring(source.path)
 	defer delete(c_path)
 	props := sdl.CreateProperties()
 	if props == 0 {return nil}
 	defer sdl.DestroyProperties(props)
 	_ = sdl.SetStringProperty(props, ttf.PROP_FONT_CREATE_FILENAME_STRING, c_path)
-	_ = sdl.SetFloatProperty(props, ttf.PROP_FONT_CREATE_SIZE_FLOAT, f32(size_key) / 8)
-	_ = sdl.SetNumberProperty(props, ttf.PROP_FONT_CREATE_FACE_NUMBER, sdl.Sint64(face))
+	_ = sdl.SetFloatProperty(props, ttf.PROP_FONT_CREATE_SIZE_FLOAT, size)
+	_ = sdl.SetNumberProperty(props, ttf.PROP_FONT_CREATE_FACE_NUMBER, sdl.Sint64(source.index))
 	font := ttf.OpenFontWithProperties(props)
-	if font == nil {
-		fmt.eprintln("could not load system font:", path)
-		return nil
+	if font == nil {fmt.eprintln("could not load font:", source.path); return nil}
+	ttf.SetFontHinting(font, hinting)
+	return font
+}
+
+// Resolve only characters the primary font and its attached fallbacks lack.
+// Sources are shared across sizes; failed matches are cached as well.
+font_for_text :: proc(state: ^State, value: string, size: f32, font_id: u16 = 0) -> ^ttf.Font {
+	font := font_for_size(state, size, font_id)
+	if font == nil {return nil}
+	for character in value {
+		if character < ' ' || ttf.FontHasGlyph(font, u32(character)) {continue}
+		key := u64(u32(character)) << 16 | u64(font_id)
+		index, found := state.fallback_matches[key]
+		if !found {
+			weight := fontconfig.WEIGHT_REGULAR
+			// Fallback symbols keep their designed outline instead of taking
+			// the title's bold weight. Script letters still follow the role.
+			if !unicode.is_symbol(character) {
+				if font_id == u16(Font_Role.Bold) {weight = fontconfig.WEIGHT_BOLD}
+				if font_id == u16(Font_Role.Medium) {weight = fontconfig.WEIGHT_MEDIUM}
+			}
+			path, face := fontconfig.match(
+				state.font_config,
+				character,
+				weight,
+				state.fallback_sources.allocator,
+			)
+			index = -1
+			if path != "" {
+				for source, candidate in state.fallback_sources {
+					if source.path == path && source.index == face {index = candidate; break}
+				}
+				if index < 0 {
+					index = len(state.fallback_sources)
+					append(&state.fallback_sources, Font_Source{path, face})
+				} else {delete(path, state.fallback_sources.allocator)}
+			}
+			state.fallback_matches[key] = index
+		}
+		if index < 0 {continue}
+		fallback := font_for_size(state, size, FONT_ROLE_COUNT + u16(index))
+		if fallback == nil ||
+		   !ttf.FontIsScalable(fallback) ||
+		   !ttf.FontHasGlyph(fallback, u32(character)) {
+			state.fallback_matches[key] = -1
+			continue
+		}
+		if !ttf.AddFallbackFont(
+			font,
+			fallback,
+		) {fmt.eprintln("could not add font fallback:", sdl.GetError())}
 	}
-	ttf.SetFontHinting(font, state.hinting)
-	state.fonts[key] = font
 	return font
 }

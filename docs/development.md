@@ -3,12 +3,17 @@
 ## dependencies
 
 install Odin, `just`, a C compiler, `pkg-config`, and `rsvg-convert`.
-fonts are included in `assets/fonts`.
+the primary Geist fonts are included in `assets/fonts`. on Linux, install
+fontconfig and the distribution's Noto script, symbol, and CJK font packages
+for broad Unicode coverage. install the color emoji font package for inline
+emoji, such as Noto Color Emoji on Linux. see
+[font details](../assets/fonts/FONTS.md).
 
 | library | Linux | macOS | Windows |
 | --- | --- | --- | --- |
 | SDL3 | system package | `brew install sdl3` | vcpkg `sdl3` |
 | SDL3_ttf | system package | `brew install sdl3_ttf` | vcpkg `sdl3-ttf` |
+| fontconfig | system package | `brew install fontconfig` | vcpkg `fontconfig` |
 | libcurl | system package | `brew install curl` | vcpkg `curl` |
 | vorbisfile | system package | `brew install libvorbis` | vcpkg `libvorbis` |
 | libwebp | system package | `brew install webp` | vcpkg `libwebp` |
@@ -22,7 +27,9 @@ macOS also needs the Xcode command line tools.
 
 on Windows, the build scripts use `sh` from Git for Windows or msys2.
 msys2 also provides `cc`, `pkg-config`, and `rsvg-convert`.
-put the required shared DLLs beside the application binary.
+put the required shared DLLs beside the application binary. include the
+fontconfig configuration files and verify that they list the Windows
+system and user font directories.
 
 ## build and check
 
@@ -45,6 +52,7 @@ for address-sanitizer checks:
 odin test spotify/library -sanitize:address
 odin test spotify/session -sanitize:address
 odin test spotify/connect -sanitize:address
+odin test ui -define:ODIN_TEST_THREADS=1 -sanitize:address
 odin test . -define:ODIN_TEST_THREADS=1 -sanitize:address
 ```
 

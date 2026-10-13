@@ -1,7 +1,6 @@
 package main
 
 import "base:runtime"
-import c "core:c/libc"
 import "core:fmt"
 import "core:strings"
 import diagnostic "diagnostic"
@@ -9,7 +8,6 @@ import library "spotify/library"
 import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
 
 Cover_Request_State :: struct {
 	pending:  bool,
@@ -131,12 +129,15 @@ measure_text :: proc "c" (
 ) -> clay.Dimensions {
 	context = runtime.default_context()
 	state := (^ui.State)(user_data)
-	font := ui.font_for_size(state, f32(config.fontSize) * ui.scale(state), config.fontId)
-	if font == nil {return {}}
+	value := string(text.chars[:text.length])
 	state.text_measures += 1
-	width, height: c.int
-	_ = ttf.GetStringSize(font, text.chars, uint(text.length), &width, &height)
-	return {f32(width), f32(height)}
+	width, height := ui.text_size(
+		state,
+		value,
+		f32(config.fontSize) * ui.scale(state),
+		config.fontId,
+	)
+	return {width, height}
 }
 
 render :: proc(
@@ -144,6 +145,7 @@ render :: proc(
 	state: ^ui.State,
 	textures: ^Textures,
 ) {
+	ui.poll_emoji(state)
 	clip_stack: [64]sdl.Rect
 	clip_depth := 0
 	for i in 0 ..< commands.length {

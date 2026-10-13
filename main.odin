@@ -756,6 +756,7 @@ main :: proc() {
 	load_icons(&state, &textures, theme_dark)
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
+	_ = ui.start_emoji(&state, WAKE_EVENT != 0 ? wake_app : nil)
 	mpris_active = mpris.start(WAKE_EVENT != 0 ? wake_app : nil)
 	oauth.set_prompt_handler(prompt_arrived)
 	app_state = load_state()
@@ -907,6 +908,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	using frame
 	event: sdl.Event
 	wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
+	emoji_poll := WAKE_EVENT == 0 && ui.emoji_pending(&state)
 	fades_animating :=
 		(textures.fade_top_alpha != 0 && textures.fade_top_alpha != 1) ||
 		(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1) ||
@@ -941,6 +943,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		if preload_worker != nil && stage != .Playing {wait_ms = 40}
 	}
 	if (connect_client.worker != nil && WAKE_EVENT == 0) ||
+	   emoji_poll ||
 	   library_client.devices_pending ||
 	   library_client.transfer_pending ||
 	   remote_control {
@@ -1171,7 +1174,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 			if !sdl.PollEvent(&event) {break}
 		}
 	}
-	return has_event, fades_animating
+	return has_event || emoji_poll, fades_animating
 }
 
 // History moves plus the banked scroll offset that follows them.

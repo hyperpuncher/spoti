@@ -12,6 +12,7 @@ runtime dependency. librespot and Spotifast are protocol references.
 | UI thread | events, navigation, layout, texture upload, playback decisions |
 | library worker | account data, native playlist reads, search, confirmed writes |
 | cover worker | artwork requests and image decoding |
+| emoji worker | system color font lookup, sequence shaping, and image rendering |
 | playback and preload workers | authorization, audio resolution and decoding |
 | Connect worker | Dealer connection, registration, incoming commands, state publication |
 | AP keep-alive worker | idle connection maintenance |
@@ -84,6 +85,12 @@ commands but still processes layout, and only supports 100 clip containers.
 keep offscreen rows out of layout and clip pointer hits to their visible area.
 numeric fields use the monospace face; titles use proportional faces.
 artwork is not cropped or otherwise materially changed.
+
+ordinary text uses Geist with character-based system outline fallbacks.
+emoji uses whole grapheme clusters with stable inline cells. a worker owns
+the color font and renders cached images; SDL texture uploads and scaled
+drawing stay on the UI thread. image arrivals wake the event loop and never
+change text measurements. see [font behavior and limits](../assets/fonts/FONTS.md).
 
 cached content appears before background revalidation. successful playlist
 removal updates the existing rows only after the server confirms it.

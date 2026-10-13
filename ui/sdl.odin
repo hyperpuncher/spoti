@@ -3,7 +3,7 @@ package ui
 import c "core:c/libc"
 import "core:fmt"
 import "core:math"
-import "core:unicode/utf8"
+import fontconfig "fontconfig"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
@@ -26,10 +26,14 @@ State :: struct {
 	medium_font_path:   string,
 	medium_font_index:  int,
 	hinting:            ttf.Hinting,
+	font_config:        ^fontconfig.Config,
+	fallback_sources:   [dynamic]Font_Source,
+	fallback_matches:   map[u64]int,
 	fonts:              map[int]^ttf.Font,
 	text_engine:        ^ttf.TextEngine,
 	texts:              [dynamic]^ttf.Text,
 	text_count:         int,
+	emoji:              ^Emoji_Cache,
 	density:            f32,
 	masks:              map[u64]^sdl.Texture,
 	cursors:            [Cursor_Kind]^sdl.Cursor,
@@ -90,6 +94,7 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 	state.medium_font_path, state.medium_font_index, ok = resolve_role(.Medium)
 	if !ok {close(&state); return}
 	state.hinting = system_hinting()
+	resolve_fallbacks(&state)
 	state.fonts = make(map[int]^ttf.Font)
 	state.masks = make(map[u64]^sdl.Texture)
 	state.cursors[.Default] = sdl.GetDefaultCursor()
@@ -107,6 +112,7 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 }
 
 close :: proc(state: ^State) {
+	stop_emoji(state)
 	for text in state.texts {ttf.DestroyText(text)}
 	delete(state.texts)
 	if state.text_engine != nil {ttf.DestroyRendererTextEngine(state.text_engine)}
@@ -116,6 +122,10 @@ close :: proc(state: ^State) {
 	delete(state.numeric_font_path)
 	delete(state.bold_font_path)
 	delete(state.medium_font_path)
+	for source in state.fallback_sources {delete(source.path, state.fallback_sources.allocator)}
+	delete(state.fallback_sources)
+	delete(state.fallback_matches)
+	if state.font_config != nil {fontconfig.ConfigDestroy(state.font_config)}
 	for _, texture in state.masks {sdl.DestroyTexture(texture)}
 	delete(state.masks)
 	if state.cursors[.Default] != nil {_ = sdl.SetCursor(state.cursors[.Default])}
@@ -424,32 +434,4 @@ frame_done :: proc(state: ^State) {
 	finish_text_frame(state)
 	_ = sdl.RenderPresent(state.renderer)
 	if !state.vsync {sdl.Delay(16)}
-}
-
-text :: proc(
-	state: ^State,
-	value: string,
-	x, y, font_size: f32,
-	color: sdl.Color,
-	font_id: u16 = 0,
-) {
-	if len(value) == 0 {return}
-	font := font_for_size(state, font_size, font_id)
-	if font == nil {return}
-	content := cached_text(state, font, value)
-	if content == nil {return}
-	_ = ttf.SetTextColor(content, color.r, color.g, color.b, color.a)
-	// SDL_ttf draws from the pen, so a glyph's left side bearing would indent
-	// the ink and grow with font size. Shift the pen so the ink starts at the
-	// box's left edge and lines up with smaller text in the same column.
-	pen_x := x - glyph_left_bearing(font, value)
-	// Whole-pixel positions keep glyph rasterization identical between frames.
-	_ = ttf.DrawRendererText(content, f32(int(pen_x + 0.5)), f32(int(y + 0.5)))
-}
-
-glyph_left_bearing :: proc(font: ^ttf.Font, value: string) -> f32 {
-	r, _ := utf8.decode_rune_in_string(value)
-	minx: c.int
-	if !ttf.GetGlyphMetrics(font, u32(r), &minx, nil, nil, nil, nil) {return 0}
-	return f32(minx)
 }

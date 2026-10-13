@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:math"
 import "core:strings"
+import "core:unicode/utf8"
 import library "spotify/library"
 import ui "ui"
 import clay "vendor/clay"
@@ -1115,12 +1116,18 @@ hero_fit_text :: proc(
 		if hero_text_width(state, text, size, font) <= width {return text}
 	} else if hero_wrapped_lines(state, text, size, font, width) <= lines {return text}
 	scratch := make([]u8, len(text) + len("…"), allocator)
-	lo, hi := 0, len(text)
+	// Every measurement probe ends at a complete grapheme cluster.
+	boundaries := make([dynamic]int, 0, len(text) + 1, context.temp_allocator)
+	it := utf8.decode_grapheme_iterator_make(text)
+	for _, grapheme in utf8.decode_grapheme_iterate(&it) {append(&boundaries, grapheme.byte_index)}
+	append(&boundaries, len(text))
+	lo, hi := 0, len(boundaries) - 1
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
-		copy(scratch, text[:mid])
-		copy(scratch[mid:], "…")
-		probe := string(scratch[:mid + len("…")])
+		end := boundaries[mid]
+		copy(scratch, text[:end])
+		copy(scratch[end:], "…")
+		probe := string(scratch[:end + len("…")])
 		ok :=
 			lines <= 1 ? hero_text_width(state, probe, size, font) <= width : hero_wrapped_lines(state, probe, size, font, width) <= lines
 		if ok {
@@ -1129,12 +1136,11 @@ hero_fit_text :: proc(
 			hi = mid - 1
 		}
 	}
-	// Never split a multi-byte rune; shrinking only ever keeps the fit.
-	for lo > 0 && (text[lo - 1] & 0xC0) == 0x80 {lo -= 1}
-	if lo == 0 {return "…"}
-	copy(scratch, text[:lo])
-	copy(scratch[lo:], "…")
-	return string(scratch[:lo + len("…")])
+	end := boundaries[lo]
+	if end == 0 {return "…"}
+	copy(scratch, text[:end])
+	copy(scratch[end:], "…")
+	return string(scratch[:end + len("…")])
 }
 
 // Compound Clay index for one artist segment: the row slot owns the high
