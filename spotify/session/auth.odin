@@ -38,11 +38,11 @@ authorize :: proc(
 	tokens: oauth.Tokens,
 	ok: bool,
 ) {
-	if !sync.try_lock(&authorization_mutex) {
-		fmt.eprintln(
-			"Spotify streaming approval is already in progress; try again after it finishes",
-		)
-		return
+	// Connect and library startup can reuse the same grant at the same
+	// time. Wait for its owner instead of reporting a missing grant.
+	for !sync.try_lock(&authorization_mutex) {
+		if cancelled(cancel) {return}
+		time.sleep(10 * time.Millisecond)
 	}
 	defer sync.unlock(&authorization_mutex)
 	if cancel != nil && sync.atomic_load(cancel) {return}
