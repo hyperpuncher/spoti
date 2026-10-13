@@ -325,14 +325,14 @@ library_card :: proc(
 					childAlignment = {x = .Center, y = .Center},
 				},
 				floating = {
-					offset = {padding, padding},
+					offset = {padding + 4 * d, padding + 4 * d},
 					zIndex = 2,
 					attachTo = .Parent,
 					attachment = {element = .LeftTop, parent = .LeftTop},
 					pointerCaptureMode = .Passthrough,
 					clipTo = .AttachedParent,
 				},
-				backgroundColor = clay.Color{12, 12, 12, 200},
+				backgroundColor = PLAYER,
 				cornerRadius = clay.CornerRadiusAll(11 * d),
 			},
 			) {
