@@ -1365,12 +1365,7 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 		   len(app_state.last_collection) > 0 {
 			source, id, valid := parse_card_uri(app_state.last_collection)
 			if valid {
-				preview := library.Entry {
-					name  = app_state.last_name != "" ? app_state.last_name : app_state.last_played.title,
-					uri   = app_state.last_collection,
-					image = app_state.last_played.cover,
-					saved = app_state.last_saved,
-				}
+				preview := state_collection_preview(&app_state, &library_client)
 				if library.open_detail(&library_client, source, id, preview) {
 					detail_pinned = state_is_pinned(&app_state, app_state.last_collection)
 					nav_commit(
@@ -1546,7 +1541,6 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	mouse_x, mouse_y: f32
 	buttons = sdl.GetMouseState(&mouse_x, &mouse_y)
 	mouse = ui.mouse_position(&state, mouse_x, mouse_y)
-	clay.SetLayoutDimensions({f32(width), f32(height)})
 	clay.SetPointerState({mouse.x, mouse.y}, .LEFT in buttons)
 	previous_density := ui.scale(&state)
 	density = ui.update_scale(&state)

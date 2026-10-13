@@ -748,6 +748,7 @@ layout :: proc(
 	Frame_Visible,
 ) {
 	visible: Frame_Visible
+	clay.SetLayoutDimensions({viewport_width, viewport_height})
 	clay.BeginLayout()
 	if sign_in_pending(client.state) {
 		if clay.UI()(

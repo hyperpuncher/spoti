@@ -193,6 +193,21 @@ format_state :: proc(app_state: ^State, allocator := context.allocator) -> strin
 	return string(data)
 }
 
+// Borrow the reopened collection's card, never the footer's track artwork.
+// Without a matching card, keep the saved name and show a placeholder.
+state_collection_preview :: proc(app_state: ^State, client: ^library.Client) -> library.Entry {
+	for page in client.pages {
+		for entry in page.items {
+			if entry.uri == app_state.last_collection {return entry}
+		}
+	}
+	return {
+		name = app_state.last_name,
+		uri = app_state.last_collection,
+		saved = app_state.last_saved,
+	}
+}
+
 state_is_pinned :: proc(app_state: ^State, uri: string) -> bool {
 	for pinned in app_state.pinned {if pinned == uri {return true}}
 	return false
