@@ -17,7 +17,7 @@ foreign secret {
 	password_lookup_sync :: proc(schema, cancellable: rawptr, error: ^^G_Error, #c_vararg args: ..any) -> cstring ---
 	password_store_sync :: proc(schema: rawptr, collection, label, password: cstring, cancellable: rawptr, error: ^^G_Error, #c_vararg args: ..any) -> c.int ---
 	password_clear_sync :: proc(schema, cancellable: rawptr, error: ^^G_Error, #c_vararg args: ..any) -> c.int ---
-	password_wipe :: proc(password: cstring) ---
+	password_free :: proc(password: cstring) ---
 }
 
 @(default_calling_convention = "c", link_prefix = "g_")
@@ -61,7 +61,7 @@ load :: proc(slot: Slot = .Playback) -> (token: string, found: bool) {
 	)
 	if failure != nil {error_free(failure); return "", false}
 	if ptr == nil {return "", false}
-	defer password_wipe(ptr)
+	defer password_free(ptr)
 	value := string(ptr)
 	if len(value) == 0 {return "", false}
 	return strings.clone(value), true
