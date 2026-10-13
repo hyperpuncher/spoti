@@ -212,29 +212,6 @@ button_fx :: proc(
 	return scale, hovered
 }
 
-toolbar_button :: proc(
-	id, icon: string,
-	textures: ^Textures,
-	tint: Icon_Tint,
-	fx: ^Button_Fx_Ctx,
-	d: f32,
-	enabled: bool = true,
-) {
-	scale, hovered := button_fx(fx, id, enabled)
-	if clay.UI_WithId(clay.ID(id))(
-	{
-		layout = {
-			sizing = {width = clay.SizingFixed(40 * d), height = clay.SizingFixed(40 * d)},
-			childAlignment = {x = .Center, y = .Center},
-		},
-		backgroundColor = hovered ? HOVER : clay.Color{},
-		cornerRadius = clay.CornerRadiusAll(20 * d),
-	},
-	) {
-		icon_element(textures, icon, tint, 20 * d * scale)
-	}
-}
-
 top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 	if clay.UI()(
 	{
@@ -247,23 +224,25 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 		backgroundColor = BG,
 	},
 	) {
-		toolbar_button(
+		icon_button(
 			"toolbar_back",
 			"chevron-left",
-			textures,
 			view.can_back ? .Muted : .Disabled,
+			textures,
 			fx,
 			d,
-			view.can_back,
+			icon_size = 20,
+			target_size = 40,
 		)
-		toolbar_button(
+		icon_button(
 			"toolbar_forward",
 			"chevron-right",
-			textures,
 			view.can_forward ? .Muted : .Disabled,
+			textures,
 			fx,
 			d,
-			view.can_forward,
+			icon_size = 20,
+			target_size = 40,
 		)
 		if clay.UI_WithId(clay.ID("track_input"))(
 		{
@@ -299,44 +278,36 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 	}
 }
 
-player_control :: proc(
+// Toolbar, hero and player icons share a background-free target. Hover
+// brightens muted icons and gives primary icons the play button's hover
+// tone. Active and disabled colors retain their meaning.
+icon_button :: proc(
 	id, icon: string,
 	tint: Icon_Tint,
 	textures: ^Textures,
 	fx: ^Button_Fx_Ctx,
 	d: f32,
+	icon_size: f32 = 21,
+	target_size: f32 = 32,
 ) {
 	scale, hovered := button_fx(fx, id, tint != .Disabled)
-	if clay.UI_WithId(clay.ID(id))(
-	{
-		layout = {
-			sizing = {width = clay.SizingFixed(32 * d), height = clay.SizingFixed(32 * d)},
-			childAlignment = {x = .Center, y = .Center},
-		},
-		backgroundColor = hovered ? HOVER : clay.Color{},
-		cornerRadius = clay.CornerRadiusAll(16 * d),
-	},
-	) {
-		icon_element(textures, icon, tint, 18 * d * scale)
+	active := tint
+	if hovered {
+		#partial switch tint {
+		case .Muted:
+			active = .White
+		case .White:
+			active = .Hover
+		}
 	}
-}
-
-// Hero icon buttons never paint a background. They sit one step above the
-// standard control size, and hover reads through a tint shift alone.
-hero_icon :: proc(
-	id, icon: string,
-	tint: Icon_Tint,
-	textures: ^Textures,
-	fx: ^Button_Fx_Ctx,
-	d: f32,
-) {
-	scale, hovered := button_fx(fx, id, tint != .Disabled)
-	active := hovered && tint == .Muted ? Icon_Tint.White : tint
-	size := 21 * d * scale
+	size := icon_size * d * scale
 	if clay.UI_WithId(clay.ID(id))(
 	{
 		layout = {
-			sizing = {width = clay.SizingFixed(32 * d), height = clay.SizingFixed(32 * d)},
+			sizing = {
+				width = clay.SizingFixed(target_size * d),
+				height = clay.SizingFixed(target_size * d),
+			},
 			childAlignment = {x = .Center, y = .Center},
 		},
 	},
@@ -430,15 +401,24 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 			if clay.UI()(
 			{layout = {childGap = u16(8 * d), childAlignment = {x = .Center, y = .Center}}},
 			) {
-				player_control(
+				icon_button(
 					"footer_shuffle",
 					"shuffle",
 					view.shuffle ? .Green : .Muted,
 					textures,
 					fx,
 					d,
+					icon_size = 18,
 				)
-				player_control("footer_previous", "skip-back-filled", .White, textures, fx, d)
+				icon_button(
+					"footer_previous",
+					"skip-back-filled",
+					.White,
+					textures,
+					fx,
+					d,
+					icon_size = 18,
+				)
 				play_scale, play_over := button_fx(fx, "footer_play")
 				if clay.UI_WithId(clay.ID("footer_play"))(
 				{
@@ -472,14 +452,23 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 						)
 					}
 				}
-				player_control("footer_next", "skip-forward-filled", .White, textures, fx, d)
-				player_control(
+				icon_button(
+					"footer_next",
+					"skip-forward-filled",
+					.White,
+					textures,
+					fx,
+					d,
+					icon_size = 18,
+				)
+				icon_button(
 					"footer_repeat",
 					"repeat",
 					view.repeat ? .Green : .Muted,
 					textures,
 					fx,
 					d,
+					icon_size = 18,
 				)
 			}
 			if clay.UI()(
@@ -546,13 +535,14 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 			},
 		},
 		) {
-			player_control(
+			icon_button(
 				"footer_devices",
 				"speaker",
 				view.device_active ? .Green : .Muted,
 				textures,
 				fx,
 				d,
+				icon_size = 18,
 			)
 			icon_element(textures, "volume-2", .Muted, 18 * d)
 			if clay.UI_WithId(clay.ID("volume_slider"))(

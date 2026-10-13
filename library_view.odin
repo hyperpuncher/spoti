@@ -1466,7 +1466,7 @@ detail_page :: proc(
 						)
 					}
 				}
-				hero_icon(
+				icon_button(
 					"hero_shuffle",
 					"shuffle",
 					!play_enabled ? .Disabled : view.shuffle ? .Green : .Muted,
@@ -1477,7 +1477,7 @@ detail_page :: proc(
 			}
 			if client.detail.source != .Liked {
 				like_disabled := library.detail_loading_visible(client) || client.like_pending
-				hero_icon(
+				icon_button(
 					"hero_like",
 					client.detail.liked ? "circle-check" : "circle-plus",
 					like_disabled ? .Disabled : client.detail.liked ? .Green : .Muted,
@@ -1487,7 +1487,7 @@ detail_page :: proc(
 				)
 			}
 			if client.detail.source == .Playlist {
-				hero_icon(
+				icon_button(
 					"hero_pin",
 					view.pinned ? "pin-filled" : "pin-off",
 					library.detail_loading_visible(client) ? .Disabled : view.pinned ? .Green : .Muted,
@@ -1497,7 +1497,7 @@ detail_page :: proc(
 				)
 			}
 			if client.detail.source != .Liked {
-				hero_icon(
+				icon_button(
 					"hero_copy_link",
 					"link",
 					library.detail_loading_visible(client) ? .Disabled : .Muted,
@@ -1506,7 +1506,7 @@ detail_page :: proc(
 					d,
 				)
 			}
-			hero_icon(
+			icon_button(
 				"spotify_link",
 				"external-link",
 				library.detail_loading_visible(client) ? .Disabled : .Muted,

@@ -15,6 +15,7 @@ Icon_Tint :: enum {
 	Green,
 	Dark,
 	Disabled,
+	Hover,
 }
 
 ICON_NAMES :: []string {
@@ -70,11 +71,14 @@ icon_tint_color :: proc(tint: Icon_Tint, dark: bool) -> (r, g, b: u8) {
 		return 245, 245, 245
 	case .Disabled:
 		return 90, 90, 90
+	case .Hover:
+		color := dark ? DARK_THEME.footer_hover : LIGHT_THEME.footer_hover
+		return u8(color.r), u8(color.g), u8(color.b)
 	}
 	return 245, 245, 245
 }
 
-ICON_TINTS :: [5]Icon_Tint{.White, .Muted, .Green, .Dark, .Disabled}
+ICON_TINTS :: [?]Icon_Tint{.White, .Muted, .Green, .Dark, .Disabled, .Hover}
 
 retint_icons :: proc(textures: ^Textures, dark: bool) {
 	for name in ICON_NAMES {
