@@ -62,6 +62,12 @@ playback owns the queue. prefer Vorbis at 320, then 160, then 96 kbps.
 AP requests share one serialized connection and cipher state. Connect and
 AP use the same persistent device identity.
 
+the last-played record stores an owned queue snapshot, its current index,
+shuffle order, and playback source. the last browsed collection is separate.
+reopening restores the queue without starting audio. rows that arrive later
+extend the restored queue when its source page is open; playback near the
+queue's end also requests more rows from that page.
+
 Dealer requests become UI events. reply only after the UI accepts a command;
 reject unsupported commands. publish actual local playback state. send state
 changes at once and position-only changes every five seconds. stop local

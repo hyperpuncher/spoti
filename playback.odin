@@ -87,6 +87,38 @@ build_play_queue :: proc(
 	for row, index in rows {append_play_item(items, row, index, fallback_cover)}
 }
 
+// Queue snapshots and live playback own separate copies of row metadata.
+clone_play_queue :: proc(items: []Play_Item) -> [dynamic]Play_Item {
+	cloned := make([dynamic]Play_Item, 0, len(items))
+	for item in items {
+		append_play_item(
+			&cloned,
+			library.Track_Row {
+				uri = item.uri,
+				artists = item.artist,
+				artist_links = item.artist_links,
+				album = item.album,
+				album_uri = item.album_uri,
+			},
+			item.order,
+			item.cover,
+		)
+	}
+	return cloned
+}
+
+app_restore_play_queue :: proc(app: ^App) {
+	played := &app.app_state.last_played
+	app.shuffle = played.shuffle
+	if played.queue_index < 0 || played.queue_index >= len(played.queue) {return}
+	if played.queue[played.queue_index].uri != played.track {return}
+	free_play_queue(&app.play_queue)
+	app.play_queue = clone_play_queue(played.queue[:])
+	app.play_index = played.queue_index
+	replace_string(&app.queue_detail, played.collection)
+	app.queue_restore_pending = played.collection != ""
+}
+
 // Builds the queue from the open detail. Album track objects carry no album
 // block, so those rows would leave the footer title unlinked; stamp them
 // from the open page while it is in scope.

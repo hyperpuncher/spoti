@@ -581,6 +581,7 @@ App :: struct {
 	play_index:             int,
 	queue_detail:           string,
 	queue_gen:              uint,
+	queue_restore_pending:  bool,
 	input:                  string,
 	input_active:           bool,
 	select_all:             bool,
@@ -641,7 +642,6 @@ App :: struct {
 	stage_sum:              [3]f64,
 	stage_max:              [3]f64,
 	stage_n:                int,
-	played:                 Last_Played,
 	restore_pending:        bool,
 	button_anims:           map[string]Button_Fx,
 	stage:                  Stage,
@@ -795,23 +795,12 @@ main :: proc() {
 	stage_n = 0
 	// Resume the last played track and reopen its collection. The footer
 	// shows it without starting playback; pressing play resumes it.
-	played = app_state.last_played
-	if len(played.track) > 0 {
-		delete(selected)
-		selected = strings.clone(played.track)
-	}
-	if len(played.title) > 0 {
-		delete(title)
-		title = strings.clone(played.title)
-	}
-	if len(played.artist) > 0 {
-		delete(artist)
-		artist = strings.clone(played.artist)
-	}
-	if len(played.cover) > 0 {
-		delete(player_cover)
-		player_cover = strings.clone(played.cover)
-	}
+	played := &app_state.last_played
+	app_restore_play_queue(&app)
+	if played.track != "" {replace_string(&selected, played.track)}
+	replace_string(&title, played.title)
+	replace_string(&artist, played.artist)
+	replace_string(&player_cover, played.cover)
 	restore_pending = len(app_state.last_collection) > 0
 	button_anims = make(map[string]Button_Fx)
 	defer {
@@ -850,7 +839,7 @@ main :: proc() {
 	finished = false
 	repeat, replay_pending, play_after_stop = false, false, false
 	fx_animating = false
-	shuffle, volume_dragging = false, false
+	volume_dragging = false
 	volume = app_state.volume
 	seek_dragging, start_paused = false, false
 	seek_ms = 0
@@ -1320,6 +1309,13 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 	} else if playback_prompt_opened {
 		playback_prompt_opened = false
 		redraw = true
+	}
+	if queue_restore_pending &&
+	   library_client.detail.ready &&
+	   !library_client.detail_loading &&
+	   queue_detail == detail_card_uri(library_client.detail) {
+		queue_gen = library_client.detail.generation
+		queue_restore_pending = false
 	}
 	// Playback can start before the last page lands; newly arrived rows
 	// extend the live queue in place when it still mirrors this page.
@@ -2523,6 +2519,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		restart_playback = true
 	}
 	if restart_playback {
+		if track_selected || hero_start {queue_restore_pending = false}
 		if !incoming_load {seek_ms = 0; start_paused = false}
 		seek_dragging = false
 	}
@@ -2675,6 +2672,18 @@ app_persist :: proc(app: ^App, frame: ^Frame) {
 			state_dirty = true
 		}
 	}
+	if restart_playback ||
+	   played_state.queue_index != play_index ||
+	   played_state.shuffle != shuffle ||
+	   played_state.collection != queue_detail ||
+	   len(played_state.queue) != len(play_queue) {
+		free_play_queue(&played_state.queue)
+		played_state.queue = clone_play_queue(play_queue[:])
+		played_state.queue_index = play_index
+		played_state.shuffle = shuffle
+		replace_string(&played_state.collection, queue_detail)
+		state_dirty = true
+	}
 	if state_dirty {
 		state_dirty = false
 		save_state(&app_state)
@@ -2701,7 +2710,14 @@ app_covers :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	// is loaded, exactly like the reference client. Walking the whole
 	// collection would burn the dev-mode quota bucket on every launch.
 	if !search_mode {load_more_near_bottom(&library_client, filter, density)}
-	if detail_needs_more(&library_client, visible) {
+	queue_needs_more :=
+		worker != nil &&
+		play_index >= 0 &&
+		queue_detail != "" &&
+		queue_detail == detail_card_uri(library_client.detail) &&
+		library_client.detail.source != .Artist &&
+		play_index + DETAIL_LOOKAHEAD >= len(play_queue)
+	if detail_needs_more(&library_client, visible) || queue_needs_more {
 		if library.more_rows(&library_client) {redraw = true}
 	}
 	ensure_covers(&library_client, &textures, display_page, player_cover, visible)

@@ -30,6 +30,10 @@ Last_Played :: struct {
 	album_uri:    string, // spotify:album:<id>
 	first_artist: string,
 	artist_uri:   string, // spotify:artist:<id>
+	queue:        [dynamic]Play_Item, // owned metadata, never audio keys or signed audio URLs
+	queue_index:  int,
+	collection:   string, // playing source, independent of the browsed page
+	shuffle:      bool,
 }
 
 State :: struct {
@@ -59,6 +63,8 @@ free_state :: proc(app_state: ^State) {
 	delete(app_state.last_played.album_uri)
 	delete(app_state.last_played.first_artist)
 	delete(app_state.last_played.artist_uri)
+	free_play_queue(&app_state.last_played.queue)
+	delete(app_state.last_played.collection)
 	delete(app_state.last_collection)
 	delete(app_state.last_name)
 	delete(app_state.connect_device)
@@ -117,14 +123,34 @@ sanitize_state :: proc(app_state: ^State) {
 	clear_unless_uri(&played.track, "spotify:track:")
 	cap_string(&played.title, 256)
 	cap_string(&played.artist, 256)
-	if !(strings.has_prefix(played.cover, "https://") && len(played.cover) <= 512) {
-		delete(played.cover)
-		played.cover = ""
-	}
+	clear_unless_cover(&played.cover)
 	cap_string(&played.album, 256)
 	clear_unless_uri(&played.album_uri, "spotify:album:")
 	cap_string(&played.first_artist, 256)
 	clear_unless_uri(&played.artist_uri, "spotify:artist:")
+	clear_unless_uri(&played.collection, "spotify:playlist:", "spotify:album:", "spotify:artist:")
+	valid_queue := played.queue_index >= 0 && played.queue_index < len(played.queue)
+	for &item in played.queue {
+		clear_unless_uri(&item.uri, "spotify:track:")
+		if item.uri == "" {valid_queue = false}
+		cap_string(&item.artist, 256)
+		cap_string(&item.album, 256)
+		clear_unless_uri(&item.album_uri, "spotify:album:")
+		clear_unless_cover(&item.cover)
+		for &link in item.artist_links {
+			cap_string(&link.name, 256)
+			clear_unless_uri(&link.uri, "spotify:artist:")
+		}
+	}
+	if valid_queue {valid_queue = played.queue[played.queue_index].uri == played.track}
+	if !valid_queue {free_play_queue(&played.queue); played.queue_index = 0}
+}
+
+// Only bounded HTTPS artwork URLs belong in saved playback metadata.
+clear_unless_cover :: proc(cover: ^string) {
+	if strings.has_prefix(cover^, "https://") && len(cover^) <= 512 {return}
+	delete(cover^)
+	cover^ = ""
 }
 
 // Blanks an owned string that outgrows its bound.
