@@ -69,7 +69,7 @@ nav_bounds_history_and_clones_captured_strings :: proc(t: ^testing.T) {
 	nav: Nav
 	defer nav_free_all(&nav)
 	for index in 0 ..< NAV_LIMIT + 4 {
-		nav_commit(&nav, nav_state(fmt.aprintf("state-%d", index)))
+		nav_commit(&nav, Nav_State{input = fmt.aprintf("state-%d", index)})
 	}
 	testing.expect_value(t, len(nav.states), NAV_LIMIT)
 	testing.expect_value(t, nav.index, NAV_LIMIT - 1)
