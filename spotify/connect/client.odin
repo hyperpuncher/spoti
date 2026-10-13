@@ -49,32 +49,21 @@ new_id :: proc() -> string {
 	return string(hex.encode(bytes[:]))
 }
 
-start :: proc(client: ^Client, device_id: string, wake: proc "c" (_: rawptr) = nil) -> bool {
+start :: proc(client: ^Client, device_id: string, wake: proc "c" (_: rawptr) = nil) -> (ok: bool) {
 	if client.worker != nil {return true}
 	if !valid_id(device_id) {return false}
 	client.device_id = strings.clone(device_id)
 	client.wake = wake
+	defer if !ok {stop(client)}
 	allocation: runtime.Allocator_Error
 	client.events, allocation = chan.create_buffered(chan.Chan(Event), 8, context.allocator)
-	if allocation != nil {delete(client.device_id); client^ = {}; return false}
+	if allocation != nil {return false}
 	client.replies, allocation = chan.create_buffered(chan.Chan(Reply), 8, context.allocator)
-	if allocation != nil {
-		chan.destroy(client.events)
-		delete(client.device_id)
-		client^ = {}
-		return false
-	}
+	if allocation != nil {return false}
 	client.states, allocation = chan.create_buffered(chan.Chan(Snapshot), 2, context.allocator)
-	if allocation != nil {
-		chan.destroy(client.events)
-		chan.destroy(client.replies)
-		delete(client.device_id)
-		client^ = {}
-		return false
-	}
+	if allocation != nil {return false}
 	client.worker = thread.create_and_start_with_data(client, run)
-	if client.worker == nil {stop(client); return false}
-	return true
+	return client.worker != nil
 }
 
 stop :: proc(client: ^Client) {

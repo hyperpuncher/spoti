@@ -24,21 +24,9 @@ resolve_context :: proc(client: ^Client, access: string, event: ^Event, reuse: r
 	// A transfer can still play its supplied track if context resolution
 	// fails. A play request without any tracks must fail.
 	if !fetched || code != 200 {return len(event.tracks) > 0}
-	wire: Request
-	if json.unmarshal(body[:], &wire.command.ctx, allocator = context.temp_allocator) !=
+	ctx: Context
+	if json.unmarshal(body[:], &ctx, allocator = context.temp_allocator) !=
 	   nil {return len(event.tracks) > 0}
-	started := false
-	at := 0
-	for page in wire.command.ctx.pages {
-		for item in page.tracks {
-			if !started {
-				started =
-					event.target_uid != "" ? item.uid == event.target_uid : event.target_uri != "" ? item.uri == event.target_uri : at == event.target_index
-				if started && len(event.tracks) > 0 {at += 1; continue}
-			}
-			if started {_ = append_uri(event, item.uri)}
-			at += 1
-		}
-	}
+	append_context(event, ctx)
 	return len(event.tracks) > 0
 }

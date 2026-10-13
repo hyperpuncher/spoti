@@ -60,8 +60,8 @@ Snapshot :: struct {
 // Fixed64 little-endian double for PlayerState.playback_speed.
 put_double :: proc(out: ^[dynamic]u8, field: u64, value: f64) {
 	ap.put_varint(out, field << 3 | 1)
-	number := transmute(u64)value
-	for i in 0 ..< 8 {append(out, u8(number >> uint(i * 8)))}
+	bytes := transmute([8]u8)u64le(transmute(u64)value)
+	append(out, ..bytes[:])
 }
 
 put_string :: proc(out: ^[dynamic]u8, field: u64, value: string) {
@@ -207,6 +207,41 @@ parse_transfer :: proc(data: []u8) -> (event: Event, ok: bool) {
 	return
 }
 
+Context :: struct {
+	uri:   string,
+	pages: []struct {
+		tracks: []struct {
+			uri, uid: string,
+		},
+	},
+}
+
+// A transfer already carries its current track and any explicit queue.
+// A play request starts empty. Both select the same context position.
+append_context :: proc(event: ^Event, ctx: Context) {
+	skip_current := len(event.tracks) > 0
+	started := false
+	at := 0
+	for page in ctx.pages {
+		for item in page.tracks {
+			if len(event.tracks) >= MAX_TRACKS {return}
+			if !started {
+				switch {
+				case event.target_uid != "":
+					started = item.uid == event.target_uid
+				case event.target_uri != "":
+					started = item.uri == event.target_uri
+				case:
+					started = at == event.target_index
+				}
+				if started && skip_current {at += 1; continue}
+			}
+			if started {_ = append_uri(event, item.uri)}
+			at += 1
+		}
+	}
+}
+
 Request :: struct {
 	message_id:        u32,
 	sent_by_device_id: string,
@@ -214,15 +249,7 @@ Request :: struct {
 		endpoint:                                              string,
 		data:                                                  string,
 		value:                                                 json.Value,
-		ctx:                                                   struct {
-			uri:   string,
-			pages: []struct {
-				tracks: []struct {
-					uri: string,
-					uid: string,
-				},
-			},
-		} `json:"context"`,
+		ctx:                                                   Context `json:"context"`,
 		options:                                               struct {
 			seek_to:          int,
 			initially_paused: bool,
@@ -252,18 +279,7 @@ parse_command :: proc(body: []u8) -> (event: Event, request: Request, ok: bool) 
 		event.target_uri = strings.clone(request.command.options.skip_to.track_uri)
 		event.target_uid = strings.clone(request.command.options.skip_to.track_uid)
 		event.target_index = max(request.command.options.skip_to.track_index, 0)
-		at := 0
-		started := false
-		for page in request.command.ctx.pages {
-			for item in page.tracks {
-				if !started {
-					started =
-						event.target_uid != "" ? item.uid == event.target_uid : event.target_uri != "" ? item.uri == event.target_uri : at == event.target_index
-				}
-				if started {_ = append_uri(&event, item.uri)}
-				at += 1
-			}
-		}
+		append_context(&event, request.command.ctx)
 		ok = len(event.tracks) > 0 || event.context_uri != ""
 	case "pause":
 		event.action, ok = .Pause, true
@@ -281,12 +297,14 @@ parse_command :: proc(body: []u8) -> (event: Event, request: Request, ok: bool) 
 	case "set_shuffling_context", "set_repeating_context", "set_repeating_track":
 		if value, valid := request.command.value.(bool); valid {
 			event.action = .Options
-			event.shuffle = value && request.command.endpoint == "set_shuffling_context"
-			event.repeat_context = value && request.command.endpoint == "set_repeating_context"
-			event.repeat_track = value && request.command.endpoint == "set_repeating_track"
-			event.set_shuffle = request.command.endpoint == "set_shuffling_context"
-			event.set_repeat_context = request.command.endpoint == "set_repeating_context"
-			event.set_repeat_track = request.command.endpoint == "set_repeating_track"
+			switch request.command.endpoint {
+			case "set_shuffling_context":
+				event.shuffle, event.set_shuffle = value, true
+			case "set_repeating_context":
+				event.repeat_context, event.set_repeat_context = value, true
+			case "set_repeating_track":
+				event.repeat_track, event.set_repeat_track = value, true
+			}
 			ok = true
 		}
 	case "set_options":

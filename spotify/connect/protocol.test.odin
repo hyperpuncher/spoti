@@ -31,6 +31,23 @@ transfer_retains_position_pause_and_queued_tracks :: proc(t: ^testing.T) {
 		testing.expect_value(t, event.tracks[0], "spotify:track:0000000000000000000001")
 		testing.expect_value(t, event.tracks[1], "spotify:track:0000000000000000000002")
 	}
+	ctx := Context {
+		pages = {
+			{
+				tracks = {
+					{uri = "spotify:track:0000000000000000000000"},
+					{uri = "spotify:track:0000000000000000000001"},
+					{uri = "spotify:track:0000000000000000000003"},
+				},
+			},
+		},
+	}
+	append_context(&event, ctx)
+	if testing.expect_value(t, len(event.tracks), 3) {
+		testing.expect_value(t, event.tracks[0], "spotify:track:0000000000000000000001")
+		testing.expect_value(t, event.tracks[1], "spotify:track:0000000000000000000002")
+		testing.expect_value(t, event.tracks[2], "spotify:track:0000000000000000000003")
+	}
 	_, broken := parse_transfer(body[:len(body) - 1])
 	testing.expect(t, !broken, "truncated transfers must fail without a partial event")
 	_, empty := parse_transfer(nil)
