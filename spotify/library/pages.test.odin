@@ -40,8 +40,13 @@ cover_selection_uses_card_and_hero_sizes :: proc(t: ^testing.T) {
 		{url = "http://invalid/image", width = 1200},
 	}
 	testing.expect(t, cover_url(images) == "https://i.scdn.co/image/card")
-	testing.expect(t, cover_url_smallest(images) == "https://i.scdn.co/image/card")
-	testing.expect(t, cover_url_largest(images) == "https://i.scdn.co/image/large")
+	testing.expect(t, cover_url(images, .Smallest) == "https://i.scdn.co/image/card")
+	testing.expect(t, cover_url(images, .Largest) == "https://i.scdn.co/image/large")
+	images = []Image {
+		{url = "https://i.scdn.co/image/unknown"},
+		{url = "https://i.scdn.co/image/small", width = 32},
+	}
+	for size in Cover_Size {testing.expect_value(t, cover_url(images, size), "https://i.scdn.co/image/small")}
 }
 
 @(test)

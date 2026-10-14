@@ -183,8 +183,8 @@ fetch_detail :: proc(
 		detail.subtitle = strings.clone(header.owner.display_name, allocator)
 		detail.owner_id = strings.clone(header.owner.id, allocator)
 		detail.collaborative = header.collaborative
-		detail.image = strings.clone(cover_url_largest(header.images), allocator)
-		detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
+		detail.image = strings.clone(cover_url(header.images, .Largest), allocator)
+		detail.image_small = strings.clone(cover_url(header.images, .Smallest), allocator)
 		detail.total = header.items.total
 	case .Album:
 		header, header_status, header_ok := fetch_header(
@@ -208,8 +208,8 @@ fetch_detail :: proc(
 		detail.subtitle = joined_artists(header.artists, allocator)
 		detail.artist_links = artist_links_from(header.artists, allocator)
 		detail.year = release_year(header.release_date, allocator)
-		detail.image = strings.clone(cover_url_largest(header.images), allocator)
-		detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
+		detail.image = strings.clone(cover_url(header.images, .Largest), allocator)
+		detail.image_small = strings.clone(cover_url(header.images, .Smallest), allocator)
 		detail.total = header.total_tracks
 	case .Artist:
 		header, header_status, header_ok := fetch_header(
@@ -228,8 +228,8 @@ fetch_detail :: proc(
 		detail.label = strings.clone("Artist", allocator)
 		detail.name = strings.clone(header.name, allocator)
 		detail.subtitle = ""
-		detail.image = strings.clone(cover_url_largest(header.images), allocator)
-		detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
+		detail.image = strings.clone(cover_url(header.images, .Largest), allocator)
+		detail.image_small = strings.clone(cover_url(header.images, .Smallest), allocator)
 	}
 	detail.id = strings.clone(id, allocator)
 	if source == .Artist {
@@ -688,7 +688,7 @@ track_row :: proc(track: Track_Ref, allocator: runtime.Allocator) -> (row: Track
 			album_uri = strings.clone(track.album.uri, allocator),
 			duration_ms = track.duration_ms,
 			image = strings.clone(cover_url(track.album.images), allocator),
-			image_small = strings.clone(cover_url_smallest(track.album.images), allocator),
+			image_small = strings.clone(cover_url(track.album.images, .Smallest), allocator),
 		},
 		true
 }

@@ -11,17 +11,10 @@ import sdl "vendor:sdl3"
 
 @(test)
 release_feed_layout_keeps_big_covers_and_bounded_rows :: proc(t: ^testing.T) {
-	memory := make([]u8, int(clay.MinMemorySize()))
-	defer delete(memory)
 	errors := 0
-	clay.Initialize(
-		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{1280, 820},
-		{handler = layout_test_error, userData = &errors},
-	)
-	defer clay.SetCurrentContext(nil)
 	density: f32 = 1
-	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	memory := layout_test_init(&density, &errors, {1280, 820})
+	defer {clay.SetCurrentContext(nil); delete(memory)}
 	client := library.Client {
 		state = .Ready,
 	}

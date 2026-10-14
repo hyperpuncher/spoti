@@ -7,17 +7,10 @@ import clay "vendor/clay"
 
 @(test)
 sign_in_uses_current_viewport_on_the_first_frame :: proc(t: ^testing.T) {
-	memory := make([]u8, int(clay.MinMemorySize()))
-	defer delete(memory)
 	errors := 0
-	clay.Initialize(
-		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{944, 542},
-		{handler = layout_test_error, userData = &errors},
-	)
-	defer clay.SetCurrentContext(nil)
 	density: f32 = 1
-	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	memory := layout_test_init(&density, &errors, {944, 542})
+	defer {clay.SetCurrentContext(nil); delete(memory)}
 	client := library.Client {
 		state = .Authorizing,
 	}

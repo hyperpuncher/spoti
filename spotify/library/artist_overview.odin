@@ -96,7 +96,7 @@ parse_artist_overview :: proc(body: []u8, detail: ^Detail) -> bool {
 		   parsed && count > 0 {row.play_count = count}
 		append(&rows, row)
 	}
-	detail.banner = strings.clone(cover_url_largest(artist.visuals.header.sources), allocator)
+	detail.banner = strings.clone(cover_url(artist.visuals.header.sources, .Largest), allocator)
 	detail.monthly_listeners = max(0, artist.stats.listeners)
 	detail.rows = rows
 	return true

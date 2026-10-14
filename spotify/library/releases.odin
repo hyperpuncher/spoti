@@ -186,7 +186,7 @@ parse_new_releases :: proc(
 				entry = {
 					name = strings.clone(album.name, allocator),
 					uri = strings.clone(album.uri, allocator),
-					image = strings.clone(cover_url_largest(album.cover_art.sources), allocator),
+					image = strings.clone(cover_url(album.cover_art.sources, .Largest), allocator),
 					subtitle = joined_artists(artists, allocator),
 					year = release_year(date, allocator),
 					total = album.tracks.total,

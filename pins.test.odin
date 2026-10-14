@@ -8,18 +8,11 @@ import sdl "vendor:sdl3"
 
 @(test)
 pin_badge_has_cover_insets_and_contrast_in_both_themes :: proc(t: ^testing.T) {
-	memory := make([]u8, int(clay.MinMemorySize()))
-	defer delete(memory)
 	errors := 0
-	clay.Initialize(
-		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{400, 400},
-		{handler = layout_test_error, userData = &errors},
-	)
-	defer clay.SetCurrentContext(nil)
-	defer apply_theme(true)
 	density: f32 = 1
-	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	memory := layout_test_init(&density, &errors, {400, 400})
+	defer {clay.SetCurrentContext(nil); delete(memory)}
+	defer apply_theme(true)
 	entry := library.Entry {
 		name  = "Playlist",
 		image = "https://i.scdn.co/image/fixture",

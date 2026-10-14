@@ -12,9 +12,8 @@ Rated_Entry :: struct {
 	recent_rank: int,
 }
 
-// Pins always lead; the mode pass runs first so a second stable pass can
-// lift them without a capturing comparator (nested procs cannot close over
-// the sort mode).
+// One stable pass orders pins, then optional play history. Equal ranks
+// keep Spotify's existing order.
 sort_library_page :: proc(page: ^library.Page, kind: library.Kind, app_state: ^State) {
 	if len(page.items) < 2 {return}
 	rated := make([]Rated_Entry, len(page.items), context.temp_allocator)
@@ -22,23 +21,16 @@ sort_library_page :: proc(page: ^library.Page, kind: library.Kind, app_state: ^S
 		rated[index] = {
 			index       = index,
 			pin_rank    = state_rank(app_state.pinned, entry.uri),
-			recent_rank = state_rank(app_state.recent, entry.uri),
+			recent_rank = app_state.sort[kind] == .Played ? state_rank(app_state.recent, entry.uri) : max(int),
 		}
 	}
-	// The default order is Spotify's own, so only played needs a pass.
-	if app_state.sort[kind] == .Played {slice.stable_sort_by(rated, less_played)}
-	slice.stable_sort_by(rated, less_pin)
-	ordered := make([]library.Entry, len(page.items), context.temp_allocator)
-	for entry, index in rated {ordered[index] = page.items[entry.index]}
-	copy(page.items[:], ordered)
-}
-
-less_pin :: proc(a, b: Rated_Entry) -> bool {
-	return a.pin_rank < b.pin_rank
-}
-
-less_played :: proc(a, b: Rated_Entry) -> bool {
-	return a.recent_rank < b.recent_rank
+	slice.stable_sort_by(rated, proc(a, b: Rated_Entry) -> bool {
+		if a.pin_rank != b.pin_rank {return a.pin_rank < b.pin_rank}
+		return a.recent_rank < b.recent_rank
+	})
+	indices := make([]int, len(rated), context.temp_allocator)
+	for entry, index in rated {indices[index] = entry.index}
+	slice.sort_from_permutation_indices(page.items[:], indices)
 }
 
 // Sorting only when a page changed keeps page merges cheap. A length check

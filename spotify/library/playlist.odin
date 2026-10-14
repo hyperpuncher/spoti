@@ -161,8 +161,8 @@ fetch_session_playlist_detail :: proc(
 	detail.owner_id, detail.subtitle =
 		strings.clone(string(owner), allocator), strings.clone(string(owner), allocator)
 	detail.collaborative = header.collaborative
-	detail.image = strings.clone(cover_url_largest(header.images), allocator)
-	detail.image_small = strings.clone(cover_url_smallest(header.images), allocator)
+	detail.image = strings.clone(cover_url(header.images, .Largest), allocator)
+	detail.image_small = strings.clone(cover_url(header.images, .Smallest), allocator)
 	detail.banner = strings.clone(header.banner, allocator)
 	return detail, 200, true
 }

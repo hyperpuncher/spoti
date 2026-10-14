@@ -4,10 +4,8 @@
 // is never re-sorted by pins or recents.
 package library
 
-import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
-import "core:mem/virtual"
 import "core:net"
 import "core:strings"
 
@@ -49,36 +47,18 @@ fetch_search :: proc(
 	return parsed, code, parsed_ok
 }
 
-build_search_page :: proc(
-	page: ^Page,
-	window: Offset_Page($T),
-	append_one: proc(items: ^[dynamic]Entry, row: T, allocator: runtime.Allocator),
-) -> bool {
-	if virtual.arena_init_growing(&page.arena) != nil {return false}
-	page.ready = true
-	allocator := virtual.arena_allocator(&page.arena)
-	page.total = window.total
-	page.has_more = false
-	page.next_offset = window.offset + len(window.items)
-	if !sane_page(page.total, len(window.items), page.next_offset) {
-		free_page(page)
-		return false
-	}
-	page.items = make([dynamic]Entry, 0, len(window.items), allocator)
-	for row in window.items {append_one(&page.items, row, allocator)}
-	return true
-}
-
 parse_search :: proc(body: []u8) -> (pages: [Kind]Page, ok: bool) {
 	decoded: Raw_Search
 	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return}
-	if !build_search_page(&pages[.Playlists], decoded.playlists, append_playlist_entry) ||
-	   !build_search_page(&pages[.Albums], decoded.albums, append_album_entry) ||
-	   !build_search_page(&pages[.Artists], decoded.artists, append_artist_entry) ||
-	   !build_search_page(&pages[.Tracks], decoded.tracks, append_track_entry) {
+	if !build_offset_page(&pages[.Playlists], decoded.playlists, append_playlist_entry) ||
+	   !build_offset_page(&pages[.Albums], decoded.albums, append_album_entry) ||
+	   !build_offset_page(&pages[.Artists], decoded.artists, append_artist_entry) ||
+	   !build_offset_page(&pages[.Tracks], decoded.tracks, append_track_entry) {
 		for &page in pages {free_page(&page)}
 		return {}, false
 	}
+	// Search keeps the returned relevance window and does not load more.
+	for &page in pages {page.has_more = false}
 	return pages, true
 }
 

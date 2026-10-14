@@ -160,54 +160,33 @@ Raw_Followed_Artists :: struct {
 	artists: Artist_Window,
 }
 
-// Prefer a roughly card-sized cover; Spotify orders images largest first.
-cover_url :: proc(images: []Image) -> string {
-	best := ""
-	best_distance := 1 << 30
-	for image in images {
-		if len(image.url) == 0 ||
-		   len(image.url) > 512 ||
-		   !strings.has_prefix(image.url, "https://") {continue}
-		width := image.width
-		if width <= 0 {width = 640}
-		distance := width > 300 ? width - 300 : 300 - width
-		if best == "" || distance < best_distance {
-			best, best_distance = image.url, distance
-		}
-	}
-	return best
+Cover_Size :: enum {
+	Card,
+	Smallest,
+	Largest,
 }
 
-// The smallest valid image is enough for the compact now-playing cover.
-cover_url_smallest :: proc(images: []Image) -> string {
+// Cover choice shares URL validation and keeps the first image on ties.
+// Missing dimensions count as 640 for cards/player, but 1 for heroes.
+cover_url :: proc(images: []Image, size: Cover_Size = .Card) -> string {
 	best := ""
-	best_width := 1 << 30
+	best_score := max(int)
 	for image in images {
-		if len(image.url) == 0 ||
+		if image.url == "" ||
 		   len(image.url) > 512 ||
 		   !strings.has_prefix(image.url, "https://") {continue}
 		width := image.width
-		if width <= 0 {width = 640}
-		if best == "" || width < best_width {
-			best, best_width = image.url, width
+		if width <= 0 {width = size == .Largest ? 1 : 640}
+		score := abs(width - 300)
+		switch size {
+		case .Card:
+		case .Smallest:
+			score = width
+		case .Largest:
+			score = -width
 		}
-	}
-	return best
-}
-
-// The largest valid image is used for detail heroes. Spotify orders images
-// widest first, but choose by dimensions so malformed ordering is harmless.
-cover_url_largest :: proc(images: []Image) -> string {
-	best := ""
-	best_width := -1
-	for image in images {
-		if len(image.url) == 0 ||
-		   len(image.url) > 512 ||
-		   !strings.has_prefix(image.url, "https://") {continue}
-		width := image.width
-		if width <= 0 {width = 1}
-		if best == "" || width > best_width {
-			best, best_width = image.url, width
+		if best == "" || score < best_score {
+			best, best_score = image.url, score
 		}
 	}
 	return best
@@ -402,53 +381,61 @@ fetch_index :: proc(
 	return page, status, ok
 }
 
-parse_index :: proc(body: []u8, kind: Kind) -> (page: Page, ok: bool) {
-	arena_error := virtual.arena_init_growing(&page.arena)
-	if arena_error != nil {return {}, false}
+build_offset_page :: proc(
+	page: ^Page,
+	window: Offset_Page($T),
+	append_one: proc(items: ^[dynamic]Entry, row: T, allocator: runtime.Allocator),
+) -> bool {
+	if virtual.arena_init_growing(&page.arena) != nil {return false}
 	page.ready = true
 	allocator := virtual.arena_allocator(&page.arena)
+	page.total = window.total
+	page.has_more = window.next != ""
+	page.next_offset = window.offset + len(window.items)
+	if !sane_page(page.total, len(window.items), page.next_offset) {
+		free_page(page)
+		return false
+	}
+	page.items = make([dynamic]Entry, 0, len(window.items), allocator)
+	for row in window.items {append_one(&page.items, row, allocator)}
+	return true
+}
+
+parse_offset_page :: proc(
+	body: []u8,
+	page: ^Page,
+	$T: typeid,
+	append_one: proc(items: ^[dynamic]Entry, row: T, allocator: runtime.Allocator),
+) -> bool {
+	decoded: Offset_Page(T)
+	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return false}
+	return build_offset_page(page, decoded, append_one)
+}
+
+parse_index :: proc(body: []u8, kind: Kind) -> (page: Page, ok: bool) {
 	switch kind {
 	case .Playlists:
-		ok = parse_playlists(body, &page, allocator)
+		ok = parse_offset_page(body, &page, Playlist_Ref, append_playlist_entry)
 	case .Albums:
-		ok = parse_albums(body, &page, allocator)
-	case .Artists:
-		ok = parse_artists(body, &page, allocator)
+		ok = parse_offset_page(body, &page, Saved_Album, append_saved_album)
 	case .Tracks:
-		ok = parse_tracks(body, &page, allocator)
+		ok = parse_offset_page(body, &page, Saved_Track, append_saved_track)
+	case .Artists:
+		if virtual.arena_init_growing(&page.arena) != nil {return}
+		page.ready = true
+		ok = parse_artists(body, &page, virtual.arena_allocator(&page.arena))
 	}
-	if !ok {
-		free_page(&page)
-		return page, ok
-	}
-	// Every entry on a library tab is in the account library by definition,
-	// so the hero heart needs no /me/library/contains round trip.
+	if !ok {free_page(&page); return}
 	for &entry in page.items {entry.saved = true}
-	return page, ok
+	return
 }
 
-parse_playlists :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> bool {
-	decoded: Offset_Page(Playlist_Ref)
-	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return false}
-	page.total = decoded.total
-	page.has_more = len(decoded.next) > 0
-	page.next_offset = decoded.offset + len(decoded.items)
-	if !sane_page(page.total, len(decoded.items), page.next_offset) {return false}
-	page.items = make([dynamic]Entry, 0, len(decoded.items), allocator)
-	for row in decoded.items {append_playlist_entry(&page.items, row, allocator)}
-	return true
-}
-
-parse_albums :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> bool {
-	decoded: Offset_Page(Saved_Album)
-	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return false}
-	page.total = decoded.total
-	page.has_more = len(decoded.next) > 0
-	page.next_offset = decoded.offset + len(decoded.items)
-	if !sane_page(page.total, len(decoded.items), page.next_offset) {return false}
-	page.items = make([dynamic]Entry, 0, len(decoded.items), allocator)
-	for row in decoded.items {append_saved_album(&page.items, row, allocator)}
-	return true
+append_saved_track :: proc(
+	items: ^[dynamic]Entry,
+	row: Saved_Track,
+	allocator: runtime.Allocator,
+) {
+	append_track_entry(items, row.track, allocator)
 }
 
 parse_artists :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> bool {
@@ -462,19 +449,6 @@ parse_artists :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> 
 	if !sane_page(page.total, len(window.items), page.next_offset) {return false}
 	page.items = make([dynamic]Entry, 0, len(window.items), allocator)
 	for row in window.items {append_artist_entry(&page.items, row, allocator)}
-	return true
-}
-
-// Saved songs are shown as a track list, not as cards.
-parse_tracks :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> bool {
-	decoded: Offset_Page(Saved_Track)
-	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return false}
-	page.total = decoded.total
-	page.has_more = len(decoded.next) > 0
-	page.next_offset = decoded.offset + len(decoded.items)
-	if !sane_page(page.total, len(decoded.items), page.next_offset) {return false}
-	page.items = make([dynamic]Entry, 0, len(decoded.items), allocator)
-	for row in decoded.items {append_track_entry(&page.items, row.track, allocator)}
 	return true
 }
 

@@ -22,21 +22,24 @@ layout_test_error :: proc "c" (error: clay.ErrorData) {
 	counter^ += 1
 }
 
+// Caller-owned pointers stay valid until the test releases Clay's arena.
+layout_test_init :: proc(density: ^f32, errors: ^int, dimensions: clay.Dimensions) -> []u8 {
+	memory := make([]u8, int(clay.MinMemorySize()))
+	clay.Initialize(
+		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), raw_data(memory)),
+		dimensions,
+		{handler = layout_test_error, userData = errors},
+	)
+	clay.SetMeasureTextFunction(layout_test_measure, density)
+	return memory
+}
+
 @(test)
 large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
-	memory := make([]u8, int(clay.MinMemorySize()))
-	defer delete(memory)
 	errors := 0
-	clay.Initialize(
-		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{1280, 820},
-		{handler = layout_test_error, userData = &errors},
-	)
-	// Clay holds the context process-global; a deleted arena must never
-	// dangle into the next test's MinMemorySize.
-	defer clay.SetCurrentContext(nil)
 	density: f32 = 1
-	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	memory := layout_test_init(&density, &errors, {1280, 820})
+	defer {clay.SetCurrentContext(nil); delete(memory)}
 
 	client: library.Client
 	client.pages[.Albums].items = make([dynamic]library.Entry, 3000)
@@ -296,17 +299,10 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 
 @(test)
 wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
-	memory := make([]u8, int(clay.MinMemorySize()))
-	defer delete(memory)
 	errors := 0
-	clay.Initialize(
-		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{2500, 1424},
-		{handler = layout_test_error, userData = &errors},
-	)
-	defer clay.SetCurrentContext(nil)
 	density: f32 = 1
-	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	memory := layout_test_init(&density, &errors, {2500, 1424})
+	defer {clay.SetCurrentContext(nil); delete(memory)}
 
 	client: library.Client
 	client.pages[.Albums].items = make([dynamic]library.Entry, 3000)
@@ -327,7 +323,7 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 	client.detail.albums.items = make([dynamic]library.Entry, 2000)
 	defer delete(client.detail.albums.items)
 	for &entry in client.detail.albums.items {
-		entry.name = "Album title"
+		entry.name = "Release with a fairly long name"
 		entry.subtitle = "2026"
 	}
 	client.detail.albums.total = 2000
@@ -353,50 +349,74 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 	fx := Button_Fx_Ctx {
 		anims = &anims,
 	}
-	for _ in 0 ..< 2 {
-		clay.UpdateScrollContainers(false, {}, 0)
-		_, _ = layout(
-			{button = "pause"},
-			&client,
-			&app_state,
-			.Albums,
-			&textures,
-			&fx,
-			SIDEBAR_MAX,
-			2500,
-			1424,
-			26,
-			0,
-			1,
-			nil,
-		)
+	for viewport in ([]clay.Dimensions{{2500, 1424}, {1881, 1069}}) {
+		density = viewport.width == 1881 ? 1.2 : 1
+		clay.ResetMeasureTextCache()
+		for _ in 0 ..< 3 {
+			clay.UpdateScrollContainers(false, {}, 0)
+			_, _ = layout(
+				{button = "pause"},
+				&client,
+				&app_state,
+				.Albums,
+				&textures,
+				&fx,
+				SIDEBAR_MAX,
+				viewport.width,
+				viewport.height,
+				26 * density,
+				0,
+				density,
+				nil,
+			)
+		}
+		for fraction in ([]f32{0, 0.5, 1}) {
+			clay.UpdateScrollContainers(false, {}, 0)
+			scroll := clay.GetScrollContainerData(clay.ID("detail_rows"))
+			scroll.scrollPosition.y =
+				fraction *
+				min(0, scroll.scrollContainerDimensions.height - scroll.contentDimensions.height)
+			_, visible := layout(
+				{button = "pause"},
+				&client,
+				&app_state,
+				.Albums,
+				&textures,
+				&fx,
+				SIDEBAR_MAX,
+				viewport.width,
+				viewport.height,
+				26 * density,
+				0,
+				density,
+				nil,
+			)
+			rows := clay.GetElementData(clay.ID("detail_rows")).boundingBox
+			edge := rows.x + rows.width
+			testing.expect(t, abs(edge - (viewport.width - SCROLLBAR_OUTSET * density)) < 1)
+			right: f32
+			for index in visible.releases.first ..< visible.releases.last {
+				card := clay.GetElementData(clay.ID("release_card", u32(index)))
+				testing.expect(t, card.found)
+				testing.expect(t, card.boundingBox.x >= rows.x + 20 * density - 1)
+				right = max(right, card.boundingBox.x + card.boundingBox.width)
+			}
+			if right > 0 {
+				inset := edge - right
+				testing.expect(t, inset >= 20 * density - 1)
+				// Wide panes can cap card widths; the narrower first frame fills a row.
+				if viewport.width == 1881 && fraction == 0 {
+					testing.expect(t, inset <= (20 + SCROLLBAR_OUTSET) * density + 1)
+				}
+			}
+			// Clay prunes its 100-entry scroll container array each frame, so a
+			// single frame may hold at most that many clips. Off-screen sections
+			// must render no cards instead of a full viewport each.
+			testing.expect_value(t, errors, 0)
+		}
 	}
-	for fraction in ([]f32{0, 0.5, 1}) {
-		clay.UpdateScrollContainers(false, {}, 0)
-		scroll := clay.GetScrollContainerData(clay.ID("detail_rows"))
-		scroll.scrollPosition.y =
-			fraction *
-			min(0, scroll.scrollContainerDimensions.height - scroll.contentDimensions.height)
-		_, _ = layout(
-			{button = "pause"},
-			&client,
-			&app_state,
-			.Albums,
-			&textures,
-			&fx,
-			SIDEBAR_MAX,
-			2500,
-			1424,
-			26,
-			0,
-			1,
-			nil,
-		)
-		// Clay prunes its 100-entry scroll container array each frame, so a
-		// single frame may hold at most that many clips. Off-screen sections
-		// must render no cards instead of a full viewport each.
-		testing.expect_value(t, errors, 0)
-	}
+	density = 1
+	clay.ResetMeasureTextCache()
 	client.detail.source = .Playlist
 	client.detail.rows[0].album = "Album title"
 	client.detail.rows[0].album_uri = "spotify:album:fixture"
@@ -511,17 +531,10 @@ autoscroll_delta_deadzone_and_direction :: proc(t: ^testing.T) {
 
 @(test)
 wheel_target_glides_to_rest :: proc(t: ^testing.T) {
-	memory := make([]u8, int(clay.MinMemorySize()))
-	defer delete(memory)
 	errors := 0
-	clay.Initialize(
-		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{1280, 820},
-		{handler = layout_test_error, userData = &errors},
-	)
-	defer clay.SetCurrentContext(nil)
 	density: f32 = 1
-	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	memory := layout_test_init(&density, &errors, {1280, 820})
+	defer {clay.SetCurrentContext(nil); delete(memory)}
 	client: library.Client
 	client.detail.ready = true
 	client.detail.source = .Playlist
@@ -591,17 +604,10 @@ wheel_target_glides_to_rest :: proc(t: ^testing.T) {
 
 @(test)
 button_press_scales_icon_and_release_springs_back :: proc(t: ^testing.T) {
-	memory := make([]u8, int(clay.MinMemorySize()))
-	defer delete(memory)
 	errors := 0
-	clay.Initialize(
-		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{1280, 820},
-		{handler = layout_test_error, userData = &errors},
-	)
-	defer clay.SetCurrentContext(nil)
 	density: f32 = 1
-	clay.SetMeasureTextFunction(layout_test_measure, &density)
+	memory := layout_test_init(&density, &errors, {1280, 820})
+	defer {clay.SetCurrentContext(nil); delete(memory)}
 	anims := make(map[string]Button_Fx)
 	defer delete(anims)
 	fx := Button_Fx_Ctx {
@@ -656,119 +662,6 @@ fx_test_layout :: proc(fx: ^Button_Fx_Ctx, d: f32) {
 		0,
 		d,
 		nil,
-	)
-}
-
-@(test)
-apply_theme_switches_palette_and_restores_dark :: proc(t: ^testing.T) {
-	testing.expect(t, LIGHT_THEME.bg != DARK_THEME.bg, "themes must differ")
-	apply_theme(false)
-	testing.expect(t, BG == LIGHT_THEME.bg, "light theme must apply")
-	testing.expect(t, WHITE == LIGHT_THEME.text, "text follows the theme")
-	apply_theme(true)
-	testing.expect(t, BG == DARK_THEME.bg, "dark theme must restore")
-	testing.expect(t, WHITE == DARK_THEME.text, "other tests render dark")
-}
-
-@(test)
-artist_discography_cards_stay_inside_their_padding :: proc(t: ^testing.T) {
-	memory := make([]u8, int(clay.MinMemorySize()))
-	defer delete(memory)
-	errors := 0
-	clay.Initialize(
-		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{1280, 820},
-		{handler = layout_test_error, userData = &errors},
-	)
-	defer clay.SetCurrentContext(nil)
-	density: f32 = 1
-	clay.SetMeasureTextFunction(layout_test_measure, &density)
-
-	client: library.Client
-	client.detail = library.Detail {
-		ready  = true,
-		source = .Artist,
-		id     = "artist",
-		name   = "Artist",
-	}
-	client.detail.albums.items = make([dynamic]library.Entry, 58)
-	defer delete(client.detail.albums.items)
-	for &release in client.detail.albums.items {
-		release.name = "Release with a fairly long name"
-		release.subtitle = "2026"
-	}
-	client.detail.albums.total = 58
-	textures := Textures {
-		by_key = make(map[u64]^sdl.Texture),
-	}
-	defer {
-		delete(textures.by_key)
-		delete(textures.requested)
-	}
-	app_state: State
-	anims := make(map[string]Button_Fx)
-	defer delete(anims)
-	fx := Button_Fx_Ctx {
-		anims = &anims,
-	}
-	density = 1.2
-	clay.SetLayoutDimensions({1881, 1069})
-	// Three settles: the first frame still spans the scrollbar outset.
-	for _ in 0 ..< 3 {
-		clay.UpdateScrollContainers(false, {}, 0)
-		_, _ = layout(
-			{button = "pause"},
-			&client,
-			&app_state,
-			.Albums,
-			&textures,
-			&fx,
-			SIDEBAR_MAX,
-			1881,
-			1069,
-			26 * 1.2,
-			0,
-			1.2,
-			nil,
-		)
-	}
-	_, visible := layout(
-		{button = "pause"},
-		&client,
-		&app_state,
-		.Albums,
-		&textures,
-		&fx,
-		SIDEBAR_MAX,
-		1881,
-		1069,
-		26 * 1.2,
-		0,
-		1.2,
-		nil,
-	)
-	testing.expect_value(t, errors, 0)
-	rows := clay.GetElementData(clay.ID("detail_rows"))
-	if !testing.expect(t, rows.found) {return}
-	edge := rows.boundingBox.x + rows.boundingBox.width
-	// The detail root reserves the scrollbar outset, so the grid must end
-	// before it instead of stretching underneath the thumb.
-	testing.expect(
-		t,
-		math.abs(edge - (1881 - SCROLLBAR_OUTSET * 1.2)) < 1,
-		"the discography must respect the scrollbar outset",
-	)
-	right := f32(0)
-	for index in visible.releases.first ..< visible.releases.last {
-		card := clay.GetElementData(clay.ID("release_card", u32(index)))
-		if !testing.expect(t, card.found) {continue}
-		right = max(right, card.boundingBox.x + card.boundingBox.width)
-	}
-	inset := edge - right
-	testing.expect(
-		t,
-		inset >= 20 * 1.2 - 1 && inset <= (20 + SCROLLBAR_OUTSET) * 1.2 + 1,
-		"the last release card must keep the page side padding",
 	)
 }
 

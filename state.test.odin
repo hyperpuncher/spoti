@@ -5,13 +5,17 @@ import "core:testing"
 import library "spotify/library"
 
 @(test)
-state_round_trip_preserves_order_and_clamps_input :: proc(t: ^testing.T) {
+state_round_trip_preserves_preferences_and_order :: proc(t: ^testing.T) {
 	loaded := parse_state(
-		`{"sidebar_width":99999,"tab":"Artists","pinned":["spotify:playlist:a","spotify:playlist:b"],"recent":["spotify:playlist:c"]}`,
+		`{"sidebar_width":99999,"volume":0.8,"tab":"Artists","sort":{"Albums":"Played","Playlists":"Default","Artists":"Played"},"pinned":["spotify:playlist:a","spotify:playlist:b"],"recent":["spotify:playlist:c"]}`,
 	)
 	defer free_state(&loaded)
 	testing.expect_value(t, loaded.sidebar_width, f32(SIDEBAR_MAX))
+	testing.expect_value(t, loaded.volume, f32(0.8))
 	testing.expect_value(t, loaded.tab, library.Kind.Artists)
+	testing.expect_value(t, loaded.sort[.Albums], Sort.Played)
+	testing.expect_value(t, loaded.sort[.Playlists], Sort.Default)
+	testing.expect_value(t, loaded.sort[.Artists], Sort.Played)
 	testing.expect_value(t, len(loaded.pinned), 2)
 	testing.expect_value(t, loaded.pinned[0], "spotify:playlist:a")
 	testing.expect_value(t, loaded.pinned[1], "spotify:playlist:b")
@@ -22,64 +26,26 @@ state_round_trip_preserves_order_and_clamps_input :: proc(t: ^testing.T) {
 	decoded := parse_state(encoded)
 	defer free_state(&decoded)
 	testing.expect_value(t, decoded.sidebar_width, loaded.sidebar_width)
+	testing.expect_value(t, decoded.volume, loaded.volume)
 	testing.expect_value(t, decoded.tab, loaded.tab)
+	testing.expect_value(t, decoded.sort, loaded.sort)
 	testing.expect(t, slice.equal(decoded.pinned[:], loaded.pinned[:]))
 	testing.expect(t, slice.equal(decoded.recent[:], loaded.recent[:]))
 
-	// A corrupt file must still open the app with defaults.
-	fallback := parse_state(`{"sidebar_width":"abc","tab":"unexpected"}`)
-	defer free_state(&fallback)
-	testing.expect_value(t, fallback.sidebar_width, DEFAULT_SIDEBAR_WIDTH)
-	testing.expect_value(t, fallback.tab, library.Kind.Playlists)
-}
-
-@(test)
-state_sorts_default_then_round_trips :: proc(t: ^testing.T) {
-	fresh := parse_state("{}")
-	defer free_state(&fresh)
-	testing.expect_value(t, fresh.sort[.Albums], Sort.Default)
-	testing.expect_value(t, fresh.sort[.Playlists], Sort.Default)
-	testing.expect_value(t, fresh.sort[.Artists], Sort.Default)
-
-	loaded := parse_state(`{"sort":{"Albums":"Played","Playlists":"Default","Artists":"Played"}}`)
-	defer free_state(&loaded)
-	testing.expect_value(t, loaded.sort[.Albums], Sort.Played)
-	testing.expect_value(t, loaded.sort[.Playlists], Sort.Default)
-	testing.expect_value(t, loaded.sort[.Artists], Sort.Played)
-
-	encoded := format_state(&loaded)
-	defer delete(encoded)
-	decoded := parse_state(encoded)
-	defer free_state(&decoded)
-	testing.expect_value(t, decoded.sort[.Albums], Sort.Played)
-	testing.expect_value(t, decoded.sort[.Playlists], Sort.Default)
-	testing.expect_value(t, decoded.sort[.Artists], Sort.Played)
-
-	// A retired name from an older file falls back to the default.
-	retired := parse_state(`{"sort":{"Albums":"Added"}}`)
-	defer free_state(&retired)
-	testing.expect_value(t, retired.sort[.Albums], Sort.Default)
-}
-
-@(test)
-state_volume_round_trips_and_clamps :: proc(t: ^testing.T) {
-	fresh := parse_state("{}")
-	defer free_state(&fresh)
-	testing.expect_value(t, fresh.volume, DEFAULT_VOLUME)
-
-	loaded := parse_state(`{"volume":0.8}`)
-	defer free_state(&loaded)
-	testing.expect_value(t, loaded.volume, f32(0.8))
-
-	clamped := parse_state(`{"volume":7}`)
-	defer free_state(&clamped)
-	testing.expect_value(t, clamped.volume, f32(1))
-
-	encoded := format_state(&loaded)
-	defer delete(encoded)
-	decoded := parse_state(encoded)
-	defer free_state(&decoded)
-	testing.expect_value(t, decoded.volume, f32(0.8))
+	// Missing, corrupt, and retired values all use the same defaults.
+	for input in ([]string{"{}", `{"sidebar_width":"abc","tab":"unexpected"}`, `{"sort":{"Albums":"Added"}}`}) {
+		fallback := parse_state(input)
+		defer free_state(&fallback)
+		testing.expect_value(t, fallback.sidebar_width, DEFAULT_SIDEBAR_WIDTH)
+		testing.expect_value(t, fallback.volume, DEFAULT_VOLUME)
+		testing.expect_value(t, fallback.tab, library.Kind.Playlists)
+		testing.expect_value(t, fallback.sort, default_state().sort)
+	}
+	for value, index in ([]int{-7, 7}) {
+		clamped := parse_state(index == 0 ? `{"volume":-7}` : `{"volume":7}`)
+		defer free_state(&clamped)
+		testing.expect_value(t, clamped.volume, value < 0 ? f32(0) : f32(1))
+	}
 }
 
 @(test)
