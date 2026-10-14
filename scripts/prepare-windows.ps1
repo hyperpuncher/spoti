@@ -3,6 +3,20 @@ $PSNativeCommandUseErrorActionPreference = $true
 
 # Thin libvorbisfile ABI bridge; all network and playback control stays in Odin.
 # Uses the compiler and SDK already installed on the runner.
+# SDL's official MSVC dev bundles. Pinned; vcpkg only supplies the ports
+# with no upstream Windows bundle (fontconfig, curl, vorbis, webp).
+$deps = @{
+	'SDL3-3.4.18'     = 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-devel-3.4.18-VC.zip'
+	'SDL3_ttf-3.2.2' = 'https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-devel-3.2.2-VC.zip'
+}
+New-Item -ItemType Directory -Force build/deps | Out-Null
+foreach ($dir in $deps.Keys) {
+	if (Test-Path "build/deps/$dir") { continue }
+	$zip = Join-Path $env:TEMP "spoti-$dir.zip"
+	curl.exe -sSL --retry 3 -o $zip $deps[$dir]
+	tar -xf $zip -C build/deps
+}
+
 $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
 $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
 $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath

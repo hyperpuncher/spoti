@@ -95,15 +95,17 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           winget install --id odin-lang.Odin --exact --silent --accept-package-agreements --accept-source-agreements
           winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements
-          vcpkg install --triplet x64-windows sdl3 sdl3-ttf[harfbuzz] fontconfig curl[websockets] libvorbis libwebp
+          vcpkg install --triplet x64-windows fontconfig curl[websockets] libvorbis libwebp
           $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
           "$env:LOCALAPPDATA/Microsoft/WinGet/Links", "$root/bin" >> $env:GITHUB_PATH
-          "SPOTI_LINKER_FLAGS=/LIBPATH:$root/lib" >> $env:GITHUB_ENV
+          "SPOTI_LINKER_FLAGS=/LIBPATH:$PWD/build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:$PWD/build/deps/SDL3_ttf-3.2.2/lib/x64 /LIBPATH:$root/lib" >> $env:GITHUB_ENV
           "FONTCONFIG_FILE=$root/etc/fonts/fonts.conf" >> $env:GITHUB_ENV
           "FONTCONFIG_PATH=$root/etc/fonts" >> $env:GITHUB_ENV
       - run: just release
       - name: archive
         run: |
+          Copy-Item build/deps/SDL3-3.4.18/lib/x64/SDL3.dll build/
+          Copy-Item build/deps/SDL3_ttf-3.2.2/lib/x64/SDL3_ttf.dll build/
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" build/
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/etc/fonts" build/fontconfig -Recurse
           tar --zstd -cf "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst" build/spoti.exe build/*.dll build/fontconfig assets/icons assets/fonts

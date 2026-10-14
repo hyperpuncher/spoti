@@ -27,10 +27,12 @@ Homebrew curl because the system library does not provide this API.
 macOS also needs the Xcode command line tools.
 
 on Windows, install Odin and `just` with winget and the C libraries with
-vcpkg: `sdl3`, `sdl3-ttf[harfbuzz]`, `fontconfig`, `curl[websockets]`,
-`libvorbis`, `libwebp` for `x64-windows`. `just` compiles the small Vorbis
-bridge with the installed Visual Studio tools via
-`scripts/prepare-windows.ps1`; no MSYS2 is needed.
+vcpkg: `fontconfig`, `curl[websockets]`, `libvorbis`, `libwebp` for
+`x64-windows`. SDL3 and SDL3_ttf come from SDL's official pinned `-VC`
+dev bundles, fetched automatically by `scripts/prepare-windows.ps1`
+alongside the small Vorbis bridge compile; no MSYS2 is needed. point
+`FONTCONFIG_FILE` and `FONTCONFIG_PATH` at vcpkg's font configuration,
+and extend `SPOTI_LINKER_FLAGS` with `/LIBPATH:<vcpkg>/installed/x64-windows/lib`.
 
 ## build and check
 

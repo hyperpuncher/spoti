@@ -1,8 +1,10 @@
 set windows-shell := ["pwsh", "-NoLogo", "-NoProfile", "-Command"]
 
 vet_flags := "-vet -vet-cast -vet-style -vet-semicolon -vet-tabs"
-# CI supplies its native library paths. macOS uses Homebrew curl for WebSockets.
-linker_flags := env_var_or_default("SPOTI_LINKER_FLAGS", if os() == "macos" { "-L$(brew --prefix curl)/lib -L$(brew --prefix)/lib" } else { "" })
+# Native library paths. macOS uses Homebrew curl for WebSockets; Windows
+# links SDL's dev bundles from build/deps plus the vcpkg libraries, whose
+# install root varies per machine and arrives via SPOTI_LINKER_FLAGS.
+linker_flags := env_var_or_default("SPOTI_LINKER_FLAGS", if os() == "macos" { "-L$(brew --prefix curl)/lib -L$(brew --prefix)/lib" } else if os() == "windows" { "/LIBPATH:build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:build/deps/SDL3_ttf-3.2.2/lib/x64" } else { "" })
 curl_flags := if linker_flags == "" { "" } else { '-extra-linker-flags:"' + linker_flags + '"' }
 binary := if os() == "windows" { "build/spoti.exe" } else { "build/spoti" }
 project_packages := "main,ap,artwork,audio,connect,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui,fontconfig"
