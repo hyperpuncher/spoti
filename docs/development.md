@@ -71,8 +71,12 @@ checks require a Windows SDK. verify native builds on their target OS.
 ## CI
 
 GitHub Actions runs three native builds: Ubuntu 26.04 x64, macOS arm64, and
-Windows x64. the Linux job runs `just check` and `just test` on every push and pull request. release builds and artifact
-uploads run only on manual dispatch; macOS and Windows wait for Linux. pull requests run only the
+Windows x64. Linux and macOS pin the same Odin release tarball so the
+compiler never drifts between platforms. Windows caches vcpkg binaries
+between runs; the first build is slow, later ones reuse them.
+the Linux job runs `just check` and `just test` on every push and pull request. release builds run only on
+manual dispatch; macOS and Windows wait for Linux. each build archives its
+binary, icons, and fonts into a `.tar.zst` test artifact. pull requests run only the
 check job; the three builds run on pushes to `main` and manual dispatches.
 actions use major-version tags. download the artifact from a successful run;
 no Spotify credentials are needed. the Windows artifact bundles its DLLs and a fontconfig

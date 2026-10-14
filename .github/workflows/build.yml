@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: build-${{ github.ref }}
@@ -39,19 +40,19 @@ jobs:
       - name: build
         if: github.event_name == 'workflow_dispatch'
         run: just release
+      - name: archive
+        if: github.event_name == 'workflow_dispatch'
+        run: tar --zstd -cf "build/spoti-linux-x64-${GITHUB_SHA:0:12}.tar.zst" build/spoti assets/icons assets/fonts
       - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch'
         with:
-          name: spoti-linux-x64
-          path: |
-            build/spoti
-            assets/icons/*.png
-            assets/fonts/
+          path: build/spoti-linux-x64-*.tar.zst
+          archive: false
           if-no-files-found: error
 
   macos:
-    if: github.event_name == 'workflow_dispatch'
     needs: linux
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -59,52 +60,55 @@ jobs:
         with:
           persist-credentials: false
       - name: install dependencies
-        run: brew install odin just pkg-config sdl3 sdl3_ttf fontconfig curl libvorbis webp
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          brew install just pkg-config sdl3 sdl3_ttf fontconfig curl libvorbis webp
+          mkdir -p "$RUNNER_TEMP/odin"
+          gh release download --repo odin-lang/Odin --pattern 'odin-macos-arm64-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
+          tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
+          "$RUNNER_TEMP/odin/vendor/stb/src/build_stb.sh"
+          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
       - run: just release
+      - name: archive
+        run: tar --zstd -cf "build/spoti-macos-arm64-${GITHUB_SHA:0:12}.tar.zst" build/spoti assets/icons assets/fonts
       - uses: actions/upload-artifact@v7
         with:
-          name: spoti-macos-arm64
-          path: |
-            build/spoti
-            assets/icons/*.png
-            assets/fonts/
+          path: build/spoti-macos-arm64-*.tar.zst
+          archive: false
           if-no-files-found: error
 
   windows:
-    if: github.event_name == 'workflow_dispatch'
     needs: linux
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: install dependencies
         run: |
+          $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          Install-Module Microsoft.WinGet.Client -Force -Repository PSGallery
-          Repair-WinGetPackageManager -AllUsers
-          winget install --id odin-lang.Odin --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-          winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-          "$env:LOCALAPPDATA/Microsoft/WinGet/Links" >> $env:GITHUB_PATH
+          winget install --id odin-lang.Odin --exact --silent --accept-package-agreements --accept-source-agreements
+          winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements
           vcpkg install --triplet x64-windows sdl3 sdl3-ttf[harfbuzz] fontconfig curl[websockets] libvorbis libwebp
           $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
-          "$root/bin" >> $env:GITHUB_PATH
+          "$env:LOCALAPPDATA/Microsoft/WinGet/Links", "$root/bin" >> $env:GITHUB_PATH
           "SPOTI_LINKER_FLAGS=/LIBPATH:$root/lib" >> $env:GITHUB_ENV
           "FONTCONFIG_FILE=$root/etc/fonts/fonts.conf" >> $env:GITHUB_ENV
           "FONTCONFIG_PATH=$root/etc/fonts" >> $env:GITHUB_ENV
       - run: just release
-      - name: bundle runtime libraries
+      - name: archive
         run: |
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" build/
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/etc/fonts" build/fontconfig -Recurse
+          tar --zstd -cf "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst" build/spoti.exe build/*.dll build/fontconfig assets/icons assets/fonts
       - uses: actions/upload-artifact@v7
         with:
-          name: spoti-windows-x64
-          path: |
-            build/spoti.exe
-            build/*.dll
-            build/fontconfig/
-            assets/icons/*.png
-            assets/fonts/
+          path: build/spoti-windows-x64-*.tar.zst
+          archive: false
           if-no-files-found: error
