@@ -8,6 +8,7 @@ import track "../track"
 import "core:encoding/base64"
 import "core:encoding/json"
 import "core:fmt"
+import "core:strconv"
 import "core:strings"
 import "core:time"
 
@@ -49,12 +50,23 @@ free_event :: proc(event: Event) {
 }
 
 Snapshot :: struct {
-	uri:                                   string,
+	uri, context_uri:                      string,
+	tracks:                                [dynamic]string,
+	index:                                 int,
+	queue_revision:                        u64,
 	position, duration:                    int,
 	active:                                bool,
 	playing, paused, buffering:            bool,
 	volume:                                f32,
 	shuffle, repeat_context, repeat_track: bool,
+}
+
+free_snapshot :: proc(snapshot: ^Snapshot) {
+	delete(snapshot.uri)
+	delete(snapshot.context_uri)
+	for uri in snapshot.tracks {delete(uri)}
+	delete(snapshot.tracks)
+	snapshot^ = {}
 }
 
 // Fixed64 little-endian double for PlayerState.playback_speed.
@@ -77,10 +89,9 @@ encode_state :: proc(
 ) -> [dynamic]u8 {
 	capabilities := make([dynamic]u8)
 	defer delete(capabilities)
-	for field in ([]u64{2, 5, 7, 10, 15, 16, 19, 20, 22, 25}) {ap.put_number(&capabilities, field, 1)}
+	for field in ([]u64{2, 5, 7, 10, 15, 16, 19, 20, 22, 23, 25}) {ap.put_number(&capabilities, field, 1)}
 	ap.put_number(&capabilities, 8, 100)
 	put_string(&capabilities, 9, "audio/track")
-	// No gzip pushes are advertised until the receiver can decode them.
 	ap.put_number(&capabilities, 30, 4) // VERY_HIGH
 	info := make([dynamic]u8)
 	defer delete(info)
@@ -111,12 +122,30 @@ encode_state :: proc(
 	ap.put_number(&player, 15, 1)
 	ap.put_bytes(&player, 16, options[:])
 	put_string(&player, 23, session_id)
+	if snapshot.context_uri != "" {put_string(&player, 2, snapshot.context_uri)}
 	if snapshot.uri != "" {
 		provided := make([dynamic]u8)
 		defer delete(provided)
 		put_string(&provided, 1, snapshot.uri)
 		put_string(&provided, 6, "context")
 		ap.put_bytes(&player, 7, provided[:])
+	}
+	if len(snapshot.tracks) > 0 {
+		index := clamp(snapshot.index, 0, len(snapshot.tracks) - 1)
+		context_index := make([dynamic]u8)
+		defer delete(context_index)
+		ap.put_number(&context_index, 2, u64(index))
+		ap.put_bytes(&player, 6, context_index[:])
+		for uri, track_index in snapshot.tracks {
+			if track_index == index {continue}
+			provided := make([dynamic]u8)
+			put_string(&provided, 1, uri)
+			put_string(&provided, 6, "context")
+			ap.put_bytes(&player, track_index < index ? 19 : 20, provided[:])
+			delete(provided)
+		}
+		revision := fmt.aprintf("%d", snapshot.queue_revision, allocator = context.temp_allocator)
+		put_string(&player, 24, revision)
 	}
 	device := make([dynamic]u8)
 	defer delete(device)
@@ -243,9 +272,9 @@ append_context :: proc(event: ^Event, ctx: Context) {
 }
 
 Request :: struct {
-	message_id:        u32,
-	sent_by_device_id: string,
-	command:           struct {
+	// Some Spotify clients send null or string Dealer metadata.
+	message_id, sent_by_device_id: json.Value,
+	command:                       struct {
 		endpoint:                                              string,
 		data:                                                  string,
 		value:                                                 json.Value,
@@ -263,7 +292,44 @@ Request :: struct {
 	},
 }
 
+request_message_id :: proc(request: Request) -> u32 {
+	if value, integer := request.message_id.(json.Integer);
+	   integer && value >= 0 && value <= i64(max(u32)) {return u32(value)}
+	if value, text := request.message_id.(json.String); text {
+		parsed, ok := strconv.parse_u64(value)
+		if ok && parsed <= u64(max(u32)) {return u32(parsed)}
+	}
+	return 0
+}
+
+request_sender :: proc(request: Request) -> string {
+	value, valid := request.sent_by_device_id.(json.String)
+	return valid ? value : ""
+}
+
 parse_command :: proc(body: []u8) -> (event: Event, request: Request, ok: bool) {
+	// Transport controls need only the endpoint. Parse that first because
+	// clients can attach nullable fields that belong to other commands.
+	header: struct {
+		message_id, sent_by_device_id: json.Value,
+		command:                       struct {
+			endpoint: string,
+		},
+	}
+	if json.unmarshal(body, &header, allocator = context.temp_allocator) != nil {return}
+	request.message_id = header.message_id
+	request.sent_by_device_id = header.sent_by_device_id
+	request.command.endpoint = header.command.endpoint
+	switch header.command.endpoint {
+	case "pause":
+		event.action, ok = .Pause, true; return
+	case "resume":
+		event.action, ok = .Resume, true; return
+	case "skip_next":
+		event.action, ok = .Next, true; return
+	case "skip_prev":
+		event.action, ok = .Previous, true; return
+	}
 	if json.unmarshal(body, &request, allocator = context.temp_allocator) != nil {return}
 	switch request.command.endpoint {
 	case "transfer":
@@ -281,14 +347,6 @@ parse_command :: proc(body: []u8) -> (event: Event, request: Request, ok: bool) 
 		event.target_index = max(request.command.options.skip_to.track_index, 0)
 		append_context(&event, request.command.ctx)
 		ok = len(event.tracks) > 0 || event.context_uri != ""
-	case "pause":
-		event.action, ok = .Pause, true
-	case "resume":
-		event.action, ok = .Resume, true
-	case "skip_next":
-		event.action, ok = .Next, true
-	case "skip_prev":
-		event.action, ok = .Previous, true
 	case "seek_to":
 		if value, valid := request.command.value.(json.Integer);
 		   valid && value >= 0 && value <= i64(max(i32)) {

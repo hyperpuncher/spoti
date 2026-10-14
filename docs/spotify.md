@@ -64,6 +64,11 @@ another Spotify client can transfer playback to it and send playback and
 volume commands. spoti reports local state and stops local audio when another
 device takes playback. the device picker also controls other signed-in devices.
 
+Dealer payloads can be plain or gzip-compressed after base64 decoding.
+state updates include shuffle, repeat, and a queue window of at most 80
+tracks, with its current index and revision. remote queue editing remains
+unsupported.
+
 current limits:
 
 - no local Zeroconf discovery or pairing;
@@ -78,7 +83,8 @@ live backend checks confirmed registration, the connection heartbeat, and
 native library coverage. the actual library request and page merge returned
 116 playlists for the tested account, including Release Radar. its header,
 cover, and first, middle, and final track windows were also checked.
-phone-to-spoti audio transfer was confirmed in a live user test.
+phone-to-spoti audio transfer was confirmed in a live user test. user tests
+also confirmed remote playback controls and the phone's shuffle indicator.
 
 these checks do not guarantee access to every Spotify resource. report a
 server refusal rather than show an unsupported operation as successful.

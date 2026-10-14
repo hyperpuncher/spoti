@@ -8,6 +8,8 @@ import http "../http"
 import oauth "../oauth"
 import session "../session"
 import "base:runtime"
+import "core:bytes"
+import gzip "core:compress/gzip"
 import "core:crypto"
 import "core:encoding/base64"
 import "core:encoding/hex"
@@ -75,7 +77,10 @@ stop :: proc(client: ^Client) {
 	if client.worker != nil {thread.join(client.worker); thread.destroy(client.worker)}
 	for event in chan.try_recv(client.events) {free_event(event)}
 	for reply in chan.try_recv(client.replies) {delete(reply.key)}
-	for state in chan.try_recv(client.states) {delete(state.uri)}
+	for state in chan.try_recv(client.states) {
+		owned := state
+		free_snapshot(&owned)
+	}
 	chan.destroy(client.events)
 	chan.destroy(client.replies)
 	chan.destroy(client.states)
@@ -97,7 +102,10 @@ publish :: proc(client: ^Client, snapshot: Snapshot) -> bool {
 	if client.worker == nil {return false}
 	owned := snapshot
 	owned.uri = strings.clone(snapshot.uri)
-	if !chan.try_send(client.states, owned) {delete(owned.uri); return false}
+	owned.context_uri = strings.clone(snapshot.context_uri)
+	owned.tracks = make([dynamic]string, 0, len(snapshot.tracks))
+	for uri in snapshot.tracks {append(&owned.tracks, strings.clone(uri))}
+	if !chan.try_send(client.states, owned) {free_snapshot(&owned); return false}
 	return true
 }
 
@@ -170,8 +178,44 @@ put_state :: proc(
 		reuse,
 	)
 	defer delete(response)
-	diagnostic.writef("connect state reason=%d status=%d ok=%v", reason, code, ok)
+	diagnostic.writef(
+		"connect state reason=%d status=%d ok=%v shuffle=%v command=%v sender=%v",
+		reason,
+		code,
+		ok,
+		snapshot.shuffle,
+		message != 0,
+		sender != "",
+	)
 	return ok && code >= 200 && code < 300
+}
+
+dealer_payload :: proc(encoded: string) -> (data: []u8, compressed, ok: bool) {
+	decoded, error := base64.decode(encoded, allocator = context.temp_allocator)
+	if error != nil || len(decoded) == 0 {return}
+	if len(decoded) < 2 || decoded[0] != 0x1f || decoded[1] != 0x8b {
+		return decoded, false, true
+	}
+	compressed = true
+	// Gzip stores its uncompressed size in the final little-endian word.
+	if len(decoded) < 18 {return nil, true, false}
+	last := len(decoded) - 4
+	size :=
+		u64(decoded[last]) |
+		u64(decoded[last + 1]) << 8 |
+		u64(decoded[last + 2]) << 16 |
+		u64(decoded[last + 3]) << 24
+	if size > http.WS_LIMIT {return nil, true, false}
+	buffer: bytes.Buffer
+	if gzip.load(
+		   data = decoded,
+		   buf = &buffer,
+		   known_gzip_size = len(decoded),
+		   allocator = context.temp_allocator,
+	   ) !=
+	   nil {return nil, true, false}
+	data = bytes.buffer_to_bytes(&buffer)
+	return data, true, len(data) <= http.WS_LIMIT
 }
 
 reply_to_dealer :: proc(client: ^Client, socket: ^http.WebSocket, reply: Reply) -> bool {
@@ -227,7 +271,7 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 		}
 		changed := false
 		for state in chan.try_recv(client.states) {
-			delete(snapshot.uri)
+			free_snapshot(snapshot)
 			snapshot^ = state
 			changed = true
 		}
@@ -270,14 +314,9 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 				sync.atomic_store(&client.ready, true)
 				notify(client)
 				diagnostic.write("connect device registered")
-			} else if envelope.type == "message" &&
-			   len(envelope.payloads) == 1 &&
-			   envelope.headers["Transfer-Encoding"] != "gzip" {
-				data, error := base64.decode(
-					envelope.payloads[0],
-					allocator = context.temp_allocator,
-				)
-				if error != nil {continue}
+			} else if envelope.type == "message" && len(envelope.payloads) == 1 {
+				data, _, payload_ok := dealer_payload(envelope.payloads[0])
+				if !payload_ok {continue}
 				event: Event
 				deliver := false
 				if envelope.uri == "hm://connect-state/v1/connect/volume" {
@@ -306,15 +345,19 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 				}
 			} else if envelope.type == "request" {
 				event: Event
-				accepted := false
-				if envelope.message_ident == "hm://connect-state/v1/player/command" &&
-				   envelope.headers["Transfer-Encoding"] != "gzip" {
-					data, error := base64.decode(
+				request: Request
+				accepted, decoded := false, false
+				player_command :=
+					strings.trim_right(envelope.message_ident, "/") ==
+					"hm://connect-state/v1/player/command"
+				compressed := false
+				if player_command {
+					data, payload_compressed, payload_ok := dealer_payload(
 						envelope.payload.compressed,
-						allocator = context.temp_allocator,
 					)
-					if error == nil {
-						request: Request
+					compressed = payload_compressed
+					if payload_ok {
+						decoded = true
 						event, request, accepted = parse_command(data)
 						if accepted &&
 						   event.action == .Load &&
@@ -323,16 +366,19 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 						}
 						if accepted {
 							delete(last_sender)
-							last_sender = strings.clone(request.sent_by_device_id)
-							last_message = request.message_id
+							last_sender = strings.clone(request_sender(request))
+							last_message = request_message_id(request)
 						}
 					}
 				}
 				diagnostic.writef(
-					"connect request parsed=%v tracks=%d compressed=%v",
+					"connect request player=%v decoded=%v endpoint=%s parsed=%v tracks=%d compressed=%v",
+					player_command,
+					decoded,
+					request.command.endpoint,
 					accepted,
 					len(event.tracks),
-					envelope.headers["Transfer-Encoding"] == "gzip",
+					compressed,
 				)
 				event.key = strings.clone(envelope.key)
 				if !accepted || !chan.try_send(client.events, event) {
@@ -368,7 +414,7 @@ run :: proc(pointer: rawptr) {
 	snapshot := Snapshot {
 		volume = 0.5,
 	}
-	defer delete(snapshot.uri)
+	defer free_snapshot(&snapshot)
 	for !sync.atomic_load(&client.cancel) {
 		defer free_all(context.temp_allocator)
 		tokens, authorized := session.authorize(.Remember, &client.cancel, interactive = false)

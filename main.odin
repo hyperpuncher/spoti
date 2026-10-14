@@ -840,7 +840,7 @@ main :: proc() {
 		clear_audio_stream(&stream)
 		library.stop(&library_client)
 		connect.stop(&connect_client)
-		delete(connect_snapshot.uri)
+		connect.free_snapshot(&connect_snapshot)
 		session.clear_authorization()
 		for _, texture in textures.by_key {sdl.DestroyTexture(texture)}
 		delete(textures.by_key)
