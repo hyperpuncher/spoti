@@ -691,11 +691,11 @@ toast_banner :: proc(view: View, d: f32) {
 			attachment = {element = .CenterBottom, parent = .CenterBottom},
 			pointerCaptureMode = .Passthrough,
 		},
-		backgroundColor = PANEL,
+		backgroundColor = WHITE,
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
 	) {
-		clay.Text(view.toast, clay.TextElementConfig{fontSize = 14, textColor = WHITE})
+		clay.Text(view.toast, clay.TextElementConfig{fontSize = 14, textColor = BG})
 	}
 }
 
