@@ -14,7 +14,7 @@
 - acknowledge Connect requests only after the UI accepts them; reject unknown commands
 - never log Dealer addresses, connection keys, device IDs or command bodies
 - do not log credentials, tokens, redirect URLs, audio keys, or signed CDN URLs
-- retain only Lucide SVG sources in `assets/icons/`; `scripts/build-icons.sh` generates ignored PNGs
+- keep Lucide SVG sources beside their committed PNGs in `assets/icons/`; `scripts/build-icons.sh` regenerates PNGs only when an icon changes
 
 ## local references
 

@@ -1,0 +1,109 @@
+name: desktop builds
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: install dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang just pkg-config libsdl3-dev libsdl3-ttf-dev libfontconfig-dev libcurl4-openssl-dev libvorbis-dev libwebp-dev libsecret-1-dev libsystemd-dev fonts-noto-core fonts-noto-color-emoji
+          mkdir -p "$RUNNER_TEMP/odin"
+          gh release download --repo odin-lang/Odin --pattern 'odin-linux-amd64-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
+          tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
+          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+      - name: check and test
+        run: |
+          just check
+          just test
+      - name: build
+        if: github.event_name == 'workflow_dispatch'
+        run: just release
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: spoti-linux-x64
+          path: |
+            build/spoti
+            assets/icons/*.png
+            assets/fonts/
+          if-no-files-found: error
+
+  macos:
+    if: github.event_name == 'workflow_dispatch'
+    needs: linux
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: install dependencies
+        run: brew install odin just pkg-config sdl3 sdl3_ttf fontconfig curl libvorbis webp
+      - run: just release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: spoti-macos-arm64
+          path: |
+            build/spoti
+            assets/icons/*.png
+            assets/fonts/
+          if-no-files-found: error
+
+  windows:
+    if: github.event_name == 'workflow_dispatch'
+    needs: linux
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: install dependencies
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Install-Module Microsoft.WinGet.Client -Force -Repository PSGallery
+          Repair-WinGetPackageManager -AllUsers
+          winget install --id odin-lang.Odin --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+          winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+          "$env:LOCALAPPDATA/Microsoft/WinGet/Links" >> $env:GITHUB_PATH
+          vcpkg install --triplet x64-windows sdl3 sdl3-ttf[harfbuzz] fontconfig curl[websockets] libvorbis libwebp
+          $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
+          "$root/bin" >> $env:GITHUB_PATH
+          "SPOTI_LINKER_FLAGS=/LIBPATH:$root/lib" >> $env:GITHUB_ENV
+          "FONTCONFIG_FILE=$root/etc/fonts/fonts.conf" >> $env:GITHUB_ENV
+          "FONTCONFIG_PATH=$root/etc/fonts" >> $env:GITHUB_ENV
+      - run: just release
+      - name: bundle runtime libraries
+        run: |
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" build/
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/etc/fonts" build/fontconfig -Recurse
+      - uses: actions/upload-artifact@v7
+        with:
+          name: spoti-windows-x64
+          path: |
+            build/spoti.exe
+            build/*.dll
+            build/fontconfig/
+            assets/icons/*.png
+            assets/fonts/
+          if-no-files-found: error

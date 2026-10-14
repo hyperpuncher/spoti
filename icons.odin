@@ -101,7 +101,7 @@ icon_key :: proc(name: string, tint: Icon_Tint) -> u64 {
 // through the same decode path as covers.
 load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 	for name in ICON_NAMES {
-		path := fmt.aprintf("build/icons/%s.png", name)
+		path := fmt.aprintf("assets/icons/%s.png", name)
 		bytes, read_error := os.read_entire_file_from_path(path, context.allocator)
 		delete(path)
 		if read_error != nil {continue}

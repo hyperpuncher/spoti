@@ -7,7 +7,11 @@ package http
 // Constants below are CURL* values from curl.h.
 import c "core:c/libc"
 
-foreign import libcurl "system:curl"
+when ODIN_OS == .Windows {
+	foreign import libcurl "libcurl.lib"
+} else {
+	foreign import libcurl "system:curl"
+}
 
 @(default_calling_convention = "c", link_prefix = "curl_")
 foreign libcurl {

@@ -2,7 +2,11 @@ package artwork
 
 import "core:c"
 
-foreign import libwebp "system:webp"
+when ODIN_OS == .Windows {
+	foreign import libwebp "libwebp.lib"
+} else {
+	foreign import libwebp "system:webp"
+}
 
 @(private, default_calling_convention = "c")
 foreign libwebp {

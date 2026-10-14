@@ -1,26 +1,24 @@
-# The prepare scripts are POSIX shell. On Windows they run under the sh
-# that ships with Git for Windows (or msys2).
-set windows-shell := ["sh", "-cu"]
+set windows-shell := ["pwsh", "-NoLogo", "-NoProfile", "-Command"]
 
 vet_flags := "-vet -vet-cast -vet-style -vet-semicolon -vet-tabs"
-# macOS system curl has no WebSocket API. Use the Homebrew library.
-curl_flags := if os() == "macos" { '-extra-linker-flags:"-L$(brew --prefix curl)/lib"' } else { "" }
+# CI supplies its native library paths. macOS uses Homebrew curl for WebSockets.
+linker_flags := env_var_or_default("SPOTI_LINKER_FLAGS", if os() == "macos" { "-L$(brew --prefix curl)/lib -L$(brew --prefix)/lib" } else { "" })
+curl_flags := if linker_flags == "" { "" } else { '-extra-linker-flags:"' + linker_flags + '"' }
+binary := if os() == "windows" { "build/spoti.exe" } else { "build/spoti" }
 project_packages := "main,ap,artwork,audio,connect,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui,fontconfig"
 
 default: run
 
 _prepare:
-	./scripts/build-vorbis.sh
-	./scripts/build-icons.sh
-	./scripts/build-mpris.sh
+	{{if os() == "windows" { "pwsh -NoProfile -File scripts/prepare-windows.ps1" } else { "./scripts/build-vorbis.sh && ./scripts/build-mpris.sh" }}}
 
 # Fast dev build with default optimization.
 build: _prepare
-	odin build . -out:build/spoti {{curl_flags}}
+	odin build . -out:{{binary}} {{curl_flags}}
 
 # Optimized portable release build. Keep runtime safety checks enabled.
 release: _prepare
-	odin build . -out:build/spoti -o:speed {{curl_flags}}
+	odin build . -out:{{binary}} -o:speed {{curl_flags}}
 
 run *args: _prepare
 	odin run . {{curl_flags}} -- {{args}}
@@ -57,8 +55,7 @@ probe:
 	odin run cmd/ap_probe {{curl_flags}}
 
 # Browser approval, AP login, audio key and first CDN range diagnostics.
-login:
-	./scripts/build-vorbis.sh
+login: _prepare
 	odin run cmd/ap_login {{curl_flags}}
 
 # Remove the saved refresh credential from the desktop keyring.
