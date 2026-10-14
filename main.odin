@@ -367,6 +367,16 @@ open_spotify_detail :: proc(detail: ^library.Detail) {
 	_ = sdl.OpenURL(c_address)
 }
 
+show_toast :: proc(app: ^App, message: string) {
+	replace_string(&app.toast, message)
+	app.toast_until = sdl.GetTicksNS() + 2_500_000_000
+	app.pending_redraw = true
+}
+
+copy_link :: proc(app: ^App, uri: string) {
+	show_toast(app, copy_spotify_uri(uri) ? "Link copied" : "Could not copy link")
+}
+
 open_dashboard :: proc() {
 	c_url := strings.clone_to_cstring(SPOTIFY_DASHBOARD)
 	defer delete(c_url)
@@ -978,6 +988,10 @@ main :: proc() {
 		// Glide wheel targets toward their offsets before the idle check so
 		// a settling glide keeps frames (and redraws) coming by itself.
 		app_glide(&app, &frame)
+		if len(toast) > 0 && sdl.GetTicksNS() >= toast_until {
+			replace_string(&toast, "")
+			redraw = true
+		}
 		if !redraw && stage != .Playing {continue}
 
 		visible := app_layout(&app, &frame)
@@ -1788,10 +1802,6 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		toast_until = sdl.GetTicksNS() + 2_500_000_000
 	}
 	last_write_pending = library_client.write_pending
-	if len(toast) > 0 && sdl.GetTicksNS() > toast_until {
-		delete(toast)
-		toast = ""
-	}
 	width, height = ui.size(&state)
 	// The picker submenu opens while the pointer is over the add row and
 	// stays open while it is over the menu or the panel, so the pointer
@@ -2060,7 +2070,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					order_dirty = true
 					state_dirty = true
 				case .Copy_Link:
-					copy_spotify_uri(menu.uri)
+					copy_link(app, menu.uri)
 				case .Open_In_Spotify:
 					open_spotify_uri(menu.uri)
 				case .Save_Album:
@@ -2157,11 +2167,10 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		} else if hit("setup_redirect", mouse_click) {
 			c_uri := strings.clone_to_cstring(oauth.WEB_REDIRECT_URI)
 			defer delete(c_uri)
-			if sdl.SetClipboardText(c_uri) {
-				delete(toast)
-				toast = strings.clone("Redirect URI copied")
-				toast_until = sdl.GetTicksNS() + 2_500_000_000
-			}
+			show_toast(
+				app,
+				sdl.SetClipboardText(c_uri) ? "Redirect URI copied" : "Could not copy redirect URI",
+			)
 		} else if hit("setup_dashboard", mouse_click) {
 			open_dashboard()
 		} else if hit("setup_save", mouse_click) {
@@ -2294,7 +2303,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					handled = true
 				} else if hit("hero_copy_link", mouse_click) &&
 				   !library.detail_loading_visible(&library_client) {
-					copy_spotify_uri(detail_card_uri(library_client.detail))
+					copy_link(app, detail_card_uri(library_client.detail))
 					handled = true
 				} else if hit("spotify_link", mouse_click) && !library_client.detail_loading {
 					open_spotify_detail(&library_client.detail)

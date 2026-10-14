@@ -476,11 +476,11 @@ open_spotify_uri :: proc(uri: string) {
 }
 
 // The link lives only in the clipboard; it is never written to the log.
-copy_spotify_uri :: proc(uri: string) {
+copy_spotify_uri :: proc(uri: string) -> bool {
 	address := spotify_web_url(uri)
-	if len(address) == 0 {return}
+	if len(address) == 0 {return false}
 	defer delete(address)
 	c_address := strings.clone_to_cstring(address)
 	defer delete(c_address)
-	_ = sdl.SetClipboardText(c_address)
+	return sdl.SetClipboardText(c_address)
 }
