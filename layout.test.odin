@@ -505,6 +505,26 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, nav_can_back(&nav) && !armed)
 	testing.expect_value(t, nav.states[nav.index].detail.uri, entry.uri)
+	// Tall panes must not spend Clay's 100 clip slots on individual rows.
+	resize(&client.detail.rows, 2000)
+	for &row in client.detail.rows {row.name = "Track title"; row.artists = "Artist"}
+	for _ in 0 ..< 2 {
+		_, _ = layout(
+			{button = "pause"},
+			&client,
+			&app_state,
+			.Albums,
+			&textures,
+			&fx,
+			SIDEBAR_MIN,
+			1280,
+			5000,
+			26,
+			0,
+			1,
+			nil,
+		)
+	}
 	testing.expect_value(t, errors, 0)
 }
 

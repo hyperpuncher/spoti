@@ -112,8 +112,8 @@ transfer completion is handled before the playback stage.
 virtualize grids and track rows with full-height spacers. Clay can cull draw
 commands but still processes layout, and only supports 100 clip containers.
 keep offscreen rows out of layout and clip pointer hits to their visible area.
-card text is shortened to fit before layout; grids own clipping instead of
-allocating one clip container per card. image decoding accepts dimensions up
+card and track text is shortened to fit before layout. grids and track tables
+own clipping instead of allocating clip containers per card or track row. image decoding accepts dimensions up
 to 4096 pixels so Spotify's 2660-pixel artist headers can be displayed.
 numeric fields use the monospace face; titles use proportional faces.
 square cover artwork is not cropped or otherwise materially changed;

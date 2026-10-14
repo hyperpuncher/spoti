@@ -607,9 +607,8 @@ track_list_row :: proc(
 		// Wide rows give the title a fixed column under the header;
 		// narrow rows hug the text so the artist follows at exactly
 		// one gap, with the cap keeping a runaway title from eating
-		// the artist. Slot-keyed like card clips: one stable scroll
-		// entry per visible row instead of one per absolute index.
-		if clay.UI_WithId(clay.ID("row_clip", slot))(
+		// the artist. Text fits its column; the table owns clipping.
+		if clay.UI()(
 		{
 			layout = {
 				sizing = {
@@ -617,7 +616,6 @@ track_list_row :: proc(
 				},
 				childAlignment = {y = .Center},
 			},
-			clip = {horizontal = true},
 		},
 		) {
 			clay.Text(
@@ -630,11 +628,8 @@ track_list_row :: proc(
 				},
 			)
 		}
-		if clay.UI_WithId(clay.ID("artist_clip", slot))(
-		{
-			layout = {sizing = {width = clay.SizingGrow({})}, childAlignment = {y = .Center}},
-			clip = {horizontal = true},
-		},
+		if clay.UI()(
+		{layout = {sizing = {width = clay.SizingGrow({})}, childAlignment = {y = .Center}}},
 		) {
 			artist_links_row(
 				ui_state,
@@ -727,27 +722,8 @@ added_at_text :: proc(milliseconds: i64) -> string {
 	if milliseconds <= 0 {return ""}
 	at := time.unix(milliseconds / 1000, milliseconds % 1000 * 1_000_000)
 	year, month, day := time.date(at)
-	months := [12]string {
-		"Jan",
-		"Feb",
-		"Mar",
-		"Apr",
-		"May",
-		"Jun",
-		"Jul",
-		"Aug",
-		"Sep",
-		"Oct",
-		"Nov",
-		"Dec",
-	}
-	return fmt.aprintf(
-		"%s %d, %d",
-		months[int(month) - 1],
-		day,
-		year,
-		allocator = context.temp_allocator,
-	)
+	name, _ := fmt.enum_value_to_string(month)
+	return fmt.aprintf("%s %d, %d", name[:3], day, year, allocator = context.temp_allocator)
 }
 
 // Track-row text budgets for one container width: the flowing title cap,
@@ -823,7 +799,7 @@ track_table :: proc(
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 			childGap = u16(2 * d),
 		},
-		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+		clip = {horizontal = true, vertical = true, childOffset = clay.GetScrollOffset()},
 	},
 	) {
 		// Header labels sit over the number and duration slots, and over the
