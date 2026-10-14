@@ -50,6 +50,7 @@ resolve_bundled :: proc(file: string) -> (path: string, ok: bool) {
 	if exe, err := os.get_executable_path(context.temp_allocator); err == nil {
 		dir := filepath.dir(string(exe))
 		append(&candidates, fmt.aprintf("%s/../share/spoti/fonts/%s", dir, file))
+		append(&candidates, fmt.aprintf("%s/../Resources/fonts/%s", dir, file))
 		append(&candidates, fmt.aprintf("%s/fonts/%s", dir, file))
 	}
 	append(&candidates, fmt.aprintf("assets/fonts/%s", file))

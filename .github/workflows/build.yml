@@ -70,8 +70,19 @@ jobs:
           "$RUNNER_TEMP/odin/vendor/stb/src/build_stb.sh"
           echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
       - run: just release
+      - name: bundle
+        run: |
+          app=build/Spoti.app/Contents
+          mkdir -p "$app/MacOS" "$app/Resources"
+          cp build/spoti "$app/MacOS/"
+          cp -R assets/icons "$app/Resources/"
+          cp -R assets/fonts "$app/Resources/"
+          sips -s format icns assets/icons/music.png --out "$app/Resources/AppIcon.icns"
+          cp packaging/macos/Info.plist "$app/"
+          codesign --force --deep --sign - build/Spoti.app
+          codesign --verify --strict build/Spoti.app
       - name: archive
-        run: tar --zstd -cf "build/spoti-macos-arm64-${GITHUB_SHA:0:12}.tar.zst" build/spoti assets/icons assets/fonts
+        run: tar --zstd -cf "build/spoti-macos-arm64-${GITHUB_SHA:0:12}.tar.zst" -C build Spoti.app
       - uses: actions/upload-artifact@v7
         with:
           path: build/spoti-macos-arm64-*.tar.zst

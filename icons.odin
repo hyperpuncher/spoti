@@ -4,6 +4,8 @@ package main
 
 import "core:fmt"
 import "core:os"
+import filepath "core:path/filepath"
+import "core:strings"
 import artwork "spotify/artwork"
 import library "spotify/library"
 import ui "ui"
@@ -97,11 +99,28 @@ icon_key :: proc(name: string, tint: Icon_Tint) -> u64 {
 	return library.url_key(fmt.bprintf(buffer[:], "icon:%s:%d", name, int(tint)))
 }
 
+// Icons resolve beside the executable first (app bundles, installs),
+// then the development checkout. Finder launches set no useful CWD.
+icon_path :: proc(name: string) -> (path: string, ok: bool) {
+	if exe, err := os.get_executable_path(context.temp_allocator); err == nil {
+		dir := filepath.dir(string(exe))
+		for candidate in ([]string{fmt.aprintf("%s/../Resources/icons/%s.png", dir, name), fmt.aprintf("%s/icons/%s.png", dir, name), fmt.aprintf("%s/assets/icons/%s.png", dir, name)}) {
+			if os.exists(candidate) {return strings.clone(candidate), true}
+			delete(candidate)
+		}
+	}
+	candidate := fmt.aprintf("assets/icons/%s.png", name)
+	if os.exists(candidate) {return candidate, true}
+	delete(candidate)
+	return "", false
+}
+
 // The artwork package is the only image decoder in the tree, so icons go
 // through the same decode path as covers.
 load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 	for name in ICON_NAMES {
-		path := fmt.aprintf("assets/icons/%s.png", name)
+		path, found := icon_path(name)
+		if !found {continue}
 		bytes, read_error := os.read_entire_file_from_path(path, context.allocator)
 		delete(path)
 		if read_error != nil {continue}
