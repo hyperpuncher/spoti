@@ -63,7 +63,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          brew install just pkg-config sdl3 sdl3_ttf fontconfig curl libvorbis webp
+          brew install just pkg-config dylibbundler sdl3 sdl3_ttf fontconfig curl libvorbis webp
           mkdir -p "$RUNNER_TEMP/odin"
           gh release download --repo odin-lang/Odin --pattern 'odin-macos-arm64-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
           tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1

@@ -83,8 +83,16 @@ download the `.tar.zst` artifact from a successful manual run. Linux and
 Windows include the binary and assets. Windows also includes DLLs and a
 fontconfig directory beside the exe; point `FONTCONFIG_FILE` and
 `FONTCONFIG_PATH` at it before running. macOS includes an ad-hoc signed
-`Spoti.app`, with its icons and fonts in `Contents/Resources`. it is not
-notarized and still requires the Homebrew runtime libraries.
+`Spoti.app`, with its icons, fonts, and Homebrew libraries in
+`Contents/Resources` and `Contents/Frameworks`, so it launches without
+Homebrew installed. it is not notarized.
+
+macOS packaging requires `brew install dylibbundler`. the bundler resolves
+absolute paths, `@rpath`, and `@loader_path` references, copies the required
+libraries, and updates their load paths. the package script checks every
+binary for unresolved dependencies before signing and uploading.
+see [Apple\'s run-path guide](https://developer.apple.com/library/archive/documentation/DeveloperTools/Conceptual/DynamicLibraries/100-Articles/RunpathDependentLibraries.html)
+and [dylibbundler usage](https://github.com/auriamg/macdylibbundler#using-dylibbundler-on-the-terminal).
 
 ## curl and linker flags
 
