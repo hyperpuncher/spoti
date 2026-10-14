@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=spoti
+Comment=Native Spotify client
+Exec=spoti
+Icon=app.spoti
+StartupWMClass=app.spoti
+Terminal=false
+Categories=AudioVideo;Audio;Player;

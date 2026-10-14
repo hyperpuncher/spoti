@@ -46,6 +46,7 @@ State :: struct {
 }
 
 open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
+	_ = sdl.SetAppMetadata("spoti", "0.1.0", "app.spoti")
 	when ODIN_OS == .Linux {
 		// Override wayland,x11 in the environment: XWayland is not a fallback.
 		if !sdl.SetHintWithPriority(sdl.HINT_VIDEO_DRIVER, "wayland", .OVERRIDE) {

@@ -12,8 +12,8 @@ emoji, such as Noto Color Emoji on Linux. see
 
 | library | Linux | macOS | Windows |
 | --- | --- | --- | --- |
-| SDL3 | system package | `brew install sdl3` | vcpkg `sdl3` |
-| SDL3_ttf | system package | `brew install sdl3_ttf` | vcpkg `sdl3-ttf` |
+| SDL3 | system package | `brew install sdl3` | official SDL dev bundle |
+| SDL3_ttf | system package | `brew install sdl3_ttf` | official SDL dev bundle |
 | fontconfig | system package | `brew install fontconfig` | vcpkg `fontconfig` |
 | libcurl | system package | `brew install curl` | vcpkg `curl` |
 | vorbisfile | system package | `brew install libvorbis` | vcpkg `libvorbis` |
@@ -73,17 +73,18 @@ checks require a Windows SDK. verify native builds on their target OS.
 ## CI
 
 GitHub Actions runs three native builds: Ubuntu 26.04 x64, macOS arm64, and
-Windows x64. Linux and macOS pin the same Odin release tarball so the
-compiler never drifts between platforms. Windows caches vcpkg binaries
-between runs; the first build is slow, later ones reuse them.
-the Linux job runs `just check` and `just test` on every push and pull request. release builds run only on
-manual dispatch; macOS and Windows wait for Linux. each build archives its
-binary, icons, and fonts into a `.tar.zst` test artifact. pull requests run only the
-check job; the three builds run on pushes to `main` and manual dispatches.
-actions use major-version tags. download the artifact from a successful run;
-no Spotify credentials are needed. the Windows artifact bundles its DLLs and a fontconfig
-directory beside the exe; point `FONTCONFIG_FILE` and `FONTCONFIG_PATH`
-at it before running.
+Windows x64. Linux and macOS use official Odin release archives.
+the Linux job runs `just check` and `just test` on pushes to `main` and
+pull requests. release builds run only on manual dispatch; macOS and
+Windows wait for Linux. actions use major-version tags. no Spotify
+credentials are needed.
+
+download the `.tar.zst` artifact from a successful manual run. Linux and
+Windows include the binary and assets. Windows also includes DLLs and a
+fontconfig directory beside the exe; point `FONTCONFIG_FILE` and
+`FONTCONFIG_PATH` at it before running. macOS includes an ad-hoc signed
+`Spoti.app`, with its icons and fonts in `Contents/Resources`. it is not
+notarized and still requires the Homebrew runtime libraries.
 
 ## curl and linker flags
 
@@ -108,6 +109,24 @@ Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
 icon PNGs in `assets/icons` are committed and loaded directly. the Lucide
 SVG sources sit beside them; `scripts/build-icons.sh` regenerates the PNGs
 when an icon changes.
+
+## app icon and Linux desktop entry
+
+[app icon source and generation](../assets/app/README.md) describes the
+shared SVG, PNG, and ICO assets. Windows embeds the ICO; macOS uses an
+ICNS in its app bundle. SDL sets the running icon on the main thread.
+Wayland compositors without the window-icon protocol use the desktop
+entry matched by SDL's `app.spoti` application ID.
+
+install a local Linux build and its desktop entry:
+
+```sh
+install -Dm755 build/spoti "$HOME/.local/bin/spoti"
+mkdir -p "$HOME/.local/share/spoti"
+cp -R assets/icons assets/fonts assets/app "$HOME/.local/share/spoti/"
+install -Dm644 packaging/linux/app.spoti.desktop "$HOME/.local/share/applications/app.spoti.desktop"
+install -Dm644 assets/app/icon.svg "$HOME/.local/share/icons/hicolor/scalable/apps/app.spoti.svg"
+```
 
 ## live verification
 

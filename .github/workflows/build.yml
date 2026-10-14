@@ -42,7 +42,7 @@ jobs:
         run: just release
       - name: archive
         if: github.event_name == 'workflow_dispatch'
-        run: tar --zstd -cf "build/spoti-linux-x64-${GITHUB_SHA:0:12}.tar.zst" build/spoti assets/icons assets/fonts
+        run: tar --zstd -cf "build/spoti-linux-x64-${GITHUB_SHA:0:12}.tar.zst" build/spoti assets/icons assets/fonts assets/app packaging/linux/app.spoti.desktop
       - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch'
         with:
@@ -73,11 +73,12 @@ jobs:
       - name: bundle
         run: |
           app=build/Spoti.app/Contents
-          mkdir -p "$app/MacOS" "$app/Resources"
+          mkdir -p "$app/MacOS" "$app/Resources/app"
           cp build/spoti "$app/MacOS/"
           cp -R assets/icons "$app/Resources/"
           cp -R assets/fonts "$app/Resources/"
-          sips -s format icns assets/icons/music.png --out "$app/Resources/AppIcon.icns"
+          cp assets/app/icon.png "$app/Resources/app/"
+          cp assets/app/icon.icns "$app/Resources/AppIcon.icns"
           cp packaging/macos/Info.plist "$app/"
           codesign --force --deep --sign - build/Spoti.app
           codesign --verify --strict build/Spoti.app
@@ -119,7 +120,7 @@ jobs:
           Copy-Item build/deps/SDL3_ttf-3.2.2/lib/x64/SDL3_ttf.dll build/
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" build/
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/etc/fonts" build/fontconfig -Recurse
-          tar --zstd -cf "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst" build/spoti.exe build/*.dll build/fontconfig assets/icons assets/fonts
+          tar --zstd -cf "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst" build/spoti.exe build/*.dll build/fontconfig assets/icons assets/fonts assets/app
       - uses: actions/upload-artifact@v7
         with:
           path: build/spoti-windows-x64-*.tar.zst
