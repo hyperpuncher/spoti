@@ -1342,9 +1342,9 @@ detail_hero :: proc(
 					),
 				)
 			}
-			metadata := strings.join(parts[:], " · ", context.temp_allocator)
+			metadata := strings.join(parts[:], " • ", context.temp_allocator)
 			if len(detail.artist_links) > 0 {
-				tail := fmt.aprintf(" · %s", metadata, allocator = context.temp_allocator)
+				tail := fmt.aprintf(" • %s", metadata, allocator = context.temp_allocator)
 				tail_width := hero_text_width(ui_state, tail, 14, 0)
 				if clay.UI()(
 				{

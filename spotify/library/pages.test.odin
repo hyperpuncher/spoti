@@ -112,7 +112,7 @@ artist_discography_uses_current_album_page :: proc(t: ^testing.T) {
 		len(releases) == 1 &&
 		releases[0].name == "A Release" &&
 		releases[0].uri == "spotify:album:abc" &&
-		releases[0].subtitle == "2026 · EP" &&
+		releases[0].subtitle == "2026 • EP" &&
 		releases[0].total == 6,
 	)
 }

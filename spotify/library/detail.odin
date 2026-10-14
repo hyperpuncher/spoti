@@ -574,7 +574,7 @@ release_kind :: proc(album_type: string, total_tracks: int) -> string {
 }
 
 // The discography card subtitle: the release year, then the content kind,
-// e.g. "2026 · EP".
+// e.g. "2026 • EP".
 release_subtitle :: proc(
 	album_type, date: string,
 	total_tracks: int,
@@ -582,7 +582,7 @@ release_subtitle :: proc(
 ) -> string {
 	kind := release_kind(album_type, total_tracks)
 	if len(date) < 4 {return strings.clone(kind, allocator)}
-	return fmt.aprintf("%s · %s", date[:4], kind, allocator = allocator)
+	return fmt.aprintf("%s • %s", date[:4], kind, allocator = allocator)
 }
 
 parse_artist_albums :: proc(

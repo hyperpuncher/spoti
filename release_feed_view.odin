@@ -89,7 +89,7 @@ release_feed_page :: proc(
 				clay.TextElementConfig{fontId = 2, fontSize = 28, textColor = WHITE},
 			)
 			clay.Text(
-				"Music from artists you follow · Last seven days",
+				"Music from artists you follow • Last seven days",
 				clay.TextElementConfig{fontSize = 14, textColor = MUTED},
 			)
 			status := fmt.aprintf(
@@ -174,7 +174,7 @@ release_feed_page :: proc(
 								clay.TextElementConfig{fontSize = 13, textColor = MUTED},
 							)
 							clay.Text(
-								"·",
+								"•",
 								clay.TextElementConfig{fontSize = 13, textColor = MUTED},
 							)
 							clay.Text(
