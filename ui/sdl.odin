@@ -3,9 +3,14 @@ package ui
 import c "core:c/libc"
 import "core:fmt"
 import "core:math"
+import "core:os"
 import fontconfig "fontconfig"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
+
+// On-screen fps is a development aid: dev builds define it in, release
+// builds only show it with SPOTI_DEBUG set in the environment.
+SPOTI_DEBUG :: #config(SPOTI_DEBUG, false)
 
 Cursor_Kind :: enum {
 	Default,
@@ -39,6 +44,7 @@ State :: struct {
 	cursors:            [Cursor_Kind]^sdl.Cursor,
 	cursor:             Cursor_Kind,
 	vsync:              bool,
+	debug:              bool,
 	fps_started:        u64,
 	fps_frames:         u32,
 	fps:                u32,
@@ -85,6 +91,7 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 	state.vsync = sdl.SetRenderVSync(state.renderer, 1)
 	_ = sdl.SetRenderDrawBlendMode(state.renderer, sdl.BLENDMODE_BLEND)
 	if !state.vsync {fmt.eprintln("SDL3 vsync unavailable; limiting frames to about 60 fps")}
+	state.debug = SPOTI_DEBUG || len(os.get_env("SPOTI_DEBUG", context.temp_allocator)) > 0
 	state.fps_started = sdl.GetTicks()
 	state.font_path, state.font_index, ok = resolve_role(.Regular)
 	if !ok {close(&state); return}
@@ -415,22 +422,30 @@ frame_done :: proc(state: ^State) {
 		state.fps_frames = 0
 		state.fps_started = now
 	}
-	width, _ := size(state)
-	density := scale(state)
-	label := fmt.aprintf("%d", state.fps, allocator = context.temp_allocator)
-	font := font_for_size(state, 14 * density, 1)
-	label_width, label_height: c.int
-	if font != nil &&
-	   ttf.GetStringSize(font, raw_data(label), uint(len(label)), &label_width, &label_height) {
-		text(
-			state,
-			label,
-			f32(width) - f32(label_width) - 8 * density,
-			8 * density,
-			14 * density,
-			{120, 120, 120, 255},
-			font_id = 1,
-		)
+	if state.debug {
+		width, _ := size(state)
+		density := scale(state)
+		label := fmt.aprintf("%d", state.fps, allocator = context.temp_allocator)
+		font := font_for_size(state, 14 * density, 1)
+		label_width, label_height: c.int
+		if font != nil &&
+		   ttf.GetStringSize(
+			   font,
+			   raw_data(label),
+			   uint(len(label)),
+			   &label_width,
+			   &label_height,
+		   ) {
+			text(
+				state,
+				label,
+				f32(width) - f32(label_width) - 8 * density,
+				8 * density,
+				14 * density,
+				{120, 120, 120, 255},
+				font_id = 1,
+			)
+		}
 	}
 	finish_text_frame(state)
 	_ = sdl.RenderPresent(state.renderer)

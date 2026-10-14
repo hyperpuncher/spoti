@@ -7,6 +7,9 @@ vet_flags := "-vet -vet-cast -vet-style -vet-semicolon -vet-tabs"
 linker_flags := env_var_or_default("SPOTI_LINKER_FLAGS", if os() == "macos" { "-L$(brew --prefix curl)/lib -L$(brew --prefix)/lib" } else if os() == "windows" { "/LIBPATH:build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:build/deps/SDL3_ttf-3.2.2/lib/x64" } else { "" })
 curl_flags := if linker_flags == "" { "" } else { '-extra-linker-flags:"' + linker_flags + '"' }
 binary := if os() == "windows" { "build/spoti.exe" } else { "build/spoti" }
+# Dev-only affordances such as the on-screen fps counter. Release builds
+# stay clean unless SPOTI_DEBUG is set in the environment at runtime.
+debug_flags := "-define:SPOTI_DEBUG=true"
 resource_flags := if os() == "windows" { "-resource:build/app.res" } else { "" }
 project_packages := "main,ap,artwork,audio,connect,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui,fontconfig"
 
@@ -17,14 +20,14 @@ _prepare:
 
 # Fast dev build with default optimization.
 build: _prepare
-	odin build . -out:{{binary}} {{curl_flags}} {{resource_flags}}
+	odin build . -out:{{binary}} {{curl_flags}} {{resource_flags}} {{debug_flags}}
 
 # Optimized portable release build. Keep runtime safety checks enabled.
 release: _prepare
 	odin build . -out:{{binary}} -o:speed {{curl_flags}} {{resource_flags}}
 
 run *args: _prepare
-	odin run . {{curl_flags}} {{resource_flags}} -- {{args}}
+	odin run . {{curl_flags}} {{resource_flags}} {{debug_flags}} -- {{args}}
 
 # Format every Odin file in the project, including vendored bindings.
 fmt:

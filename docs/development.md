@@ -104,6 +104,8 @@ Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
   in the system keyring; `WEB_CLIENT_ID` overrides it for headless use.
 - `SPOTI_FONTS` overrides the font search directory.
 - `SPOTI_THEME` selects `light` or `dark`.
+- `SPOTI_DEBUG` shows the on-screen fps counter in release builds;
+  dev `just build` and `just run` always show it.
 - credentials use Secret Service, Keychain, or Credential Manager.
 - state, cache, and logs use the operating system's application directories.
 
