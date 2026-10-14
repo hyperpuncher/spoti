@@ -69,7 +69,7 @@ checks require a Windows SDK. verify native builds on their target OS.
 
 ## CI
 
-GitHub Actions runs three native builds: Ubuntu x64, macOS arm64, and
+GitHub Actions runs three native builds: Ubuntu 26.04 x64, macOS arm64, and
 Windows x64. the Linux job runs `just check` and `just test` on every push and pull request. release builds and artifact
 uploads run only on manual dispatch; macOS and Windows wait for Linux. pull requests run only the
 check job; the three builds run on pushes to `main` and manual dispatches.
