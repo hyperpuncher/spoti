@@ -121,7 +121,7 @@ release_feed_page :: proc(
 				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 				padding = {left = u16(24 * d), right = u16(24 * d)},
 			},
-			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+			clip = {horizontal = true, vertical = true, childOffset = clay.GetScrollOffset()},
 		},
 		) {
 			visible^ = scroll_items("detail_rows", len(feed.items), 1, FEED_ROW_HEIGHT * d, height)

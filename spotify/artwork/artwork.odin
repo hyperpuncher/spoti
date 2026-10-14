@@ -4,7 +4,8 @@ package artwork
 import "core:c"
 import stb "vendor:stb/image"
 
-MAX_DIMENSION :: 2048
+// Artist header images are 2660 pixels wide; retain a bounded 4096 limit.
+MAX_DIMENSION :: 4096
 
 Image :: struct {
 	pixels: []u8,

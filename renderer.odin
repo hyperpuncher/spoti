@@ -20,6 +20,7 @@ Textures :: struct {
 	requested:                map[u64]Cover_Request_State,
 	fade_top:                 u64,
 	fade_bottom:              u64,
+	hero_fade:                u64,
 	fade_top_alpha:           f32,
 	fade_bottom_alpha:        f32,
 	// The detail list scrolls independently of the sidebar grid, so it
@@ -48,6 +49,12 @@ load_fades :: proc(state: ^ui.State, textures: ^Textures) {
 		textures.by_key[u64(uintptr(bottom))] = bottom
 		textures.fade_bottom = u64(uintptr(bottom))
 	}
+	hero_fade := ui.make_fade_texture(state, true, smooth = true)
+	if hero_fade != nil {
+		_ = sdl.SetTextureColorMod(hero_fade, u8(BG.r), u8(BG.g), u8(BG.b))
+		textures.hero_fade = u64(uintptr(hero_fade))
+		textures.by_key[textures.hero_fade] = hero_fade
+	}
 	detail_top := ui.make_fade_texture(state, false)
 	if detail_top != nil {
 		_ = sdl.SetTextureColorMod(detail_top, u8(BG.r), u8(BG.g), u8(BG.b))
@@ -70,7 +77,7 @@ retint_fades :: proc(textures: ^Textures) {
 		if texture == nil {continue}
 		_ = sdl.SetTextureColorMod(texture, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
 	}
-	for key in ([2]u64{textures.fade_detail_top, textures.fade_detail_bottom}) {
+	for key in ([]u64{textures.fade_detail_top, textures.fade_detail_bottom, textures.hero_fade}) {
 		texture := textures.by_key[key]
 		if texture == nil {continue}
 		_ = sdl.SetTextureColorMod(texture, u8(BG.r), u8(BG.g), u8(BG.b))
@@ -159,7 +166,21 @@ render :: proc(
 			)
 		case .Image:
 			key := u64(uintptr(command.renderData.image.imageData))
-			ui.draw_texture(state, textures.by_key[key], {box.x, box.y, box.width, box.height})
+			banner := command.id == clay.ID("hero_banner_image").id
+			ui.draw_texture(
+				state,
+				textures.by_key[key],
+				{box.x, box.y, box.width, box.height},
+				crop = banner,
+			)
+			if banner {
+				ui.mask_top_corners(
+					state,
+					{box.x, box.y, box.width, box.height},
+					12 * ui.scale(state),
+					{u8(BG.r), u8(BG.g), u8(BG.b), 255},
+				)
+			}
 		case .Text:
 			text := command.renderData.text
 			color := text.textColor

@@ -26,10 +26,6 @@ RELEASE_CARD_COLUMNS :: 8
 // A playlist card under a dragged track lights green.
 DROP_TARGET :: clay.Color{30, 215, 96, 80}
 
-// Clip slots are visible-relative per section, so the singles grid offsets
-// its truncation clips past anything the albums grid can hold.
-RELEASE_CLIP_STRIDE :: 64
-
 // Keep one extra row on either side. Spacers retain the complete scroll extent.
 visible_items :: proc(count, columns: int, stride, offset, height: f32) -> Visible_Items {
 	if count == 0 {return {}}
@@ -296,10 +292,6 @@ library_card :: proc(
 	id: string = "card",
 	selected: bool = false,
 	pinned: bool = false,
-	// Visible slot, not the absolute index: truncation clips register a
-	// persistent Clay scroll entry each, so slot keys keep the entries
-	// stable while scrolling instead of churning one per row per frame.
-	clip_slot: u32 = 0,
 	drop_target: bool = false,
 ) {
 	hovered := clay.PointerOver(clay.ID(id, index))
@@ -340,16 +332,14 @@ library_card :: proc(
 				icon_element(textures, "pin-filled", .White, 13 * d)
 			}
 		}
-		clip_id :=
-			id == "card" ? clay.ID("card_clip", clip_slot) : clay.ID("release_clip", clip_slot)
-		if clay.UI_WithId(clip_id)(
+		// Text is fitted to the card width; the grid owns clipping.
+		if clay.UI()(
 		{
 			layout = {
 				layoutDirection = .TopToBottom,
 				sizing = {width = clay.SizingGrow({})},
 				childGap = u16(3 * d),
 			},
-			clip = {horizontal = true},
 		},
 		) {
 			text_width := card_width - padding * 2
@@ -467,7 +457,7 @@ sidebar :: proc(
 				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 				childGap = 0,
 			},
-			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+			clip = {horizontal = true, vertical = true, childOffset = clay.GetScrollOffset()},
 		},
 		) {
 			// Cards own their padding, so rows do not add a second outer gap.
@@ -498,7 +488,6 @@ sidebar :: proc(
 							selected = !client.release_feed.open &&
 							card_selected(&page.items[next], &client.detail),
 							pinned = state_is_pinned(app_state, page.items[next].uri),
-							clip_slot = u32(next - visible.first),
 							drop_target = next == drop_target,
 						)
 					}
@@ -574,7 +563,8 @@ track_list_row :: proc(
 	// Boundary-fitted segments: whole artists that fit, then an
 	// ellipsis. A first artist that alone overflows truncates with
 	// one like before. Sources that omit URIs render plain text.
-	artist_box := max(0, row_text - title_box)
+	count_width := row.play_count > 0 && row_text >= 380 * d ? 100 * d : 0
+	artist_box := max(0, row_text - title_box - (count_width > 0 ? count_width + ROW_GAP * d : 0))
 	hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
 	if clay.UI_WithId(clay.ID("track_row", u32(index)))(
 	{
@@ -647,6 +637,26 @@ track_list_row :: proc(
 				"artist_link",
 				artist_link_id(slot, 0),
 			)
+		}
+		if count_width > 0 {
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {width = clay.SizingFixed(count_width)},
+					childAlignment = {x = .Right},
+				},
+			},
+			) {
+				clay.Text(
+					count_text(row.play_count),
+					clay.TextElementConfig {
+						fontId = 1,
+						fontSize = 14,
+						textColor = MUTED,
+						wrapMode = .None,
+					},
+				)
+			}
 		}
 		if clay.UI()(
 		{
@@ -848,10 +858,10 @@ artist_page :: proc(
 		layout = {
 			layoutDirection = .TopToBottom,
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
-			padding = {left = u16(20 * d), right = u16(20 * d)},
+			padding = {left = u16(20 * d), right = u16(20 * d), top = u16(24 * d)},
 			childGap = u16(8 * d),
 		},
-		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+		clip = {horizontal = true, vertical = true, childOffset = clay.GetScrollOffset()},
 	},
 	) {
 		usable := max(280 * d, available_width - (40 + SCROLLBAR_OUTSET) * d)
@@ -859,7 +869,7 @@ artist_page :: proc(
 		card_width := min(usable / f32(columns), RELEASE_CARD_MAX * d)
 		row_height := card_row_height(card_width, card_text_height, d)
 		row_gap := f32(u16(8 * d))
-		leading: f32 = 0
+		leading := f32(u16(24 * d))
 		// Popular keeps the track table's tighter row gap inside its own
 		// wrapper, so the container gap never enters the row stride.
 		if len(detail.rows) > 0 {
@@ -880,7 +890,9 @@ artist_page :: proc(
 					d,
 				)
 				popular_leading :=
-					clay.GetElementData(clay.ID("popular_title")).boundingBox.height + track_gap
+					leading +
+					clay.GetElementData(clay.ID("popular_title")).boundingBox.height +
+					track_gap
 				visible.tracks = scroll_items(
 					"detail_rows",
 					len(detail.rows),
@@ -902,7 +914,7 @@ artist_page :: proc(
 					track_gap,
 					d,
 				)
-				leading =
+				leading +=
 					clay.GetElementData(clay.ID("popular_title")).boundingBox.height +
 					track_gap +
 					f32(len(detail.rows)) * ROW_HEIGHT * d +
@@ -915,7 +927,6 @@ artist_page :: proc(
 			"Albums",
 			"albums_title",
 			"release_card",
-			0,
 			textures,
 			ui_state,
 			columns,
@@ -934,7 +945,6 @@ artist_page :: proc(
 			"Singles and EPs",
 			"singles_title",
 			"single_card",
-			RELEASE_CLIP_STRIDE,
 			textures,
 			ui_state,
 			columns,
@@ -971,7 +981,6 @@ artist_page :: proc(
 release_section :: proc(
 	group: ^library.Release_Group,
 	title, title_id, card_id: string,
-	slot_base: u32,
 	textures: ^Textures,
 	ui_state: ^ui.State,
 	columns: int,
@@ -1016,7 +1025,6 @@ release_section :: proc(
 						card_width,
 						d,
 						card_id,
-						clip_slot = slot_base + u32(next - visible.first),
 					)
 				} else {
 					release_skeleton(card_width, row_height, d)
@@ -1222,14 +1230,144 @@ detail_rows_ready :: proc(client: ^library.Client) -> bool {
 	return client.detail.ready && client.detail.rows_error == 0 && len(client.detail.rows) > 0
 }
 
+// Counts share one grouped format; numeric rows use the monospace face.
+count_text :: proc(value: i64) -> string {
+	digits := fmt.aprintf("%d", max(0, value), allocator = context.temp_allocator)
+	out := make([]u8, len(digits) + (len(digits) - 1) / 3, context.temp_allocator)
+	at := 0
+	for ch, i in transmute([]u8)digits {
+		if i > 0 && (len(digits) - i) % 3 == 0 {out[at] = ','; at += 1}
+		out[at] = ch
+		at += 1
+	}
+	return string(out)
+}
+
+hero_metadata :: proc(detail: ^library.Detail) -> string {
+	count_label := detail.source == .Artist ? "releases" : "songs"
+	parts := make([dynamic]string, 0, 3, context.temp_allocator)
+	// Album artists render as their own clickable segments, so the
+	// joined subtitle only serves sources that carry no links.
+	if len(detail.subtitle) > 0 && len(detail.artist_links) == 0 {
+		append(&parts, detail.subtitle)
+	}
+	if len(detail.year) >= 4 {append(&parts, detail.year)}
+	if detail.source == .Artist && detail.monthly_listeners > 0 {
+		append(
+			&parts,
+			fmt.aprintf(
+				"%s monthly listeners",
+				count_text(detail.monthly_listeners),
+				allocator = context.temp_allocator,
+			),
+		)
+	} else if detail.source == .Playlist && detail.rows_error != 0 {
+		append(&parts, "tracks unavailable")
+	} else {
+		append(
+			&parts,
+			fmt.aprintf("%d %s", detail.total, count_label, allocator = context.temp_allocator),
+		)
+	}
+	return strings.join(parts[:], " • ", context.temp_allocator)
+}
+
+// Dedicated banners fill a bounded header; SDL crops without stretching.
+hero_banner :: proc(
+	detail: ^library.Detail,
+	textures: ^Textures,
+	ui_state: ^ui.State,
+	width, viewport_height, d: f32,
+) -> bool {
+	if detail.banner == "" {return false}
+	texture := textures.by_key[cover_key(detail.banner)]
+	w, h: f32
+	if texture == nil || !sdl.GetTextureSize(texture, &w, &h) || w <= h || h <= 0 {return false}
+	available := max(0, width - SCROLLBAR_OUTSET * d)
+	// Keep small windows unchanged; let larger windows grow up to 40%.
+	height_limit := min(
+		viewport_height * 0.40,
+		viewport_height * 0.35 + max(0, viewport_height - 900 * d) * 0.15,
+	)
+	height := min(available * h / w, height_limit)
+	title_width := max(0, available - 48 * d)
+	title := hero_fit_text(
+		ui_state,
+		detail.name,
+		title_width,
+		54,
+		HERO_TITLE_FONT,
+		1,
+		context.temp_allocator,
+	)
+	metadata := hero_metadata(detail)
+	if clay.UI_WithId(clay.ID("hero_banner"))(
+	{layout = {sizing = {width = clay.SizingFixed(available), height = clay.SizingFixed(height)}}},
+	) {
+		clay.UI_WithId(clay.ID("hero_banner_image"))(
+		{
+			layout = {
+				sizing = {width = clay.SizingFixed(available), height = clay.SizingFixed(height)},
+			},
+			image = {imageData = rawptr(uintptr(cover_key(detail.banner)))},
+		},
+		)
+		fade_height := min(height, 320 * d)
+		fade_image(
+			textures,
+			textures.hero_fade,
+			1,
+			0,
+			available,
+			fade_height,
+			height - fade_height,
+		)
+		if clay.UI_WithId(clay.ID("hero_caption"))(
+		{
+			layout = {
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingFixed(title_width)},
+				childGap = u16(8 * d),
+			},
+			floating = {
+				offset = {24 * d, -24 * d},
+				zIndex = 2,
+				attachTo = .Parent,
+				attachment = {element = .LeftBottom, parent = .LeftBottom},
+				pointerCaptureMode = .Passthrough,
+			},
+		},
+		) {
+			clay.Text(detail.label, clay.TextElementConfig{fontSize = 13, textColor = WHITE})
+			clay.Text(
+				title,
+				clay.TextElementConfig {
+					fontId = HERO_TITLE_FONT,
+					fontSize = 54,
+					textColor = WHITE,
+					wrapMode = .None,
+				},
+			)
+			fitted_text(
+				ui_state,
+				metadata,
+				title_width,
+				{fontSize = 14, textColor = WHITE, wrapMode = .None},
+			)
+		}
+	}
+	return true
+}
+
 detail_hero :: proc(
 	detail: ^library.Detail,
 	textures: ^Textures,
 	ui_state: ^ui.State,
-	available_width, d: f32,
+	available_width, viewport_height, d: f32,
 ) {
 	// Spotify-style hero: substantial artwork and a strong, bold title.
 	// No panel behind it; the cover floats on the page with a soft shadow.
+	if hero_banner(detail, textures, ui_state, available_width, viewport_height, d) {return}
 	hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
 	// A density unit of slack keeps knife-edge words from spilling a third
 	// line over floating-point summation order.
@@ -1321,28 +1459,7 @@ detail_hero :: proc(
 				title_text,
 				clay.TextElementConfig{fontId = 2, fontSize = title_size, textColor = WHITE},
 			)
-			count_label := detail.source == .Artist ? "releases" : "songs"
-			parts := make([dynamic]string, 0, 3, context.temp_allocator)
-			// Album artists render as their own clickable segments, so the
-			// joined subtitle only serves sources that carry no links.
-			if len(detail.subtitle) > 0 && len(detail.artist_links) == 0 {
-				append(&parts, detail.subtitle)
-			}
-			if len(detail.year) >= 4 {append(&parts, detail.year)}
-			if detail.source == .Playlist && detail.rows_error != 0 {
-				append(&parts, "tracks unavailable")
-			} else {
-				append(
-					&parts,
-					fmt.aprintf(
-						"%d %s",
-						detail.total,
-						count_label,
-						allocator = context.temp_allocator,
-					),
-				)
-			}
-			metadata := strings.join(parts[:], " • ", context.temp_allocator)
+			metadata := hero_metadata(detail)
 			if len(detail.artist_links) > 0 {
 				tail := fmt.aprintf(" • %s", metadata, allocator = context.temp_allocator)
 				tail_width := hero_text_width(ui_state, tail, 14, 0)
@@ -1446,7 +1563,7 @@ detail_page :: proc(
 			}
 			return
 		}
-		detail_hero(detail, textures, ui_state, available_width, d)
+		detail_hero(detail, textures, ui_state, available_width, viewport_height, d)
 		if clay.UI()(
 		{
 			layout = {

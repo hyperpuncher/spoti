@@ -131,3 +131,17 @@ rootlist_rejects_incomplete_decorations_and_wrong_windows :: proc(t: ^testing.T)
 	_, ok = parse_rootlist(body[:len(body) - 1], "fixture", 36)
 	testing.expect(t, !ok)
 }
+
+@(test)
+playlist_banner_is_separate_from_cover_art :: proc(t: ^testing.T) {
+	attributes, field: [dynamic]u8
+	defer {delete(attributes); delete(field)}
+	ap.put_bytes(&attributes, 1, transmute([]u8)string("Energy Booster Rock"))
+	ap.put_bytes(&field, 1, transmute([]u8)string("header_image_url_desktop"))
+	ap.put_bytes(&field, 2, transmute([]u8)string("https://i.scdn.co/image/banner"))
+	ap.put_bytes(&attributes, 12, field[:])
+	ref, ok := playlist_attributes(attributes[:])
+	testing.expect(t, ok)
+	testing.expect_value(t, ref.banner, "https://i.scdn.co/image/banner")
+	testing.expect_value(t, len(ref.images), 0)
+}

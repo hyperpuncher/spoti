@@ -57,4 +57,4 @@
 - library grids use 2 to 4 columns and load more automatically near the bottom
 - virtualize library cards, discography, and track rows with full-height spacers; Clay culls drawing, not layout, and tracks only 100 clip containers
 - numeric fields use the monospace face; titles use proportional faces
-- artwork must not be cropped or otherwise materially altered
+- square cover artwork must not be cropped or otherwise materially altered; dedicated artist and playlist banners may use a centered crop to fill a height-limited header

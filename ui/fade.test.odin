@@ -1,6 +1,8 @@
 package ui
 
+import "core:math"
 import "core:testing"
+import sdl "vendor:sdl3"
 
 // The procedural Bayer must match the reference 8x8 ordered matrix:
 // each level adds its quadrant offset below the finer bits.
@@ -24,4 +26,43 @@ fade_bayer_matches_reference :: proc(t: ^testing.T) {
 	// Tiling repeats every 8 texels in both axes.
 	testing.expect(t, bayer_value(8, 0) == bayer_value(0, 0))
 	testing.expect(t, bayer_value(3, 71) == bayer_value(3, 7))
+}
+
+@(test)
+banner_crop_fills_the_header_without_stretching :: proc(t: ^testing.T) {
+	for size in ([][4]f32{{2660, 1496, 1600, 360}, {600, 1200, 900, 400}}) {
+		crop := crop_source_rect(size[0], size[1], size[2], size[3])
+		testing.expect(t, crop.x >= 0 && crop.y >= 0)
+		testing.expect(t, crop.x + crop.w <= size[0] && crop.y + crop.h <= size[1])
+		testing.expect(t, math.abs(crop.w / crop.h - size[2] / size[3]) < 0.001)
+		testing.expect_value(t, crop.x * 2 + crop.w, size[0])
+		testing.expect_value(t, crop.y * 2 + crop.h, size[1])
+	}
+}
+
+@(test)
+cropped_banner_rounds_only_the_displayed_top_corners :: proc(t: ^testing.T) {
+	surface := sdl.CreateSurface(24, 24, .RGBA32)
+	if !testing.expect(t, surface != nil) {return}
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	if !testing.expect(t, renderer != nil) {return}
+	defer sdl.DestroyRenderer(renderer)
+	state := State {
+		renderer = renderer,
+		masks    = make(map[u64]^sdl.Texture),
+	}
+	defer {
+		for _, mask in state.masks {sdl.DestroyTexture(mask)}
+		delete(state.masks)
+	}
+	_ = sdl.SetRenderDrawColor(renderer, 255, 255, 255, 255)
+	_ = sdl.RenderClear(renderer)
+	mask_top_corners(&state, {0, 0, 24, 24}, 8, {0, 0, 0, 255})
+	_ = sdl.RenderPresent(renderer)
+	pixels := ([^]u8)(surface.pixels)
+	testing.expect_value(t, pixels[0], 0)
+	testing.expect_value(t, pixels[23 * 4], 0)
+	testing.expect_value(t, pixels[12 * 4], 255)
+	testing.expect_value(t, pixels[23 * int(surface.pitch)], 255)
 }

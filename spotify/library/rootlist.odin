@@ -125,6 +125,17 @@ playlist_attributes :: proc(body: []u8) -> (ref: Playlist_Ref, ok: bool) {
 	for pos < len(body) {
 		field, wire, bytes, _, valid := ap.next_field(body, &pos)
 		if !valid {return}
+		if field == 12 {
+			if wire != 2 {return}
+			key, _, key_valid := ap.get_bytes(bytes, 1)
+			value, _, value_valid := ap.get_bytes(bytes, 2)
+			if !key_valid || !value_valid {return}
+			if string(key) == "header_image_url_desktop" &&
+			   strings.has_prefix(string(value), "https://") {
+				ref.banner = string(value)
+			}
+			continue
+		}
 		if field != 13 {continue}
 		if wire != 2 || len(images) >= 32 {return}
 		target, _, target_valid := ap.get_bytes(bytes, 1)

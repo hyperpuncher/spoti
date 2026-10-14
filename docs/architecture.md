@@ -53,6 +53,21 @@ personal Web API omits some Spotify-made playlists, so it is only the index
 fallback when the native read is unavailable. albums, artists, and saved
 songs retain their Web API reads.
 
+artist opens also use one cached `queryArtistOverview` streaming request for
+`visuals.headerImage`, `stats.monthlyListeners`, and Popular-track `playcount`.
+the current query hash was verified with saved streaming approval. only valid
+responses enter the cache; GraphQL errors can arrive with HTTP 200. a failed
+query retains the native ARTIST_V4 fallback. there is no request per track.
+playlist banners use the `header_image_url_desktop` format attribute from the
+native playlist response already fetched for the page. banners fill the pane
+width with a centered crop that keeps the image proportions. header height
+is at most 35 percent of a small window and grows smoothly up to 40 percent
+on larger windows. rounded top corners are applied after cropping. captions
+use theme text colors over a smooth mask that reaches the page background
+color at the lower edge. square cover art stays uncropped and is never used
+as a wide banner. play counts are shown only when supplied and when the pane
+has space for the numeric column.
+
 native rootlist offsets count folder markers as well as playlists. keep the
 native account on each page and request so those offsets never enter Web API
 pagination. show folder contents in the flat grid without adding folder UI.
@@ -83,8 +98,12 @@ transfer completion is handled before the playback stage.
 virtualize grids and track rows with full-height spacers. Clay can cull draw
 commands but still processes layout, and only supports 100 clip containers.
 keep offscreen rows out of layout and clip pointer hits to their visible area.
+card text is shortened to fit before layout; grids own clipping instead of
+allocating one clip container per card. image decoding accepts dimensions up
+to 4096 pixels so Spotify's 2660-pixel artist headers can be displayed.
 numeric fields use the monospace face; titles use proportional faces.
-artwork is not cropped or otherwise materially changed.
+square cover artwork is not cropped or otherwise materially changed;
+dedicated banners may be cropped to fit their bounded header.
 
 ordinary text uses Geist with character-based system outline fallbacks.
 emoji uses whole grapheme clusters with stable inline cells. a worker owns

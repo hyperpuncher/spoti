@@ -121,6 +121,7 @@ Playlist_Ref :: struct {
 	owner:         Owner,
 	description:   string,
 	collaborative: bool,
+	banner:        string,
 	items:         Count,
 }
 

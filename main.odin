@@ -600,6 +600,7 @@ ensure_covers :: proc(
 		return
 	}
 	if client.detail.ready {
+		ensure_cover(client, textures, client.detail.banner, &budget)
 		ensure_cover(client, textures, client.detail.image, &budget)
 		ensure_cover(client, textures, client.detail.image_preview, &budget)
 		ensure_cover(client, textures, client.detail.image_small, &budget)

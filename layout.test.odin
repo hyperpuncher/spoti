@@ -77,6 +77,17 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 	textures := Textures {
 		by_key = make(map[u64]^sdl.Texture),
 	}
+	// A software texture exercises banner layout without a window or desktop.
+	surface := sdl.CreateSurface(14, 6, .RGBA32)
+	if !testing.expect(t, surface != nil) {return}
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	if !testing.expect(t, renderer != nil) {return}
+	defer sdl.DestroyRenderer(renderer)
+	banner_texture := sdl.CreateTextureFromSurface(renderer, surface)
+	if !testing.expect(t, banner_texture != nil) {return}
+	defer sdl.DestroyTexture(banner_texture)
+	textures.by_key[cover_key("banner")] = banner_texture
 	fake_icon: sdl.Texture
 	textures.by_key[icon_key("play-filled", .Dark)] = &fake_icon
 	textures.by_key[icon_key("pause-filled", .Dark)] = &fake_icon
@@ -105,6 +116,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 			for source in ([]library.Source{.Album, .Artist}) {
 				client.detail.source = source
 				client.detail.name = source == .Artist ? "Starfoxlaflare" : "Album"
+				client.detail.banner = source == .Artist ? "banner" : ""
 				// Allow dimensions from the previous layout to settle after resizing.
 				for _ in 0 ..< 2 {
 					clay.UpdateScrollContainers(false, {}, 0)
@@ -122,6 +134,21 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						0,
 						d,
 						nil,
+					)
+				}
+				if source == .Artist {
+					banner := clay.GetElementData(clay.ID("hero_banner")).boundingBox
+					caption := clay.GetElementData(clay.ID("hero_caption")).boundingBox
+					testing.expect(
+						t,
+						math.abs(banner.width - (1280 - width - 6 - SCROLLBAR_OUTSET) * d) < 1,
+					)
+					expected_height := min(banner.width * 6 / 14, 820 * d * 0.35)
+					testing.expect(t, math.abs(banner.height - expected_height) < 1)
+					testing.expect(
+						t,
+						caption.y >= banner.y &&
+						caption.y + caption.height < banner.y + banner.height,
 					)
 				}
 				input := clay.GetElementData(clay.ID("track_input")).boundingBox
@@ -267,7 +294,7 @@ artist_sections_skip_off_screen_cards :: proc(t: ^testing.T) {
 	errors := 0
 	clay.Initialize(
 		clay.CreateArenaWithCapacityAndMemory(uint(len(memory)), &memory[0]),
-		{1920, 1080},
+		{2500, 1424},
 		{handler = layout_test_error, userData = &errors},
 	)
 	defer clay.SetCurrentContext(nil)
@@ -275,6 +302,9 @@ artist_sections_skip_off_screen_cards :: proc(t: ^testing.T) {
 	clay.SetMeasureTextFunction(layout_test_measure, &density)
 
 	client: library.Client
+	client.pages[.Albums].items = make([dynamic]library.Entry, 3000)
+	defer delete(client.pages[.Albums].items)
+	for &entry in client.pages[.Albums].items {entry.name = "Album title"}
 	client.detail.ready = true
 	client.detail.source = .Artist
 	client.detail.id = "artist"
@@ -326,8 +356,8 @@ artist_sections_skip_off_screen_cards :: proc(t: ^testing.T) {
 			&textures,
 			&fx,
 			SIDEBAR_MAX,
-			1920,
-			1080,
+			2500,
+			1424,
 			26,
 			0,
 			1,
@@ -348,8 +378,8 @@ artist_sections_skip_off_screen_cards :: proc(t: ^testing.T) {
 			&textures,
 			&fx,
 			SIDEBAR_MAX,
-			1920,
-			1080,
+			2500,
+			1424,
 			26,
 			0,
 			1,
@@ -688,4 +718,12 @@ artist_discography_cards_stay_inside_their_padding :: proc(t: ^testing.T) {
 		inset >= 20 * 1.2 - 1 && inset <= (20 + SCROLLBAR_OUTSET) * 1.2 + 1,
 		"the last release card must keep the page side padding",
 	)
+}
+
+@(test)
+play_counts_use_grouped_numbers :: proc(t: ^testing.T) {
+	testing.expect_value(t, count_text(0), "0")
+	testing.expect_value(t, count_text(999), "999")
+	testing.expect_value(t, count_text(1000), "1,000")
+	testing.expect_value(t, count_text(563387486), "563,387,486")
 }

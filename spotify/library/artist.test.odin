@@ -88,3 +88,28 @@ artist_top_tracks_choose_the_country_block :: proc(t: ^testing.T) {
 	testing.expect(t, global_ok && len(global_uris) == 1)
 	testing.expect_value(t, global_uris[0], test_top_uri(worldwide_gid))
 }
+
+@(test)
+artist_overview_keeps_banner_listeners_and_playable_counts :: proc(t: ^testing.T) {
+	detail := Detail {
+		id = "fixture",
+	}
+	if !testing.expect(t, virtual.arena_init_growing(&detail.arena) == nil) {return}
+	defer free_detail(&detail)
+	body := `{"data":{"artistUnion":{"uri":"spotify:artist:fixture","profile":{"name":"Artist"},"visuals":{"headerImage":{"sources":[{"url":"https://i.scdn.co/image/banner","width":2660,"height":1140}]}},"stats":{"monthlyListeners":17600000},"discography":{"topTracks":{"items":[{"track":{"uri":"spotify:track:0000000000000000000001","name":"Hit","playcount":"563387486","duration":{"totalMilliseconds":142000},"playability":{"playable":true},"artists":{"items":[{"uri":"spotify:artist:fixture","profile":{"name":"Artist"}}]}}},{"track":{"uri":"spotify:track:0000000000000000000002","name":"Unavailable","playability":{"playable":false}}}]}}}}}`
+	if !testing.expect(t, parse_artist_overview(transmute([]u8)body, &detail)) {return}
+	testing.expect_value(t, detail.banner, "https://i.scdn.co/image/banner")
+	testing.expect_value(t, detail.monthly_listeners, 17600000)
+	if testing.expect_value(t, len(detail.rows), 1) {
+		testing.expect_value(t, detail.rows[0].play_count, 563387486)
+		testing.expect_value(t, detail.rows[0].duration_ms, 142000)
+		testing.expect_value(t, detail.rows[0].artist_links[0].name, "Artist")
+	}
+	errors := `{"errors":[{"message":"PersistedQueryNotFound"}]}`
+	testing.expect(t, !parse_artist_overview(transmute([]u8)errors, &detail))
+	testing.expect_value(t, detail.banner, "https://i.scdn.co/image/banner")
+	no_banner := `{"data":{"artistUnion":{"uri":"spotify:artist:fixture","profile":{"name":"Artist"},"visuals":{"headerImage":null},"stats":{"monthlyListeners":123},"discography":{"topTracks":{"items":[]}}}}}`
+	testing.expect(t, parse_artist_overview(transmute([]u8)no_banner, &detail))
+	testing.expect_value(t, detail.banner, "")
+	testing.expect_value(t, detail.monthly_listeners, 123)
+}

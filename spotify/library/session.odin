@@ -4,6 +4,7 @@ package library
 import oauth "../oauth"
 import session "../session"
 import "base:runtime"
+import "core:mem/virtual"
 import "core:sync"
 
 PLAYLIST_AUTH_REQUIRED :: -3
@@ -52,27 +53,25 @@ read_session_rootlist :: proc(
 	return fetch(tokens.access, account, request.offset, reuse, request.refresh)
 }
 
-// Artist top tracks, non-interactive: the section is optional, so it never
-// prompts and simply stays hidden when no streaming grant is at hand.
-read_artist_top_tracks :: proc(
+// Artist artwork, listeners and Popular rows share the response arena.
+// This optional read never starts browser approval.
+read_artist_overview :: proc(
 	client: ^Client,
 	tokens: ^oauth.Tokens,
-	id: string,
-	allocator: runtime.Allocator,
+	detail: ^Detail,
 	reuse: rawptr = nil,
-) -> (
-	rows: [dynamic]Track_Row,
-	status: int,
-	ok: bool,
 ) {
-	if !authorize_session(client, tokens, interactive = false) {return nil, 0, false}
-	return fetch_artist_top_tracks(
+	if !authorize_session(client, tokens, interactive = false) {return}
+	country := session.cached_country()
+	if fetch_artist_overview(tokens.access, detail, country, reuse, &client.cancel) {return}
+	rows, _, ok := fetch_artist_top_tracks(
 		tokens.access,
-		id,
-		allocator,
+		detail.id,
+		virtual.arena_allocator(&detail.arena),
 		reuse,
-		country = session.cached_country(),
+		country = country,
 	)
+	if ok {detail.rows = rows}
 }
 
 // Called only after the official playlist-items endpoint returns 403. Renew

@@ -284,10 +284,23 @@ create_texture :: proc(state: ^State, pixels: []u8, width, height: int) -> ^sdl.
 	return texture
 }
 
-draw_texture :: proc(state: ^State, texture: ^sdl.Texture, rect: sdl.FRect) {
-	if texture == nil {return}
+draw_texture :: proc(state: ^State, texture: ^sdl.Texture, rect: sdl.FRect, crop: bool = false) {
+	if texture == nil || rect.w <= 0 || rect.h <= 0 {return}
 	area := rect
-	_ = sdl.RenderTexture(state.renderer, texture, nil, &area)
+	if crop {
+		w, h: f32
+		if !sdl.GetTextureSize(texture, &w, &h) {return}
+		source := crop_source_rect(w, h, rect.w, rect.h)
+		_ = sdl.RenderTexture(state.renderer, texture, &source, &area)
+	} else {
+		_ = sdl.RenderTexture(state.renderer, texture, nil, &area)
+	}
+}
+
+crop_source_rect :: proc(width, height, target_width, target_height: f32) -> sdl.FRect {
+	scale := max(target_width / width, target_height / height)
+	w, h := min(width, target_width / scale), min(height, target_height / scale)
+	return {(width - w) / 2, (height - h) / 2, w, h}
 }
 
 // Scroll-edge fade strips: white pixels carrying a Bayer-dithered alpha
@@ -318,22 +331,22 @@ bayer_value :: proc(x, y: int) -> u8 {
 	return u8(value + quad[xx | (yy << 1)] * mult)
 }
 
-make_fade_texture :: proc(state: ^State, flip: bool) -> ^sdl.Texture {
+make_fade_texture :: proc(state: ^State, flip: bool, smooth: bool = false) -> ^sdl.Texture {
 	pixels: [FADE_TEX_W * FADE_TEX_H * 4]u8
 	for y in 0 ..< FADE_TEX_H {
 		t := 1 - f32(y) / f32(FADE_TEX_H - 1)
 		if flip {t = 1 - t}
-		// Cubic: flat landing at clear so the fade melts into content,
-		// steep finish so almost no solid lip lingers at the edge.
-		t = t * t * t
+		// Scroll edges use a cubic ramp; banners use smoothstep so the
+		// image meets both the clear edge and the page color smoothly.
+		t = smooth ? t * t * (3 - 2 * t) : t * t * t
 		for x in 0 ..< FADE_TEX_W {
 			threshold := (f32(bayer_value(x, y)) - 31.5) / 63 * FADE_DITHER
 			alpha := u8(clamp(t * 255 + threshold, 0, 255))
-			// Pin the clear tail so the stretched strip meets content with
-			// no dither residue line. The solid head needs no pin: the
-			// curve reaches it naturally on the last texel.
+			// Pin both ends so the strip meets clear content and its
+			// background color exactly, without dither residue lines.
 			tail := flip ? y : FADE_TEX_H - 1 - y
 			if tail < 2 {alpha = 0}
+			if tail >= FADE_TEX_H - 2 {alpha = 255}
 			base := (y * FADE_TEX_W + x) * 4
 			pixels[base + 0] = 255
 			pixels[base + 1] = 255
@@ -351,8 +364,13 @@ mask_key :: proc(width, height, radius: int) -> u64 {
 	return u64(width) << 32 | u64(height) << 16 | u64(radius)
 }
 
-rounded_mask :: proc(state: ^State, width, height, radius: int) -> ^sdl.Texture {
+rounded_mask :: proc(
+	state: ^State,
+	width, height, radius: int,
+	inverse: bool = false,
+) -> ^sdl.Texture {
 	key := mask_key(width, height, radius)
+	if inverse {key |= 1 << 63}
 	if texture, found := state.masks[key]; found {return texture}
 	// Compute coverage at the final texture size. SDL's linear minification only
 	// interpolates nearby texels; it does not average an entire supersampled
@@ -384,12 +402,30 @@ rounded_mask :: proc(state: ^State, width, height, radius: int) -> ^sdl.Texture 
 			pixels[index + 0] = 255
 			pixels[index + 1] = 255
 			pixels[index + 2] = 255
-			pixels[index + 3] = u8(covered * 255 / (SAMPLES * SAMPLES))
+			alpha := u8(covered * 255 / (SAMPLES * SAMPLES))
+			pixels[index + 3] = inverse ? 255 - alpha : alpha
 		}
 	}
 	texture := create_texture(state, pixels, width, height)
 	if texture != nil {state.masks[key] = texture}
 	return texture
+}
+
+// Cover the two top corners after drawing a cropped banner. Reuse a small
+// cached inverse mask, not a render target or a full-size image mask.
+mask_top_corners :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl.Color) {
+	r := int(clamp(radius, 0, min(rect.w, rect.h) / 2) + 0.5)
+	if r == 0 {return}
+	mask := rounded_mask(state, r * 2, r * 2, r, inverse = true)
+	if mask == nil {return}
+	_ = sdl.SetTextureColorMod(mask, color.r, color.g, color.b)
+	_ = sdl.SetTextureAlphaMod(mask, color.a)
+	for side in 0 ..< 2 {
+		source := sdl.FRect{f32(side * r), 0, f32(r), f32(r)}
+		x := side == 0 ? rect.x : rect.x + rect.w - f32(r)
+		target := sdl.FRect{x, rect.y, f32(r), f32(r)}
+		_ = sdl.RenderTexture(state.renderer, mask, &source, &target)
+	}
 }
 
 fill_rounded :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl.Color) {

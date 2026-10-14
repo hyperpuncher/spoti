@@ -33,35 +33,38 @@ Track_Row :: struct {
 	album:        string,
 	album_uri:    string, // empty for album pages, stamped from the detail
 	duration_ms:  int,
+	play_count:   i64, // zero means no count was supplied
 	image:        string,
 	image_small:  string,
 }
 
 Detail :: struct {
-	arena:         virtual.Arena,
-	ready:         bool,
-	liked:         bool, // in the account library; hero heart state
-	source:        Source,
-	id:            string,
-	label:         string, // Album, Playlist, Artist or Liked Songs
-	name:          string,
-	subtitle:      string,
-	artist_links:  []Artist_Link, // arena-owned; albums only
-	year:          string, // album release year, e.g. "2024"
-	image:         string,
-	image_small:   string,
-	image_preview: string, // selected card cover, retained until hero texture is ready
-	total:         int,
-	owner_id:      string, // playlist only; who can change the items
-	collaborative: bool, // playlist only; collaborators can change the items
-	rows:          [dynamic]Track_Row,
-	albums:        Release_Group,
-	singles:       Release_Group,
-	next_offset:   int,
-	has_more:      bool,
-	rows_error:    int,
-	more_failures: int, // consecutive failed page fetches; the auto-chain stops at 3
-	generation:    uint, // a reopened page keeps its URI but never its generation
+	arena:             virtual.Arena,
+	ready:             bool,
+	liked:             bool, // in the account library; hero heart state
+	source:            Source,
+	id:                string,
+	label:             string, // Album, Playlist, Artist or Liked Songs
+	name:              string,
+	subtitle:          string,
+	artist_links:      []Artist_Link, // arena-owned; albums only
+	year:              string, // album release year, e.g. "2024"
+	image:             string,
+	image_small:       string,
+	image_preview:     string, // selected card cover, retained until hero texture is ready
+	banner:            string, // separate wide artwork, never a stretched cover
+	monthly_listeners: i64,
+	total:             int,
+	owner_id:          string, // playlist only; who can change the items
+	collaborative:     bool, // playlist only; collaborators can change the items
+	rows:              [dynamic]Track_Row,
+	albums:            Release_Group,
+	singles:           Release_Group,
+	next_offset:       int,
+	has_more:          bool,
+	rows_error:        int,
+	more_failures:     int, // consecutive failed page fetches; the auto-chain stops at 3
+	generation:        uint, // a reopened page keeps its URI but never its generation
 }
 
 // One paged side of an artist page. Albums and singles page independently,
@@ -109,6 +112,7 @@ clone_row :: proc(row: Track_Row, allocator: runtime.Allocator) -> Track_Row {
 		album = strings.clone(row.album, allocator),
 		album_uri = strings.clone(row.album_uri, allocator),
 		duration_ms = row.duration_ms,
+		play_count = row.play_count,
 		image = strings.clone(row.image, allocator),
 		image_small = strings.clone(row.image_small, allocator),
 	}
