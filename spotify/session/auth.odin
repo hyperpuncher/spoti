@@ -1,4 +1,4 @@
-// Streaming approval is separate from the user's read-only Web API grant.
+// Streaming approval is separate from the user's Web API grant.
 package session
 
 import credential "../credential"

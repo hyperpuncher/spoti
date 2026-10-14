@@ -2,7 +2,7 @@
 
 ## dependencies
 
-install Odin, `just`, a C compiler, and `pkg-config`.
+install Odin `dev-2026-10` or newer, `just`, a C compiler, and `pkg-config`.
 the primary Geist fonts are included in `assets/fonts`. on Linux, install
 fontconfig and the distribution's Noto script, symbol, and CJK font packages
 for broad Unicode coverage (on Ubuntu: `fonts-noto-core`, `fonts-noto-cjk`,

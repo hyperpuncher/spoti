@@ -40,10 +40,10 @@ web_grant_is_separate_and_write_capable :: proc(t: ^testing.T) {
 		t,
 		strings.contains(flow.url, "redirect_uri=http%3A%2F%2F127.0.0.1%3A8989%2Flogin"),
 	)
-	testing.expect(t, strings.contains(flow.url, "user-library-read"))
-	testing.expect(t, strings.contains(flow.url, "user-library-modify"))
-	testing.expect(t, strings.contains(flow.url, "user-read-playback-state"))
-	testing.expect(t, strings.contains(flow.url, "user-modify-playback-state"))
+	for scope in ([]string{"user-library-read", "user-library-modify", "user-follow-modify", "playlist-modify-public", "playlist-modify-private", "user-read-private", "user-read-email", "user-read-playback-state", "user-modify-playback-state"}) {
+		testing.expect(t, strings.contains(flow.url, scope), scope)
+	}
+	testing.expect_value(t, grant.required_scope, "user-modify-playback-state")
 	// Sessions approved without the newest write scope re-approve once.
 	old: string = `{"access_token":"fake","scope":"playlist-read-private user-library-read"}`
 	_, old_result := decode_token(200, transmute([]u8)old, true, grant.required_scope)
@@ -116,15 +116,4 @@ callback_rejects_forgery_and_accepts_authorization :: proc(t: ^testing.T) {
 	testing.expect(t, status == .Ignored)
 	_, status = parse_callback("GET /login?state=correct&code=%zz HTTP/1.1", "correct")
 	testing.expect(t, status == .Rejected)
-}
-
-@(test)
-web_grant_requests_library_write_scopes :: proc(t: ^testing.T) {
-	grant := web_grant("0123456789abcdef0123456789abcdef")
-	for scope in ([]string{"user-library-modify", "user-follow-modify", "playlist-modify-public", "playlist-modify-private", "user-read-private", "user-read-email", "user-read-playback-state", "user-modify-playback-state"}) {
-		testing.expect(t, strings.contains(grant.scopes, scope), scope)
-	}
-	// Connect control is the newest addition, so its modify scope forces a
-	// one-time re-approval of older sessions.
-	testing.expect_value(t, grant.required_scope, "user-modify-playback-state")
 }

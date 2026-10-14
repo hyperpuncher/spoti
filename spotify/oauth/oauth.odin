@@ -49,11 +49,7 @@ Flow :: struct {
 
 // Base64url without padding, as required by RFC 7636.
 encode_url :: proc(input: []u8) -> string {
-	encoded := base64.encode(input, base64.ENC_URL_TABLE)
-	if !strings.has_suffix(encoded, "=") {return encoded}
-	trimmed := strings.clone(strings.trim_right(encoded, "="))
-	delete(encoded)
-	return trimmed
+	return base64.encode(input, base64.ENC_URL_TABLE, options = {.No_Padding})
 }
 
 challenge :: proc(verifier: string) -> string {
