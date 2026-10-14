@@ -88,6 +88,8 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 		close(&state)
 		return
 	}
+	when ODIN_OS == .Darwin {configure_macos_window(state.window)}
+	when ODIN_OS == .Windows {configure_windows_window(state.window)}
 	state.vsync = sdl.SetRenderVSync(state.renderer, 1)
 	_ = sdl.SetRenderDrawBlendMode(state.renderer, sdl.BLENDMODE_BLEND)
 	if !state.vsync {fmt.eprintln("SDL3 vsync unavailable; limiting frames to about 60 fps")}

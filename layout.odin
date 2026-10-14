@@ -109,6 +109,7 @@ View :: struct {
 	input_active:   bool,
 	select_all:     bool, // the whole query is selected
 	setup_error:    string, // borrowed; setup screen error line
+	caption_width:  f32, // native Windows controls, render pixels
 	album_linked:   bool, // footer title opens the playing album
 	artist_linked:  bool, // footer artist opens the playing artist
 	pinned:         bool,
@@ -217,11 +218,21 @@ button_fx :: proc(
 }
 
 top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
+	padding := u16(10 * d)
+	search_width := clay.SizingFixed(440 * d)
+	when ODIN_OS == .Darwin {
+		padding = u16(96 * d)
+		search_width = clay.SizingGrow({min = 80 * d, max = 440 * d})
+	}
+	when ODIN_OS == .Windows {
+		padding = u16(view.caption_width + 10 * d)
+		search_width = clay.SizingGrow({min = 80 * d, max = 440 * d})
+	}
 	if clay.UI()(
 	{
 		layout = {
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(58 * d)},
-			padding = {left = u16(10 * d), right = u16(10 * d)},
+			padding = {left = padding, right = padding},
 			childAlignment = {x = .Center, y = .Center},
 			childGap = u16(4 * d),
 		},
@@ -251,7 +262,7 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 		if clay.UI_WithId(clay.ID("track_input"))(
 		{
 			layout = {
-				sizing = {width = clay.SizingFixed(440 * d), height = clay.SizingFixed(40 * d)},
+				sizing = {width = search_width, height = clay.SizingFixed(40 * d)},
 				padding = {left = u16(14 * d), right = u16(14 * d)},
 				childAlignment = {y = .Center},
 			},

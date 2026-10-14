@@ -108,6 +108,13 @@ Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
 ## runtime settings
 
 - Linux requires native Wayland. there is no XWayland fallback.
+- macOS draws app content behind a transparent native title bar. the
+  traffic-light controls stay native; empty header space moves the window.
+  the search field and toolbar buttons keep their normal click behavior.
+- Windows extends the DWM frame into the header while keeping native
+  minimise, maximise, and close buttons. native resize borders stay in
+  place. caption-button bounds determine the reserved header space.
+  see [Microsoft's custom-frame guide](https://learn.microsoft.com/windows/win32/dwm/customframe).
 - the first-run setup screen stores the personal Spotify Web API app ID
   in the system keyring; `WEB_CLIENT_ID` overrides it for headless use.
 - `SPOTI_FONTS` overrides the font search directory.

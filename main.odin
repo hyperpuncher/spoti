@@ -52,6 +52,46 @@ open_prompt_url :: proc(kind: oauth.Prompt) -> bool {
 	return sdl.OpenURL(c_url)
 }
 
+// Native window controls receive their own clicks; only unused header
+// space drags. SDL hit-test points are logical, Clay boxes are render pixels.
+window_header_hit_test :: proc "c" (
+	window: ^sdl.Window,
+	point: ^sdl.Point,
+	data: rawptr,
+) -> sdl.HitTestResult {
+	context = runtime.default_context()
+	state := (^ui.State)(data)
+	position := ui.mouse_position(state, f32(point.x), f32(point.y))
+	d := ui.scale(state)
+	controls := sdl.FRect{0, 0, 96 * d, 58 * d}
+	when ODIN_OS == .Windows {
+		width, _ := ui.size(state)
+		caption := ui.windows_caption_width(window)
+		controls = {f32(width) - caption, 0, caption, 58 * d}
+		flags := sdl.GetWindowFlags(window)
+		if .FULLSCREEN in flags {return .NORMAL}
+		if .MAXIMIZED not_in flags && position.y < 6 * d {
+			if position.x < 6 * d {return .RESIZE_TOPLEFT}
+			if position.x >= f32(width) - 6 * d {return .RESIZE_TOPRIGHT}
+			return .RESIZE_TOP
+		}
+	}
+	if !header_can_drag(position, d, controls) {return .NORMAL}
+	return .DRAGGABLE
+}
+
+header_can_drag :: proc(point: sdl.FPoint, d: f32, controls: sdl.FRect) -> bool {
+	if point.y < 0 || point.y >= 58 * d {return false}
+	if point.x >= controls.x &&
+	   point.x < controls.x + controls.w &&
+	   point.y >= controls.y &&
+	   point.y < controls.y + controls.h {return false}
+	for id in ([]string{"toolbar_back", "toolbar_forward", "track_input", "toolbar_releases"}) {
+		if hit(id, point) {return false}
+	}
+	return true
+}
+
 @(private = "file")
 wake_app :: proc "c" (_: rawptr) {
 	event := sdl.Event {
@@ -779,6 +819,11 @@ main :: proc() {
 	app.state, ok = ui.open("spoti", 1280, 820)
 	if !ok {return}
 	defer ui.close(&app.state)
+	when ODIN_OS == .Darwin || ODIN_OS == .Windows {
+		if !sdl.SetWindowHitTest(app.state.window, window_header_hit_test, &app.state) {
+			fmt.eprintln("could not enable header dragging:", sdl.GetError())
+		}
+	}
 	if !sdl.InitSubSystem(
 		sdl.INIT_AUDIO,
 	) {fmt.eprintln("could not initialize SDL3 audio:", sdl.GetError()); return}
@@ -807,6 +852,7 @@ main :: proc() {
 	}
 	theme_dark = system_dark()
 	apply_theme(theme_dark)
+	when ODIN_OS == .Windows {ui.windows_frame_theme(state.window, theme_dark)}
 	load_icons(&state, &textures, theme_dark)
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
@@ -1029,6 +1075,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 				if next_dark != theme_dark {
 					theme_dark = next_dark
 					apply_theme(theme_dark)
+					when ODIN_OS == .Windows {ui.windows_frame_theme(state.window, theme_dark)}
 					retint_icons(&textures, theme_dark)
 					retint_fades(&textures)
 					first_frame = true
@@ -1852,6 +1899,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		detail_smooth.target = 0
 		detail_smooth.active = false
 	}
+	when ODIN_OS == .Windows {view.caption_width = ui.windows_caption_width(state.window)}
 	commands, visible := layout(
 		view,
 		&library_client,
