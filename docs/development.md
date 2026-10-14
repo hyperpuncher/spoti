@@ -5,7 +5,8 @@
 install Odin, `just`, a C compiler, and `pkg-config`.
 the primary Geist fonts are included in `assets/fonts`. on Linux, install
 fontconfig and the distribution's Noto script, symbol, and CJK font packages
-for broad Unicode coverage. install the color emoji font package for inline
+for broad Unicode coverage (on Ubuntu: `fonts-noto-core`, `fonts-noto-cjk`,
+`fonts-noto-extra`). install the color emoji font package for inline
 emoji, such as Noto Color Emoji on Linux. see
 [font details](../assets/fonts/FONTS.md).
 
