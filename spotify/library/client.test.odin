@@ -1,5 +1,6 @@
 package library
 
+import oauth "../oauth"
 import "core:mem/virtual"
 import "core:strings"
 import "core:sync/chan"
@@ -206,6 +207,76 @@ like_toggle_syncs_sidebar_membership :: proc(t: ^testing.T) {
 	// Liked Songs has no sidebar membership to sync.
 	sync_library_membership(&client, .Liked, "anything", true)
 	testing.expect_value(t, len(client.pages[.Playlists].items), 0)
+}
+
+@(test)
+failed_worker_requests_keep_owned_identity_and_finish_once :: proc(t: ^testing.T) {
+	client := Client {
+		cancel = true,
+	}
+	client.results, _ = chan.create_buffered(chan.Chan(Result), 1, context.allocator)
+	defer chan.destroy(client.results)
+	tokens := oauth.Tokens {
+		expires_at = time.unix(1, 0),
+	}
+	streaming: oauth.Tokens
+	// Expired tokens plus cancellation cannot start auth or make a request.
+	for kind in Request_Kind {
+		if kind == .Auth || kind == .Release_Feed {continue}
+		request := Request {
+			kind          = kind,
+			source        = .Playlist,
+			list          = .Albums,
+			group         = .Single,
+			id            = strings.clone("page"),
+			query         = strings.clone("query"),
+			serial        = 7,
+			playlist_id   = strings.clone("playlist"),
+			playlist_name = strings.clone("name"),
+			item_uri      = strings.clone("spotify:track:item"),
+			device_id     = strings.clone("device"),
+			command       = .Next,
+			liked         = true,
+			refresh       = true,
+		}
+		handle(&client, &tokens, &streaming, request)
+		free_request(request)
+		result, received := chan.try_recv(client.results)
+		if !testing.expect(t, received) {continue}
+		defer free_result(result)
+		testing.expect(t, !result.ok && result.status == -1 && result.kind == kind)
+		testing.expect_value(t, result.id, "page")
+		testing.expect_value(t, result.search_query, "query")
+		testing.expect_value(t, result.search_serial, u64(7))
+		testing.expect_value(t, result.playlist_id, "playlist")
+		testing.expect_value(t, result.playlist_name, "name")
+		testing.expect_value(
+			t,
+			result.track_uri,
+			kind == .Remove_From_Playlist ? "spotify:track:item" : "",
+		)
+		_, extra := chan.try_recv(client.results)
+		testing.expect(t, !extra)
+	}
+	// Rejection leaves the write idle and must release its owned strings.
+	testing.expect(
+		t,
+		!remove_track_from_playlist(&client, "playlist", "name", "spotify:track:item"),
+	)
+	testing.expect(t, !client.write_pending)
+	// Partially created workers still own their queues, even with no thread.
+	client.requests, _ = chan.create_buffered(chan.Chan(Request), 1, context.allocator)
+	_ = chan.send(client.requests, Request{kind = .Detail, id = strings.clone("queued")})
+	fake_worker: thread.Thread
+	client.worker, client.state = &fake_worker, .Ready
+	testing.expect(
+		t,
+		!remove_track_from_playlist(&client, "playlist", "name", "spotify:track:item"),
+	)
+	client.worker = nil
+	_ = chan.send(client.results, Result{kind = .Detail, id = strings.clone("reply")})
+	stop_workers(&client)
+	testing.expect(t, client.requests.impl == nil && client.results.impl == nil)
 }
 
 @(test)

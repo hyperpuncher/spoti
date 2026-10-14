@@ -1,9 +1,9 @@
 #+private
 package http
 
-// Small libcurl C ABI used by OAuth and Spotify media requests. Odin's
-// installed vendor:curl package links optional mbedTLS development libraries
-// unavailable on this system; the system libcurl already handles TLS.
+// Small C ABI for the platform's selected libcurl, including WebSockets.
+// Unix links the installed library; Windows links vcpkg's import library.
+// Odin's vendor:curl selects its bundled Windows archive instead.
 // Constants below are CURL* values from curl.h.
 import c "core:c/libc"
 

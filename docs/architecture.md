@@ -21,6 +21,11 @@ network requests, cover decoding, and playback decoding stay off the UI
 thread. each network worker owns its reusable curl handle. workers exchange
 bounded messages with the UI rather than change UI-owned state directly.
 
+library requests transfer ownership to the queue, including rejected sends.
+each handled request creates one owned result and sends it on scope exit, so
+failure paths retain the same identity as successful reads. partial worker
+startup uses the normal shutdown path to close, drain, and release its queues.
+
 `main.odin` keeps an owned `App` and a short-lived `Frame`. its frame stages
 handle events, navigation, library results, playback, scrolling, layout,
 artwork, commands, and persistence. stage order matters: a playback transfer

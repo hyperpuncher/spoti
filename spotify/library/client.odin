@@ -33,7 +33,7 @@ Request_Kind :: enum {
 	More,
 	Search,
 	Like,
-	Me, // result-only: the signed-in account id
+	Me, // the signed-in account profile
 	Add_To_Playlist,
 	Remove_From_Playlist,
 	Devices,
@@ -206,16 +206,13 @@ free_request :: proc(request: Request) {
 	delete(request.command_state)
 }
 
-// Sends a worker request; drops and frees it when the queue is full.
+// Consumes an owned request, freeing it if the worker cannot accept it.
 queue_request :: proc(client: ^Client, request: ^Request) -> bool {
-	if client.worker == nil ||
-	   (client.state != .Ready &&
-			   !(request.kind == .Release_Feed && release_worker_ready(client))) {return false}
-	if !chan.try_send(client.requests, request^) {
-		free_request(request^)
-		return false
-	}
-	return true
+	if client.worker != nil &&
+	   (client.state == .Ready || request.kind == .Release_Feed && release_worker_ready(client)) &&
+	   chan.try_send(client.requests, request^) {return true}
+	free_request(request^)
+	return false
 }
 
 // The access token lives about an hour. Search and pagination fire long
@@ -238,88 +235,26 @@ ensure_tokens :: proc(client: ^Client, tokens: ^oauth.Tokens) -> bool {
 	return true
 }
 
-fail_request :: proc(client: ^Client, request: Request) {
-	#partial switch request.kind {
-	case .Index:
-		send(client, Result{kind = .Index, list = request.list, status = -1})
-	case .Detail:
-		send(
-			client,
-			Result {
-				kind = .Detail,
-				source = request.source,
-				id = strings.clone(request.id),
-				status = -1,
-			},
-		)
-	case .More:
-		send(
-			client,
-			Result {
-				kind = .More,
-				source = request.source,
-				id = strings.clone(request.id),
-				status = -1,
-			},
-		)
-	case .Search:
-		send(
-			client,
-			Result {
-				kind = .Search,
-				search_serial = request.serial,
-				search_query = strings.clone(request.query),
-				status = -1,
-			},
-		)
-	case .Like:
-		send(
-			client,
-			Result {
-				kind = .Like,
-				source = request.source,
-				id = strings.clone(request.id),
-				liked = request.liked,
-				status = -1,
-			},
-		)
-	case .Me:
-		send(client, Result{kind = .Me, status = -1})
-	case .Devices:
-		send(client, Result{kind = .Devices, status = -1})
-	case .Add_To_Playlist:
-		send(
-			client,
-			Result {
-				kind = .Add_To_Playlist,
-				playlist_id = strings.clone(request.playlist_id),
-				playlist_name = strings.clone(request.playlist_name),
-				status = -1,
-			},
-		)
-	case .Remove_From_Playlist:
-		send(
-			client,
-			Result {
-				kind = .Remove_From_Playlist,
-				playlist_id = strings.clone(request.playlist_id),
-				playlist_name = strings.clone(request.playlist_name),
-				track_uri = strings.clone(request.item_uri),
-				status = -1,
-			},
-		)
-	case .Transfer:
-		send(
-			client,
-			Result{kind = .Transfer, device_id = strings.clone(request.device_id), status = -1},
-		)
-	case .Command:
-		send(client, Result{kind = .Command, command = request.command, status = -1})
-	case .Player_State:
-		send(client, Result{kind = .Player_State, status = -1})
-	case .Release_Feed:
-		send(client, Result{kind = request.kind, status = -1})
+// Replies own the metadata that must survive the request's cleanup.
+// Both success and failure use the same identity and search serial.
+request_result :: proc(request: Request) -> Result {
+	result := Result {
+		kind          = request.kind,
+		list          = request.list,
+		source        = request.source,
+		group         = request.group,
+		id            = strings.clone(request.id),
+		search_serial = request.serial,
+		search_query  = strings.clone(request.query),
+		liked         = request.liked,
+		refresh       = request.refresh,
+		playlist_id   = strings.clone(request.playlist_id),
+		playlist_name = strings.clone(request.playlist_name),
+		device_id     = strings.clone(request.device_id),
+		command       = request.command,
 	}
+	if request.kind == .Remove_From_Playlist {result.track_uri = strings.clone(request.item_uri)}
+	return result
 }
 
 handle :: proc(
@@ -329,68 +264,54 @@ handle :: proc(
 	reuse: rawptr = nil,
 ) {
 	diagnostic.writef("library request=%v offset=%d", request.kind, request.offset)
+	if request.kind == .Auth {return} 	// sign-in failures are results, not requests
 	if request.kind == .Release_Feed {
 		handle_release_feed(client, streaming, request, reuse)
 		return
 	}
-	if !ensure_tokens(client, tokens) {
-		fail_request(client, request)
-		return
-	}
+	result := request_result(request)
+	defer send(client, result)
+	if !ensure_tokens(client, tokens) {result.status = -1; return}
 	#partial switch request.kind {
 	case .Index:
-		retry_after: int
-		page: Page
-		status: int
-		ok := false
 		if request.list == .Playlists && (request.offset == 0 || request.account != "") {
-			page, status, ok = read_session_rootlist(client, streaming, request, reuse)
+			result.page, result.status, result.ok = read_session_rootlist(
+				client,
+				streaming,
+				request,
+				reuse,
+			)
 			diagnostic.writef(
 				"library rootlist offset=%d status=%d ok=%v rows=%d",
 				request.offset,
-				status,
-				ok,
-				len(page.items),
+				result.status,
+				result.ok,
+				len(result.page.items),
 			)
 		}
 		// Never mix native rootlist offsets with Web API offsets.
-		if !ok && request.account == "" {
-			page, status, ok = fetch_index(
+		if !result.ok && request.account == "" {
+			result.page, result.status, result.ok = fetch_index(
 				tokens.access,
 				request.list,
 				request.offset,
 				request.cursor,
 				reuse,
-				&retry_after,
+				&result.retry_after,
 				refresh = request.refresh,
 			)
 		}
-		send(
-			client,
-			Result {
-				kind = .Index,
-				list = request.list,
-				page = page,
-				status = status,
-				ok = ok,
-				retry_after = retry_after,
-				refresh = request.refresh,
-			},
-		)
 	case .Detail:
-		detail: Detail
-		status: int
-		ok: bool
 		if request.source == .Playlist &&
 		   authorize_session(client, streaming, interactive = false) {
-			detail, status, ok = fetch_session_playlist_detail(
+			result.detail, result.status, result.ok = fetch_session_playlist_detail(
 				streaming.access,
 				request.id,
 				reuse,
 				request.refresh,
 			)
 		} else {
-			detail, status, ok = fetch_detail(
+			result.detail, result.status, result.ok = fetch_detail(
 				tokens.access,
 				request.source,
 				request.id,
@@ -398,8 +319,9 @@ handle :: proc(
 				refresh = request.refresh,
 			)
 		}
-		if ok && request.source == .Playlist && detail.rows_error == 403 {
-			rows, total, next, more, rows_status, rows_ok := read_session_playlist(
+		detail := &result.detail
+		if result.ok && request.source == .Playlist && detail.rows_error == 403 {
+			rows, total, next, more, status, ok := read_session_playlist(
 				client,
 				streaming,
 				request.id,
@@ -407,73 +329,37 @@ handle :: proc(
 				virtual.arena_allocator(&detail.arena),
 				reuse,
 			)
-			if rows_ok {
+			if ok {
 				detail.rows, detail.total, detail.next_offset, detail.has_more =
 					rows, total, next, more
 				detail.rows_error = 0
 			} else {
-				detail.rows_error = rows_status != 0 ? rows_status : -1
+				detail.rows_error = status != 0 ? status : -1
 			}
 		}
-		// Popular rides the open, so hero play, row clicks and the footer
-		// queue all read the same rows. A miss just hides the section.
-		if ok && request.source == .Artist {
-			read_artist_overview(client, streaming, &detail, reuse)
-		}
-		if ok {
+		// Popular and playback share the rows from this open.
+		if result.ok &&
+		   request.source == .Artist {read_artist_overview(client, streaming, detail, reuse)}
+		if result.ok {
 			detail.liked = request.saved
 			if !request.saved && time.since(client.saved_at) >= 0 {
 				if liked, known := fetch_saved(tokens.access, request.source, request.id, reuse);
 				   known {
 					detail.liked = liked
 				} else {
-					// A failed check must not read as "not saved", and must not
-					// be repeated on every open.
 					client.saved_at = time.time_add(time.now(), SAVED_CHECK_BACKOFF)
 				}
 			}
 		}
-		send(
-			client,
-			Result {
-				kind = .Detail,
-				source = request.source,
-				id = strings.clone(request.id),
-				detail = detail,
-				status = status,
-				ok = ok,
-			},
-		)
 	case .Like:
 		uri := library_uri(request.source, request.id)
 		defer delete(uri)
-		status, ok := set_saved(tokens.access, uri, request.liked, reuse)
-		send(
-			client,
-			Result {
-				kind = .Like,
-				source = request.source,
-				id = strings.clone(request.id),
-				liked = request.liked,
-				status = status,
-				ok = ok,
-			},
-		)
+		result.status, result.ok = set_saved(tokens.access, uri, request.liked, reuse)
 	case .More:
-		aresult := Result {
-			kind   = .More,
-			source = request.source,
-			id     = strings.clone(request.id),
-		}
-		if virtual.arena_init_growing(&aresult.rows_arena) != nil {
-			aresult.status = 0
-			send(client, aresult)
-			return
-		}
-		allocator := virtual.arena_allocator(&aresult.rows_arena)
+		if virtual.arena_init_growing(&result.rows_arena) != nil {return}
+		allocator := virtual.arena_allocator(&result.rows_arena)
 		if request.source == .Artist {
-			aresult.group = request.group
-			aresult.releases, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
+			result.releases, result.total, result.next_offset, result.has_more, result.status, result.ok =
 				fetch_artist_albums(
 					tokens.access,
 					request.id,
@@ -484,7 +370,7 @@ handle :: proc(
 				)
 		} else if request.source == .Playlist &&
 		   authorize_session(client, streaming, interactive = false) {
-			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
+			result.rows, result.total, result.next_offset, result.has_more, result.status, result.ok =
 				fetch_playlist_rows(
 					streaming.access,
 					request.id,
@@ -494,7 +380,7 @@ handle :: proc(
 					request.refresh,
 				)
 		} else {
-			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
+			result.rows, result.total, result.next_offset, result.has_more, result.status, result.ok =
 				fetch_track_page(
 					tokens.access,
 					request.source,
@@ -506,8 +392,8 @@ handle :: proc(
 					refresh = request.refresh,
 				)
 		}
-		if request.source == .Playlist && !aresult.ok && aresult.status == 403 {
-			aresult.rows, aresult.total, aresult.next_offset, aresult.has_more, aresult.status, aresult.ok =
+		if request.source == .Playlist && !result.ok && result.status == 403 {
+			result.rows, result.total, result.next_offset, result.has_more, result.status, result.ok =
 				read_session_playlist(
 					client,
 					streaming,
@@ -517,70 +403,48 @@ handle :: proc(
 					reuse,
 				)
 		}
-		send(client, aresult)
 	case .Search:
-		pages, status, ok := fetch_search(tokens.access, request.query, reuse)
-		send(
-			client,
-			Result {
-				kind = .Search,
-				search_serial = request.serial,
-				search_query = strings.clone(request.query),
-				search_pages = pages,
-				status = status,
-				ok = ok,
-			},
+		result.search_pages, result.status, result.ok = fetch_search(
+			tokens.access,
+			request.query,
+			reuse,
 		)
 	case .Me:
-		id, status, ok := fetch_me(tokens.access, reuse)
-		send(client, Result{kind = .Me, me_id = id, status = status, ok = ok})
+		result.me_id, result.status, result.ok = fetch_me(tokens.access, reuse)
 	case .Devices:
-		devices, status, ok := fetch_devices(tokens.access, reuse)
-		send(client, Result{kind = .Devices, devices = devices, status = status, ok = ok})
+		result.devices, result.status, result.ok = fetch_devices(tokens.access, reuse)
 	case .Transfer:
-		status, ok := transfer_playback(tokens.access, request.device_id, request.play, reuse)
-		send(
-			client,
-			Result {
-				kind = .Transfer,
-				device_id = strings.clone(request.device_id),
-				status = status,
-				ok = ok,
-			},
+		result.status, result.ok = transfer_playback(
+			tokens.access,
+			request.device_id,
+			request.play,
+			reuse,
 		)
 	case .Command:
-		status, ok := send_command(
+		result.status, result.ok = send_command(
 			tokens.access,
 			request.command,
 			request.command_value,
 			request.command_state,
 			reuse,
 		)
-		send(client, Result{kind = .Command, command = request.command, status = status, ok = ok})
 	case .Player_State:
-		state, status, ok := fetch_player_state(tokens.access, reuse)
-		send(client, Result{kind = .Player_State, player = state, status = status, ok = ok})
-	case .Add_To_Playlist, .Remove_From_Playlist:
-		removed := request.kind == .Remove_From_Playlist
+		result.player, result.status, result.ok = fetch_player_state(tokens.access, reuse)
+	case .Add_To_Playlist:
+		result.status, result.ok, result.total = add_playlist_entry(
+			tokens.access,
+			request.playlist_id,
+			request.item_uri,
+			reuse,
+		)
+	case .Remove_From_Playlist:
 		uris := [?]string{request.item_uri}
-		result := Result {
-			kind          = request.kind,
-			playlist_id   = strings.clone(request.playlist_id),
-			playlist_name = strings.clone(request.playlist_name),
-		}
-		if removed {
-			status, ok := remove_from_playlist(tokens.access, request.playlist_id, uris[:], reuse)
-			result.status, result.ok, result.track_uri =
-				status, ok, strings.clone(request.item_uri)
-		} else {
-			result.status, result.ok, result.total = add_playlist_entry(
-				tokens.access,
-				request.playlist_id,
-				request.item_uri,
-				reuse,
-			)
-		}
-		send(client, result)
+		result.status, result.ok = remove_from_playlist(
+			tokens.access,
+			request.playlist_id,
+			uris[:],
+			reuse,
+		)
 	}
 }
 
@@ -595,12 +459,10 @@ run_covers :: proc(pointer: rawptr) {
 		image: artwork.Image
 		if artwork.valid_cover_url(request.url) {
 			bytes, status, fetched := cover_get(request.url, reuse)
-			if fetched {
-				if status == 200 {
-					image, _ = artwork.decode(bytes[:])
-					if len(image.pixels) == 0 {cache_remove("cover", request.url)}
-				}
-				delete(bytes)
+			defer delete(bytes)
+			if fetched && status == 200 {
+				image, _ = artwork.decode(bytes[:])
+				if len(image.pixels) == 0 {cache_remove("cover", request.url)}
 			}
 		}
 		diagnostic.cover_decode_result(len(image.pixels) > 0)
@@ -635,7 +497,7 @@ free_result :: proc(result: Result) {
 	delete(local.track_uri)
 }
 
-start :: proc(client: ^Client) -> bool {
+start :: proc(client: ^Client) -> (ok: bool) {
 	if client.worker != nil {return true}
 	client.cancel, client.failed = false, false
 	id, found := resolve_client_id()
@@ -644,66 +506,35 @@ start :: proc(client: ^Client) -> bool {
 		client.state = .Missing_Client_ID
 		return false
 	}
+	// Partial startup uses the same teardown as a normal stop.
+	defer if !ok {stop_workers(client); client.state = .Failed}
 	allocation: runtime.Allocator_Error
 	client.requests, allocation = chan.create_buffered(chan.Chan(Request), 8, context.allocator)
-	if allocation != nil {client.state = .Failed; return false}
+	if allocation != nil {return false}
 	client.results, allocation = chan.create_buffered(chan.Chan(Result), 8, context.allocator)
-	if allocation != nil {
-		chan.destroy(client.requests)
-		client.state = .Failed
-		return false
-	}
+	if allocation != nil {return false}
 	client.cover_requests, allocation = chan.create_buffered(
 		chan.Chan(Cover_Request),
 		16,
 		context.allocator,
 	)
-	if allocation != nil {
-		chan.destroy(client.requests)
-		chan.destroy(client.results)
-		client.state = .Failed
-		return false
-	}
+	if allocation != nil {return false}
 	client.cover_results, allocation = chan.create_buffered(
 		chan.Chan(Cover_Result),
 		16,
 		context.allocator,
 	)
-	if allocation != nil {
-		chan.destroy(client.requests)
-		chan.destroy(client.results)
-		chan.destroy(client.cover_requests)
-		client.state = .Failed
-		return false
-	}
+	if allocation != nil {return false}
 	client.worker = thread.create_and_start_with_data(client, run)
 	client.cover_worker = thread.create_and_start_with_data(client, run_covers)
-	if client.worker == nil || client.cover_worker == nil {
-		sync.atomic_store(&client.cancel, true)
-		chan.close(client.requests)
-		chan.close(client.results)
-		chan.close(client.cover_requests)
-		chan.close(client.cover_results)
-		if client.worker != nil {thread.join(client.worker); thread.destroy(client.worker)}
-		if client.cover_worker != nil {
-			thread.join(client.cover_worker)
-			thread.destroy(client.cover_worker)
-		}
-		chan.destroy(client.requests)
-		chan.destroy(client.results)
-		chan.destroy(client.cover_requests)
-		chan.destroy(client.cover_results)
-		client.worker, client.cover_worker = nil, nil
-		client.state = .Failed
-		return false
-	}
+	if client.worker == nil || client.cover_worker == nil {return false}
 	diagnostic.write("library and cover workers started")
 	client.state = .Authorizing
 	client.remaining_initial = 3
 	for kind in ([]Kind{Kind.Playlists, Kind.Albums, Kind.Artists}) {
 		// Paint the cache now so the first frame is never blank, then let
 		// the worker replace it with a fresh read behind the scenes.
-		if page, _, ok := fetch_index("", kind, cache_only = true); ok {
+		if page, _, cached := fetch_index("", kind, cache_only = true); cached {
 			destination := &client.pages[kind]
 			free_page(destination)
 			destination^ = page
@@ -905,11 +736,7 @@ detail_loading_visible :: proc(client: ^Client) -> bool {
 // Add_To_Playlist result that drives the toast. Only one write rides at a
 // time, so a second drop cannot stack behind a slow write.
 queue_playlist_add :: proc(client: ^Client, playlist_id, playlist_name, item_uri: string) -> bool {
-	if client.worker == nil ||
-	   client.state != .Ready ||
-	   len(playlist_id) == 0 ||
-	   len(item_uri) == 0 ||
-	   client.write_pending {return false}
+	if len(playlist_id) == 0 || len(item_uri) == 0 || client.write_pending {return false}
 	request := Request {
 		kind          = .Add_To_Playlist,
 		playlist_id   = strings.clone(playlist_id),
@@ -1098,8 +925,6 @@ detail_buffer_stash :: proc(client: ^Client) {
 	if len(outgoing.rows) == 0 &&
 	   len(outgoing.albums.items) == 0 &&
 	   len(outgoing.singles.items) == 0 {return}
-	free_detail(&client.prev_detail)
-	client.prev_detail = {}
 	move_detail(&client.prev_detail, outgoing)
 	client.prev_at = time.now()
 }
@@ -1529,8 +1354,6 @@ apply :: proc(client: ^Client, result: Result) {
 		)
 	case .Player_State:
 		if !local.ok {
-			free_player_state(local.player)
-			local.player = {}
 			client.remote_playing = false
 			client.remote_gone = local.status == 204
 			return
@@ -1566,16 +1389,16 @@ apply :: proc(client: ^Client, result: Result) {
 }
 
 stop_workers :: proc(client: ^Client) {
-	if client.worker == nil {return}
 	sync.atomic_store(&client.cancel, true)
 	chan.close(client.requests)
 	chan.close(client.results)
 	chan.close(client.cover_requests)
 	chan.close(client.cover_results)
-	thread.join(client.worker)
-	thread.destroy(client.worker)
-	thread.join(client.cover_worker)
-	thread.destroy(client.cover_worker)
+	for worker in ([]^thread.Thread{client.worker, client.cover_worker}) {
+		if worker == nil {continue}
+		thread.join(worker)
+		thread.destroy(worker)
+	}
 	for request in chan.try_recv(client.requests) {free_request(request)}
 	for result in chan.try_recv(client.results) {free_result(result)}
 	for request in chan.try_recv(client.cover_requests) {delete(request.url)}
@@ -1584,6 +1407,10 @@ stop_workers :: proc(client: ^Client) {
 	chan.destroy(client.results)
 	chan.destroy(client.cover_requests)
 	chan.destroy(client.cover_results)
+	client.requests = {}
+	client.results = {}
+	client.cover_requests = {}
+	client.cover_results = {}
 	client.worker, client.cover_worker = nil, nil
 }
 
