@@ -8,15 +8,15 @@ import library "spotify/library"
 import player "spotify/player"
 
 @(test)
-worker_cancellation_closes_once_and_preserves_queued_packets :: proc(t: ^testing.T) {
+worker_cancellation_preserves_queued_packets :: proc(t: ^testing.T) {
 	queue, err := chan.create_buffered(chan.Chan(player.Packet), 1, context.allocator)
 	if !testing.expect(t, err == nil) {return}
 	defer chan.destroy(queue)
 	_ = chan.send(queue, player.Packet{kind = .End})
-	cancel, closed := false, false
-	cancel_worker(queue, &cancel, &closed)
-	cancel_worker(queue, &cancel, &closed)
-	testing.expect(t, sync.atomic_load(&cancel) && closed)
+	cancel := false
+	cancel_worker(queue, &cancel)
+	cancel_worker(queue, &cancel)
+	testing.expect(t, sync.atomic_load(&cancel) && chan.is_closed(queue))
 	testing.expect(t, !chan.send(queue, player.Packet{kind = .Failed}))
 	packet, received := chan.try_recv(queue)
 	testing.expect(t, received && packet.kind == .End)

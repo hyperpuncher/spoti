@@ -605,7 +605,6 @@ App :: struct {
 	preload_work:           Preload_Work,
 	preload_attempted:      string,
 	cancel:                 bool,
-	closed:                 bool,
 	stream:                 ^sdl.AudioStream,
 	title:                  string,
 	artist:                 string,
@@ -823,7 +822,7 @@ main :: proc() {
 	restore_pending = len(app_state.last_collection) > 0
 	button_anims = make(map[string]Button_Fx)
 	defer {
-		if worker != nil {release_worker(worker, queue, &cancel, closed)}
+		if worker != nil {release_worker(worker, queue, &cancel)}
 		if preload_worker != nil {
 			sync.atomic_store(&preload_work.cancel, true)
 			thread.join(preload_worker)
@@ -1305,7 +1304,7 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 			seek_dragging, start_paused = false, false
 			seek_ms = 0
 			if worker != nil && stage != .Stopping {
-				cancel_worker(queue, &cancel, &closed)
+				cancel_worker(queue, &cancel)
 				clear_audio_stream(&stream)
 				stage = .Stopping
 			}
@@ -1420,13 +1419,13 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 		play_after_stop, replay_pending = false, false
 	}
 	if stop_pressed && worker != nil && stage != .Stopping {
-		cancel_worker(queue, &cancel, &closed)
+		cancel_worker(queue, &cancel)
 		clear_audio_stream(&stream)
 		stage = .Stopping
 	}
 	if stage == .Stopping && thread.is_done(worker) {
 		redraw = true
-		release_worker(worker, queue, &cancel, closed)
+		release_worker(worker, queue, &cancel)
 		worker = nil
 		finished = false
 		sent_frames, sample_rate = 0, 0
@@ -1440,9 +1439,9 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 	}
 	if stage == .Failed && worker != nil {
 		start_paused = false
-		cancel_worker(queue, &cancel, &closed)
+		cancel_worker(queue, &cancel)
 		if thread.is_done(worker) {
-			release_worker(worker, queue, &cancel, closed)
+			release_worker(worker, queue, &cancel)
 			worker = nil
 		}
 	}
@@ -1521,7 +1520,7 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 				start_paused, replay_pending, seek_dragging = false, false, false
 				seek_ms = 0
 				clear_audio_stream(&stream)
-				cancel_worker(queue, &cancel, &closed)
+				cancel_worker(queue, &cancel)
 				stage = .Stopping
 				state_dirty = true
 				show_toast(app, "Unavailable track removed")
@@ -2496,7 +2495,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			if event.set_repeat_context {connect_repeat_context = event.repeat_context}
 		case .Inactive:
 			if worker != nil && stage != .Stopping {
-				cancel_worker(queue, &cancel, &closed)
+				cancel_worker(queue, &cancel)
 				clear_audio_stream(&stream)
 				stage = .Stopping
 			}
@@ -2608,7 +2607,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	if restart_playback || seek_requested {
 		replay_pending = false
 		if worker != nil {
-			cancel_worker(queue, &cancel, &closed)
+			cancel_worker(queue, &cancel)
 			clear_audio_stream(&stream)
 			stage = .Stopping
 			play_after_stop = true
@@ -2631,7 +2630,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		#partial switch stage {
 		case .Idle, .Ended, .Failed:
 			if worker == nil || thread.is_done(worker) {
-				if worker != nil {release_worker(worker, queue, &cancel, closed); worker = nil}
+				if worker != nil {release_worker(worker, queue, &cancel); worker = nil}
 				alloc_error: runtime.Allocator_Error
 				queue, alloc_error = chan.create_buffered(
 					chan.Chan(player.Packet),
@@ -2643,7 +2642,6 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					stage = .Failed
 				} else {
 					sync.atomic_store(&cancel, false)
-					closed = false
 					work = Login_Work {
 						queue     = queue,
 						cancel    = &cancel,

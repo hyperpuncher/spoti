@@ -374,19 +374,13 @@ login_and_decode :: proc(pointer: rawptr) {
 	}
 }
 
-cancel_worker :: proc(queue: chan.Chan(player.Packet), cancel, closed: ^bool) {
+cancel_worker :: proc(queue: chan.Chan(player.Packet), cancel: ^bool) {
 	sync.atomic_store(cancel, true)
-	if !closed^ {chan.close(queue); closed^ = true}
+	chan.close(queue)
 }
 
-release_worker :: proc(
-	worker: ^thread.Thread,
-	queue: chan.Chan(player.Packet),
-	cancel: ^bool,
-	closed: bool,
-) {
-	closed := closed
-	cancel_worker(queue, cancel, &closed)
+release_worker :: proc(worker: ^thread.Thread, queue: chan.Chan(player.Packet), cancel: ^bool) {
+	cancel_worker(queue, cancel)
 	thread.join(worker)
 	thread.destroy(worker)
 	for packet in chan.try_recv(queue) {
