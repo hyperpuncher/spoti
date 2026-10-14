@@ -15,7 +15,7 @@ Visible_Items :: struct {
 }
 
 Frame_Visible :: struct {
-	cards, tracks, releases, singles: Visible_Items,
+	cards, tracks, releases, singles, feed: Visible_Items,
 }
 
 // Release cards stop growing past a readable cover; wider windows gain
@@ -353,22 +353,18 @@ library_card :: proc(
 		},
 		) {
 			text_width := card_width - padding * 2
-			clay.Text(
-				hero_fit_text(ui_state, entry.name, text_width, 14, 0, 1, context.temp_allocator),
-				clay.TextElementConfig{fontSize = 14, textColor = WHITE, wrapMode = .None},
+			fitted_text(
+				ui_state,
+				entry.name,
+				text_width,
+				{fontSize = 14, textColor = WHITE, wrapMode = .None},
 			)
 			if len(entry.subtitle) > 0 {
-				clay.Text(
-					hero_fit_text(
-						ui_state,
-						entry.subtitle,
-						text_width,
-						12,
-						0,
-						1,
-						context.temp_allocator,
-					),
-					clay.TextElementConfig{fontSize = 12, textColor = MUTED, wrapMode = .None},
+				fitted_text(
+					ui_state,
+					entry.subtitle,
+					text_width,
+					{fontSize = 12, textColor = MUTED, wrapMode = .None},
 				)
 			}
 		}
@@ -499,7 +495,8 @@ sidebar :: proc(
 							u32(next),
 							card_width,
 							d,
-							selected = card_selected(&page.items[next], &client.detail),
+							selected = !client.release_feed.open &&
+							card_selected(&page.items[next], &client.detail),
 							pinned = state_is_pinned(app_state, page.items[next].uri),
 							clip_slot = u32(next - visible.first),
 							drop_target = next == drop_target,
@@ -1210,7 +1207,18 @@ artist_links_row :: proc(
 	}
 }
 
+fitted_text :: proc(state: ^ui.State, text: string, width: f32, style: clay.TextElementConfig) {
+	clay.Text(
+		hero_fit_text(state, text, width, style.fontSize, style.fontId, 1, context.temp_allocator),
+		style,
+	)
+}
+
 detail_play_enabled :: proc(client: ^library.Client) -> bool {
+	return !client.release_feed.open && detail_rows_ready(client)
+}
+
+detail_rows_ready :: proc(client: ^library.Client) -> bool {
 	return client.detail.ready && client.detail.rows_error == 0 && len(client.detail.rows) > 0
 }
 
@@ -1384,6 +1392,20 @@ detail_page :: proc(
 	ui_state: ^ui.State,
 	visible: ^Frame_Visible,
 ) {
+	if client.release_feed.open {
+		release_feed_page(
+			client,
+			textures,
+			fx,
+			available_width,
+			viewport_height,
+			dt,
+			d,
+			ui_state,
+			&visible.feed,
+		)
+		return
+	}
 	detail := &client.detail
 	if clay.UI()(
 	{
@@ -1439,39 +1461,18 @@ detail_page :: proc(
 			// Artists play their Popular tracks; the queue builds from
 			// the same rows as every other collection.
 			{
-				hero_scale, hero_over := button_fx(fx, "hero_play", play_enabled)
-				if clay.UI_WithId(clay.ID("hero_play"))(
-				{
-					layout = {
-						sizing = {
-							width = clay.SizingFixed(56 * d),
-							height = clay.SizingFixed(56 * d),
-						},
-						childAlignment = {x = .Center, y = .Center},
-					},
-				},
-				) {
-					if clay.UI()(
-					{
-						layout = {
-							sizing = {
-								width = clay.SizingFixed(56 * d * hero_scale),
-								height = clay.SizingFixed(56 * d * hero_scale),
-							},
-							childAlignment = {x = .Center, y = .Center},
-						},
-						backgroundColor = play_enabled ? (hero_over ? HERO_HOVER : GREEN) : CARD,
-						cornerRadius = clay.CornerRadiusAll(28 * d * hero_scale),
-					},
-					) {
-						icon_element(
-							textures,
-							"play-filled",
-							play_enabled ? .Dark : .Disabled,
-							22 * d * hero_scale,
-						)
-					}
-				}
+				round_play_button(
+					"hero_play",
+					"play-filled",
+					textures,
+					fx,
+					d,
+					56,
+					22,
+					GREEN,
+					HERO_HOVER,
+					play_enabled,
+				)
 				icon_button(
 					"hero_shuffle",
 					"shuffle",

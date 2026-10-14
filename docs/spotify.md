@@ -32,6 +32,31 @@ see [Spotify's API access changes](https://developer.spotify.com/blog/2024-11-27
 pins are local to spoti. Spotify's own pins are not synced, so a playlist
 pinned in the official app can appear farther down spoti's list.
 
+## what's new
+
+select the bell beside search to see recent music from followed artists.
+large square covers have the title, artists, relative release time, play,
+and save controls beside them. play keeps the feed open. select the cover
+or text to open the album. time labels such as "8 hours ago" use Spotify's
+catalog release timestamp, not the time it added an item to the feed.
+right-click a release to play it, save or remove it from the library, add
+all of its tracks to a playlist, copy its link, or open it in Spotify.
+
+the view reads Spotify's internal music-only `queryWhatsNewFeed` route.
+it reuses saved streaming approval without a browser prompt. there is no
+artist scan or public Web API fallback. the view shows catalog release
+dates within the last seven days, removes duplicate album IDs, and sorts
+newest first. podcasts are excluded.
+
+the worker reads 50 feed items per page.
+validated responses are cached per account for six hours and persist across
+restarts. closing the view stops further page requests. a rate limit stops
+loading until the user reopens the view after Spotify's wait period.
+
+this is an internal route. Spotify can replace its persisted-query hash.
+a rejected query remains a visible error rather than starting an artist
+scan. saving and opening albums still use the existing library operations.
+
 ## Connect
 
 spoti registers as a computer named `spoti` on the streaming account.

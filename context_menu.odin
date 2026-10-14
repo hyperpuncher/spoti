@@ -7,11 +7,14 @@ import library "spotify/library"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
+MENU_ITEMS_MAX :: 5
+
 Menu_Item :: enum {
 	Pin,
 	Copy_Link,
 	Open_In_Spotify,
 	Play,
+	Save_Album,
 	Pick_Sort,
 	Add_To_Playlist,
 	Remove_From_Playlist,
@@ -22,8 +25,8 @@ Context_Menu :: struct {
 	point:        sdl.FPoint,
 	track:        int, // detail row index, or -1 for cards
 	uri:          string, // owned clone of the target
-	items:        [4]Menu_Item,
-	labels:       [4]string,
+	items:        [MENU_ITEMS_MAX]Menu_Item,
+	labels:       [MENU_ITEMS_MAX]string,
 	count:        int,
 	selected:     int, // check-marked row, or -1
 	sorts:        [4]Sort, // sort payload per row for Pick_Sort
@@ -102,6 +105,19 @@ open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 	menu.items[1] = .Open_In_Spotify
 	menu.labels[1] = "Open in Spotify"
 	menu.count = 2
+}
+
+open_release_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, saved: bool) {
+	open_link_menu(menu, point, uri)
+	menu.items = {.Play, .Save_Album, .Add_To_Playlist, .Copy_Link, .Open_In_Spotify}
+	menu.labels = {
+		"Play",
+		saved ? "Remove from library" : "Save to library",
+		"Add to playlist",
+		"Copy link",
+		"Open in Spotify",
+	}
+	menu.count = 5
 }
 
 // Library sort picker for a tab. The current sort carries a check; the tab
@@ -400,6 +416,14 @@ open_menu_at :: proc(
 	point: sdl.FPoint,
 	app_state: ^State,
 ) {
+	if client.release_feed.open {
+		for index in visible.feed.first ..< visible.feed.last {
+			if !hit_clipped("feed_row", "detail_rows", point, u32(index)) {continue}
+			release := &client.release_feed.items[index]
+			open_release_menu(menu, point, release.entry.uri, release_feed_saved(client, release))
+			return
+		}
+	}
 	for index in visible.tracks.first ..< visible.tracks.last {
 		if !hit_clipped("track_row", "detail_rows", point, u32(index)) {continue}
 		removable :=

@@ -157,7 +157,7 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Text)
 		return
 	}
-	for id in ([]string{"toolbar_back", "toolbar_library", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "hero_copy_link", "hero_pin", "autoscroll"}) {
+	for id in ([]string{"toolbar_back", "toolbar_library", "toolbar_releases", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "hero_copy_link", "hero_pin", "autoscroll"}) {
 		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
 		if id == "hero_copy_link" && library.detail_loading_visible(client) {continue}
 		if id == "hero_pin" &&
@@ -188,6 +188,14 @@ update_cursor :: proc(
 	if link_artist && pointer_over("footer_artist") {
 		ui.set_cursor(state, .Pointer)
 		return
+	}
+	if client.release_feed.open {
+		for index in visible.feed.first ..< visible.feed.last {
+			if pointer_over("feed_row", u32(index)) {
+				ui.set_cursor(state, .Pointer)
+				return
+			}
+		}
 	}
 	if client.detail.ready {
 		if artist_links_hovered(client.detail.artist_links, "hero_artist_link", 0) {
@@ -456,7 +464,10 @@ load_more_near_bottom :: proc(client: ^library.Client, filter: library.Kind, d: 
 DETAIL_LOOKAHEAD :: 20
 
 detail_needs_more :: proc(client: ^library.Client, visible: Frame_Visible) -> bool {
-	if !client.detail.ready || !client.detail.has_more || client.detail_loading {return false}
+	if client.release_feed.open ||
+	   !client.detail.ready ||
+	   !client.detail.has_more ||
+	   client.detail_loading {return false}
 	detail := &client.detail
 	if detail.source == .Artist {
 		if detail.albums.has_more {
@@ -498,6 +509,14 @@ ensure_covers :: proc(
 		for entry in page.items[visible.cards.first:visible.cards.last] {
 			ensure_cover(client, textures, entry.image, &budget)
 		}
+	}
+	if client.release_feed.open {
+		if client.covers_pending < 8 {
+			for release in client.release_feed.items[visible.feed.first:visible.feed.last] {
+				ensure_cover(client, textures, release.entry.image, &budget)
+			}
+		}
+		return
 	}
 	if client.detail.ready {
 		ensure_cover(client, textures, client.detail.image, &budget)
@@ -621,6 +640,7 @@ App :: struct {
 	detail_scroll_target:   f32,
 	detail_scroll_armed:    bool,
 	last_detail_uri:        string,
+	release_play_uri:       string,
 	autoscroll_container:   string,
 	autoscroll_anchor:      sdl.FPoint,
 	autoscroll_moving:      bool,
@@ -780,6 +800,7 @@ main :: proc() {
 	detail_scroll_armed = false
 	last_detail_uri = ""
 	defer delete(last_detail_uri)
+	defer delete(release_play_uri)
 	autoscroll_container = ""
 	autoscroll_anchor = sdl.FPoint{}
 	autoscroll_moving = false
@@ -938,7 +959,10 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		   library_client.state == .Loading ||
 		   library_client.detail_loading ||
 		   library_client.search_loading ||
-		   library_client.covers_pending > 0 {wait_ms = 40}
+		   library_client.covers_pending > 0 ||
+		   (library_client.release_feed.open &&
+				   !library_client.release_feed.done &&
+				   library.release_worker_ready(&library_client)) {wait_ms = 40}
 		for pending in library_client.pending {
 			if pending {wait_ms = 40; break}
 		}
@@ -1268,6 +1292,7 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 		_ = library.start(&library_client)
 	}
 	if library.poll(&library_client) {redraw = true}
+	library.advance_releases(&library_client)
 	if sync.atomic_exchange(&connect_client.pending, false) {redraw = true}
 	// Stop local audio before entering remote control. This must happen
 	// before app_playback, not in layout, where the frame flag is lost.
@@ -1664,7 +1689,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	if last_write_pending && !library_client.write_pending {
 		verb := library_client.write_removed ? "Removed from" : "Added to"
 		if !library_client.write_ok {
-			verb = library_client.write_removed ? "Couldn't remove from" : "Couldn't add to"
+			verb =
+				library_client.write_partial ? "Some tracks added; couldn't finish adding to" : library_client.write_removed ? "Couldn't remove from" : "Couldn't add to"
 		}
 		delete(toast)
 		toast = fmt.aprintf("%s %s", verb, library_client.write_name)
@@ -1714,6 +1740,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		select_all     = select_all,
 		pinned         = detail_pinned,
 		search_mode    = search_mode,
+		releases       = library_client.release_feed.open,
 		sign_in        = library_prompt,
 		can_back       = nav_can_back(&nav),
 		can_forward    = nav_can_forward(&nav),
@@ -1768,7 +1795,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	// container alive across the switch, so without this the
 	// previous page's offset (and glide) would carry over and a
 	// long playlist would reopen at its bottom skeleton tail.
-	current_detail_uri := detail_card_uri(library_client.detail)
+	current_detail_uri :=
+		library_client.release_feed.open ? "spoti:releases" : detail_card_uri(library_client.detail)
 	if current_detail_uri != last_detail_uri {
 		delete(last_detail_uri)
 		last_detail_uri = strings.clone(current_detail_uri)
@@ -1911,7 +1939,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			for entry, index in menu.picker_items {
 				if !hit_index("picker_item", mouse_click, u32(index)) {continue}
 				if strings.has_prefix(entry.uri, "spotify:playlist:") {
-					_ = library.add_track_to_playlist(
+					_ = library.queue_playlist_add(
 						&library_client,
 						entry.uri[len("spotify:playlist:"):],
 						entry.name,
@@ -1942,8 +1970,23 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					copy_spotify_uri(menu.uri)
 				case .Open_In_Spotify:
 					open_spotify_uri(menu.uri)
+				case .Save_Album:
+					if release := release_feed_find(&library_client, menu.uri);
+					   release != nil && !library_client.like_pending {
+						_ = library.toggle_like(
+							&library_client,
+							.Album,
+							menu.uri[len("spotify:album:"):],
+							!release_feed_saved(&library_client, release),
+						)
+					}
 				case .Play:
-					if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
+					if release := release_feed_find(&library_client, menu.uri);
+					   menu.track < 0 && release != nil {
+						if release_feed_load_playback(&library_client, release.entry) {
+							replace_string(&release_play_uri, menu.uri)
+						}
+					} else if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
 						queue_detail_rows(&play_queue, &library_client.detail)
 						stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
 						play_index =
@@ -1974,7 +2017,40 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		}
 		if !keep_open {menu.open = false}
 	} else if clicked {
-		if hit("library_scrollbar", mouse_click) {
+		if hit("toolbar_releases", mouse_click) {
+			if !library_client.release_feed.open {nav_save_scroll(&nav, detail_scroll_y())}
+			was_open := library_client.release_feed.open
+			library.open_releases(&library_client)
+			if !was_open {
+				detail_scroll_armed = false
+				nav_commit(
+					&nav,
+					nav_capture(&library_client, filter, search_mode, search_kind, input),
+				)
+			}
+		} else if library_client.release_feed.open && hit("detail_rows", mouse_click) {
+			for index in visible.feed.first ..< visible.feed.last {
+				if !hit_clipped("feed_row", "detail_rows", mouse_click, u32(index)) {continue}
+				release := &library_client.release_feed.items[index]
+				if hit(release_feed_action("save", index), mouse_click) {
+					if !library_client.like_pending {
+						_ = library.toggle_like(
+							&library_client,
+							.Album,
+							release.entry.uri[len("spotify:album:"):],
+							!release_feed_saved(&library_client, release),
+						)
+					}
+				} else if hit(release_feed_action("play", index), mouse_click) {
+					if release_feed_load_playback(&library_client, release.entry) {
+						replace_string(&release_play_uri, release.entry.uri)
+					}
+				} else {
+					_ = open_entry_page(&nav_ctx, release.entry)
+				}
+				break
+			}
+		} else if hit("library_scrollbar", mouse_click) {
 			begin_scrollbar_drag(&scrollbar_drag, "library_grid", mouse_click.y)
 		} else if hit("detail_scrollbar", mouse_click) {
 			detail_scroll_armed = false
@@ -2213,7 +2289,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				if index := grid_card_at(display_page, visible.cards, mouse); index >= 0 {
 					entry := display_page.items[index]
 					if strings.has_prefix(entry.uri, "spotify:playlist:") {
-						_ = library.add_track_to_playlist(
+						_ = library.queue_playlist_add(
 							&library_client,
 							entry.uri[len("spotify:playlist:"):],
 							entry.name,
@@ -2460,6 +2536,17 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	}
 	hero_pressed = clicked && hit("hero_play", mouse_click)
 	hero_start = hero_pressed && detail_play_enabled(&library_client)
+	if release_play_uri != "" {
+		if track_selected ||
+		   stop_pressed ||
+		   release_play_uri != detail_card_uri(library_client.detail) ||
+		   library_client.detail_error != 0 {
+			replace_string(&release_play_uri, "")
+		} else if detail_rows_ready(&library_client) {
+			hero_start = true
+			replace_string(&release_play_uri, "")
+		}
+	}
 	restart_playback = track_selected || hero_start
 	if remote_control && (track_selected || hero_start) {
 		// An explicit local pick takes the room back; quiet the remote first.

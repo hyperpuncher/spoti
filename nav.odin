@@ -16,6 +16,7 @@ Nav_State :: struct {
 	input:         string, // owned search text
 	detail:        library.Entry, // owned preview; uri is empty when no page is open
 	detail_scroll: f32, // detail_rows y offset, restored on back/forward
+	releases:      bool,
 }
 
 Nav :: struct {
@@ -35,6 +36,7 @@ nav_capture :: proc(
 		searching   = searching,
 		search_kind = search_kind,
 		input       = strings.clone(input),
+		releases    = client.release_feed.open,
 	}
 	detail := client.detail
 	if detail.ready {
@@ -169,6 +171,8 @@ nav_restore :: proc(
 		library.clear_search(client)
 		search_mode^ = false
 	}
+	if state.releases {library.open_releases(client); return}
+	client.release_feed.open = false
 	uri := state.detail.uri
 	detail_pinned^ = len(uri) > 0 && state_is_pinned(app_state, uri)
 	if len(uri) == 0 {

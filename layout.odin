@@ -113,12 +113,13 @@ View :: struct {
 	can_back:       bool,
 	can_forward:    bool,
 	search_mode:    bool,
+	releases:       bool,
 	search_kind:    library.Kind,
 	menu_open:      bool,
 	menu_x:         f32,
 	menu_y:         f32,
 	menu_count:     int,
-	menu_labels:    [4]string,
+	menu_labels:    [MENU_ITEMS_MAX]string,
 	menu_selected:  int,
 	menu_add_index: int, // row index of Add to playlist, or -1
 	picker_open:    bool,
@@ -275,6 +276,16 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 				)
 			}
 		}
+		icon_button(
+			"toolbar_releases",
+			"bell",
+			view.releases ? .Green : .Muted,
+			textures,
+			fx,
+			d,
+			icon_size = 20,
+			target_size = 40,
+		)
 	}
 }
 
@@ -313,6 +324,41 @@ icon_button :: proc(
 	},
 	) {
 		icon_element(textures, icon, active, size)
+	}
+}
+
+round_play_button :: proc(
+	id, icon: string,
+	textures: ^Textures,
+	fx: ^Button_Fx_Ctx,
+	d, size, icon_size: f32,
+	background, hover: clay.Color,
+	enabled := true,
+) {
+	scale, over := button_fx(fx, id, enabled)
+	if clay.UI_WithId(clay.ID(id))(
+	{
+		layout = {
+			sizing = {width = clay.SizingFixed(size * d), height = clay.SizingFixed(size * d)},
+			childAlignment = {x = .Center, y = .Center},
+		},
+	},
+	) {
+		if clay.UI()(
+		{
+			layout = {
+				sizing = {
+					width = clay.SizingFixed(size * d * scale),
+					height = clay.SizingFixed(size * d * scale),
+				},
+				childAlignment = {x = .Center, y = .Center},
+			},
+			backgroundColor = !enabled ? CARD : over ? hover : background,
+			cornerRadius = clay.CornerRadiusAll(size * d * scale / 2),
+		},
+		) {
+			icon_element(textures, icon, enabled ? .Dark : .Disabled, icon_size * d * scale)
+		}
 	}
 }
 
@@ -419,39 +465,17 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 					d,
 					icon_size = 18,
 				)
-				play_scale, play_over := button_fx(fx, "footer_play")
-				if clay.UI_WithId(clay.ID("footer_play"))(
-				{
-					layout = {
-						sizing = {
-							width = clay.SizingFixed(44 * d),
-							height = clay.SizingFixed(44 * d),
-						},
-						childAlignment = {x = .Center, y = .Center},
-					},
-				},
-				) {
-					if clay.UI()(
-					{
-						layout = {
-							sizing = {
-								width = clay.SizingFixed(44 * d * play_scale),
-								height = clay.SizingFixed(44 * d * play_scale),
-							},
-							childAlignment = {x = .Center, y = .Center},
-						},
-						backgroundColor = play_over ? FOOTER_HOVER : WHITE,
-						cornerRadius = clay.CornerRadiusAll(22 * d * play_scale),
-					},
-					) {
-						icon_element(
-							textures,
-							view.button == "pause" ? "pause-filled" : "play-filled",
-							.Dark,
-							18 * d * play_scale,
-						)
-					}
-				}
+				round_play_button(
+					"footer_play",
+					view.button == "pause" ? "pause-filled" : "play-filled",
+					textures,
+					fx,
+					d,
+					44,
+					18,
+					WHITE,
+					FOOTER_HOVER,
+				)
 				icon_button(
 					"footer_next",
 					"skip-forward-filled",
