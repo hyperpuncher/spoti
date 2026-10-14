@@ -380,7 +380,7 @@ fetch_track_page :: proc(
 // but a full track object per item costs most of every page's bytes.
 // Playlist items carry the object under `item`; `track` is deprecated and
 // comes back unusable, so select `item` here, not `track`.
-TRACK_FIELDS :: "uri,name,duration_ms,artists(uri,name),album(uri,name,images)"
+TRACK_FIELDS :: "uri,name,duration_ms,is_playable,artists(uri,name),album(uri,name,images)"
 
 artist_albums_address :: proc(id: string, offset: int, group: Album_Group) -> string {
 	return fmt.aprintf(
@@ -415,7 +415,7 @@ track_page_address :: proc(
 		)
 	case .Album:
 		address = fmt.aprintf(
-			"https://api.spotify.com/v1/albums/%s/tracks?limit=50&offset=%d&fields=total,offset,next,items(uri,name,duration_ms,artists(uri,name))",
+			"https://api.spotify.com/v1/albums/%s/tracks?limit=50&offset=%d&fields=total,offset,next,items(uri,name,duration_ms,is_playable,artists(uri,name))",
 			id,
 			offset,
 		)
@@ -664,7 +664,10 @@ artist_links_from :: proc(artists: []Artist, allocator: runtime.Allocator) -> []
 }
 
 track_row :: proc(track: Track_Ref, allocator: runtime.Allocator) -> (row: Track_Row, ok: bool) {
-	if len(track.name) == 0 || len(track.uri) > 128 || track.duration_ms < 0 {return}
+	if !track_available(track) ||
+	   len(track.name) == 0 ||
+	   len(track.uri) > 128 ||
+	   track.duration_ms < 0 {return}
 	return {
 			uri = strings.clone(track.uri, allocator),
 			name = strings.clone(track.name, allocator),

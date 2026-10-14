@@ -149,3 +149,37 @@ stamp_queue_album_fills_missing_links_without_freeing_temps :: proc(t: ^testing.
 		testing.expect_value(t, item.album_uri, "spotify:album:abc")
 	}
 }
+
+@(test)
+unavailable_queue_entries_are_removed_and_the_following_track_is_selected :: proc(t: ^testing.T) {
+	rows := []library.Track_Row {
+		{uri = "gone"},
+		{uri = "good-one"},
+		{uri = "gone"},
+		{uri = "good-two"},
+	}
+	queue: [dynamic]Play_Item
+	build_play_queue(&queue, rows)
+	defer free_play_queue(&queue)
+	index := 2
+	testing.expect(t, discard_play_track(&queue, "gone", &index))
+	testing.expect_value(t, len(queue), 2)
+	testing.expect_value(t, index, 1)
+	testing.expect_value(t, queue[index].uri, "good-two")
+	testing.expect_value(t, queue[0].order, 1)
+	testing.expect_value(t, queue[1].order, 3)
+}
+
+@(test)
+unavailable_queue_ends_without_retrying_when_nothing_follows :: proc(t: ^testing.T) {
+	queue: [dynamic]Play_Item
+	build_play_queue(&queue, []library.Track_Row{{uri = "good"}, {uri = "gone"}})
+	defer free_play_queue(&queue)
+	index := 1
+	testing.expect(t, !discard_play_track(&queue, "gone", &index))
+	testing.expect_value(t, len(queue), 1)
+	testing.expect_value(t, index, -1)
+	index = 0
+	testing.expect(t, !discard_play_track(&queue, "good", &index))
+	testing.expect_value(t, len(queue), 0)
+}

@@ -43,17 +43,38 @@ free_artist_links :: proc(links: []library.Artist_Link) {
 	delete(links)
 }
 
+free_play_item :: proc(item: Play_Item) {
+	delete(item.uri)
+	delete(item.artist)
+	free_artist_links(item.artist_links)
+	delete(item.album)
+	delete(item.album_uri)
+	delete(item.cover)
+}
+
 free_play_queue :: proc(items: ^[dynamic]Play_Item) {
-	for item in items^ {
-		delete(item.uri)
-		delete(item.artist)
-		free_artist_links(item.artist_links)
-		delete(item.album)
-		delete(item.album_uri)
-		delete(item.cover)
-	}
+	for item in items^ {free_play_item(item)}
 	delete(items^)
 	items^ = nil
+}
+
+// Drop all occurrences, preserving order and selecting the following item.
+// A run of unavailable tracks shrinks the queue instead of retrying forever.
+discard_play_track :: proc(items: ^[dynamic]Play_Item, uri: string, index: ^int) -> bool {
+	next := index^
+	kept := 0
+	for item, at in items^ {
+		if item.uri == uri {
+			if at < index^ {next -= 1}
+			free_play_item(item)
+		} else {
+			items^[kept] = item
+			kept += 1
+		}
+	}
+	resize(items, kept)
+	index^ = next < kept && next >= 0 ? next : -1
+	return index^ >= 0
 }
 
 append_play_item :: proc(
@@ -297,17 +318,18 @@ login_and_decode :: proc(pointer: rawptr) {
 		clear_play_source(work.source)
 		fresh: session.Source
 		authorized := false
+		unavailable := false
 		if work.preloaded.url != "" {
 			fresh = work.preloaded
 			work.preloaded = {}
 			authorized = true
 		} else {
-			fresh, authorized = session.open(.Remember, work.cancel, work.track_url)
+			fresh, authorized = session.open(.Remember, work.cancel, work.track_url, &unavailable)
 		}
 		if !authorized {
 			if !sync.atomic_load(
 				work.cancel,
-			) {_ = chan.send(work.queue, player.Packet{kind = .Failed})}
+			) {_ = chan.send(work.queue, player.Packet{kind = unavailable ? .Unavailable : .Failed})}
 			return
 		}
 		work.source.track = strings.clone(work.track_url)

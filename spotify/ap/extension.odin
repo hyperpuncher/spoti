@@ -24,7 +24,15 @@ extension_status :: proc(message: []u8) -> (code: u64, ok: bool) {
 
 // The embedded payload of the first entity of the chosen extension kind.
 // found=false means the entity was unavailable (404/451).
-extension_message :: proc(body: []u8, kind: u64) -> (message: []u8, found, valid: bool) {
+extension_message :: proc(
+	body: []u8,
+	kind: u64,
+	unavailable: ^bool = nil,
+) -> (
+	message: []u8,
+	found, valid: bool,
+) {
+	if unavailable != nil {unavailable^ = false}
 	pos := 0
 	for pos < len(body) {
 		field, wire, array, _, array_valid := next_field(body, &pos)
@@ -44,7 +52,10 @@ extension_message :: proc(body: []u8, kind: u64) -> (message: []u8, found, valid
 			if entity_wire != 2 {return nil, false, false}
 			code, status_valid := extension_status(entity)
 			if !status_valid {return nil, false, false}
-			if code == 404 || code == 451 {return nil, false, true}
+			if code == 404 || code == 451 {
+				if unavailable != nil {unavailable^ = true}
+				return nil, false, true
+			}
 			if code != 0 && code != 200 {return nil, false, false}
 			any, has_data, data_valid := get_bytes(entity, 3)
 			if !data_valid {return nil, false, false}

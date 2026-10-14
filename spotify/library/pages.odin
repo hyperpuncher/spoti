@@ -3,6 +3,7 @@
 // a single arena_destroy, the idiom from core:mem/virtual's own doc example.
 package library
 
+import session "../session"
 import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
@@ -109,6 +110,7 @@ Track_Ref :: struct {
 	duration_ms: int,
 	artists:     []Artist,
 	album:       Album_Ref,
+	is_playable: json.Value, // absent/null means availability is unknown
 }
 
 Playlist_Ref :: struct {
@@ -308,12 +310,17 @@ append_artist_entry :: proc(items: ^[dynamic]Entry, row: Artist, allocator: runt
 	append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", "", 0, allocator)
 }
 
+track_available :: proc(track: Track_Ref) -> bool {
+	if playable, reported := track.is_playable.(bool); reported && !playable {return false}
+	return !session.track_unavailable(track.uri)
+}
+
 append_track_entry :: proc(
 	items: ^[dynamic]Entry,
 	track: Track_Ref,
 	allocator: runtime.Allocator,
 ) {
-	if len(track.name) == 0 || len(track.uri) > 128 {return}
+	if !track_available(track) || len(track.name) == 0 || len(track.uri) > 128 {return}
 	first_artist, artist_uri := "", ""
 	if len(track.artists) > 0 {
 		first_artist = strings.clone(track.artists[0].name, allocator)

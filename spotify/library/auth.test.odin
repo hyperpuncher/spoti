@@ -9,7 +9,7 @@ import "core:testing"
 env_client_id_overrides_the_stored_key :: proc(t: ^testing.T) {
 	os.set_env("WEB_CLIENT_ID", "0123456789abcdef0123456789ABCDEF")
 	defer os.unset_env("WEB_CLIENT_ID")
-	id, found := resolve_client_id(context.temp_allocator)
+	id, found := resolve_client_id()
 	if !testing.expect(t, found) {return}
 	defer delete(id)
 	testing.expect_value(t, id, "0123456789abcdef0123456789ABCDEF")

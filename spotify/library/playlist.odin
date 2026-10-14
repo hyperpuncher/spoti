@@ -7,6 +7,7 @@ package library
 import diagnostic "../../diagnostic"
 import ap "../ap"
 import http "../http"
+import session "../session"
 import track "../track"
 import "base:runtime"
 import "core:encoding/hex"
@@ -301,6 +302,7 @@ parse_playlist_metadata :: proc(
 			answer.seen = true
 			if code == 404 || code == 451 {continue} 	// unavailable tracks are not playable
 			if code != 0 && code != 200 {return}
+			if session.track_unavailable(uri) {continue}
 			any, has_data, data_valid := ap.get_bytes(entity, 3)
 			if !has_data || !data_valid {return}
 			metadata, has_payload, payload_valid := ap.get_bytes(any, 2)

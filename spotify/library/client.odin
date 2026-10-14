@@ -849,6 +849,54 @@ remove_detail_row :: proc(client: ^Client, uri: string) -> bool {
 	return false
 }
 
+// Unavailability is not a server-side playlist removal: retain raw offsets.
+// Invalidate the collection's loaded cache windows, not encrypted audio or
+// unrelated collections, so these pages are fetched again on reopen.
+discard_unavailable_track :: proc(client: ^Client, uri: string) {
+	for detail in ([]^Detail{&client.detail, &client.prev_detail}) {
+		kept, removed := 0, false
+		for row in detail.rows {
+			if row.uri == uri {removed = true; continue}
+			detail.rows[kept] = row
+			kept += 1
+		}
+		if !removed {continue}
+		resize(&detail.rows, kept)
+		for offset := 0; offset < detail.next_offset; offset += PLAYLIST_PAGE_SIZE {
+			if address, ok := track_page_address(detail.source, detail.id, offset); ok {
+				cache_remove("api", address)
+				delete(address)
+			}
+			if detail.source == .Playlist {
+				for prefix in ([]string{"ap-playlist-window", "ap-playlist-meta"}) {
+					key := playlist_cache_key(prefix, detail.id, offset)
+					cache_remove("api", key)
+					delete(key)
+				}
+			}
+		}
+	}
+	for page in ([]^Page{&client.pages[.Tracks], &client.search_pages[.Tracks]}) {
+		kept := 0
+		for entry in page.items {
+			if entry.uri == uri {continue}
+			page.items[kept] = entry
+			kept += 1
+		}
+		if kept == len(page.items) {continue}
+		resize(&page.items, kept)
+		if page != &client.pages[.Tracks] {continue}
+		for offset := 0; offset < page.next_offset; offset += 36 {
+			address := fmt.aprintf(
+				"https://api.spotify.com/v1/me/tracks?limit=36&offset=%d",
+				offset,
+				allocator = context.temp_allocator,
+			)
+			cache_remove("api", address)
+		}
+	}
+}
+
 // True while an open is slow enough, and empty enough, that a placeholder
 // helps. Pagination keeps its rows; only the first fill can show the table.
 detail_loading_visible :: proc(client: ^Client) -> bool {

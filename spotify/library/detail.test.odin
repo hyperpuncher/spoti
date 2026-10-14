@@ -1,5 +1,6 @@
 package library
 
+import "core:mem/virtual"
 import "core:strings"
 import "core:testing"
 
@@ -67,4 +68,24 @@ remove_items_body_wraps_uris_in_items :: proc(t: ^testing.T) {
 	testing.expect(t, !empty)
 	_, quoted := remove_items_body([]string{`spotify:track:a"b`})
 	testing.expect(t, !quoted)
+}
+
+@(test)
+unplayable_rows_are_hidden_without_changing_server_pagination :: proc(t: ^testing.T) {
+	body := `{"total":4,"offset":50,"next":"next","items":[{"track":{"uri":"spotify:track:available","name":"Available","is_playable":true}},{"track":{"uri":"spotify:track:gone","name":"Gone","is_playable":false}},{"track":{"uri":"spotify:track:unknown","name":"Unknown"}},{"track":{"uri":"spotify:track:null","name":"Null","is_playable":null}}]}`
+	arena: virtual.Arena
+	if !testing.expect(t, virtual.arena_init_growing(&arena) == nil) {return}
+	defer virtual.arena_destroy(&arena)
+	rows, total, next, more, _, ok := parse_saved_tracks(
+		transmute([]u8)body,
+		virtual.arena_allocator(&arena),
+	)
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, len(rows), 3)
+	testing.expect_value(t, rows[0].name, "Available")
+	testing.expect_value(t, rows[1].name, "Unknown")
+	testing.expect_value(t, rows[2].name, "Null")
+	testing.expect_value(t, total, 4)
+	testing.expect_value(t, next, 54)
+	testing.expect(t, more)
 }

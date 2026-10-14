@@ -1602,6 +1602,32 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 				diagnostic.write("playback decoder reached end")
 				finished = true
 				if stream != nil {_ = sdl.FlushAudioStream(stream)} else {stage = .Ended}
+			case .Unavailable:
+				diagnostic.write("playback skipped unavailable track")
+				library.discard_unavailable_track(&library_client, selected)
+				play_after_stop = discard_play_track(&play_queue, selected, &play_index)
+				if !play_after_stop && connect_repeat_context && len(play_queue) > 0 {
+					play_index, play_after_stop = 0, true
+				}
+				if play_after_stop {
+					_ = select_play_item(
+						play_queue[:],
+						play_index,
+						&selected,
+						&player_cover,
+						&artist,
+					)
+				} else {
+					replace_string(&selected, "")
+					replace_string(&title, "")
+				}
+				start_paused, replay_pending, seek_dragging = false, false, false
+				seek_ms = 0
+				clear_audio_stream(&stream)
+				cancel_worker(queue, &cancel, &closed)
+				stage = .Stopping
+				state_dirty = true
+				show_toast(app, "Unavailable track removed")
 			case .Failed:
 				diagnostic.write("playback worker failed")
 				fmt.eprintln("sign-in, CDN stream, or Vorbis decoding failed")

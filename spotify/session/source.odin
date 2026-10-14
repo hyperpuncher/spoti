@@ -47,6 +47,7 @@ Keyring_Mode :: enum {
 // Lets repeat plays skip AP metadata, key requests and, on full disk
 // hits, storage-resolve too.
 Resolve_Entry :: struct {
+	unavailable: bool,
 	file_id:     [20]u8,
 	key:         [16]u8,
 	format:      track.Audio_Format,
@@ -80,6 +81,27 @@ resolve_cache_store :: proc(id: [16]u8, source: ^Source) {
 	}
 }
 
+// A catalogue refusal is remembered for this process so cached collection
+// pages and restored queues cannot reintroduce the same unplayable track.
+track_unavailable :: proc(uri: string) -> bool {
+	id, valid := track.parse_id(uri)
+	if !valid {return false}
+	sync.mutex_guard(&resolve_mutex)
+	return resolve_cache[id].unavailable
+}
+
+mark_track_unavailable :: proc(id: [16]u8) {
+	sync.mutex_guard(&resolve_mutex)
+	if resolve_cache == nil {resolve_cache = make(map[[16]u8]Resolve_Entry)}
+	if old, found := &resolve_cache[id]; found {
+		crypto.zero_explicit(&old.key, size_of(old.key))
+		delete(old.name)
+	}
+	resolve_cache[id] = Resolve_Entry {
+		unavailable = true,
+	}
+}
+
 // Tests only; the app keeps entries for the process lifetime.
 clear_resolve_cache :: proc() {
 	sync.mutex_guard(&resolve_mutex)
@@ -92,14 +114,25 @@ open :: proc(
 	keyring_mode: Keyring_Mode = .None,
 	cancel: ^bool = nil,
 	track_url: string = TRACK_URL,
+	unavailable: ^bool = nil,
 ) -> (
 	source: Source,
 	ok: bool,
 ) {
+	if unavailable != nil {unavailable^ = false}
 	defer if !ok {close_source(&source)}
 	id, valid := track.parse_id(track_url)
 	if !valid {fmt.eprintln("invalid Spotify track link or URI"); return}
+	known_unavailable := false
+	defer if known_unavailable {
+		mark_track_unavailable(id)
+		if unavailable != nil {unavailable^ = true}
+	}
 	if entry, hit := resolve_cache_lookup(id); hit {
+		if entry.unavailable {
+			if unavailable != nil {unavailable^ = true}
+			return
+		}
 		source.name = entry.name
 		source.format, source.file_id, source.duration_ms, source.key =
 			entry.format, entry.file_id, entry.duration_ms, entry.key
@@ -107,7 +140,7 @@ open :: proc(
 		tokens, authorized := authorize(keyring_mode, cancel)
 		if !authorized {return}
 		defer oauth.wipe_tokens(&tokens)
-		source, ok = resolve_source(tokens.access, id, cancel)
+		source, ok = resolve_source(tokens.access, id, cancel, &known_unavailable)
 		if !ok {return}
 		ok = false
 		resolve_cache_store(id, &source)
@@ -154,8 +187,16 @@ fetch_cdn_url :: proc(
 	return true
 }
 
-resolve_source :: proc(access: string, id: [16]u8, cancel: ^bool) -> (source: Source, ok: bool) {
-	metadata, have_metadata := fetch_track_metadata(access, id, cancel)
+resolve_source :: proc(
+	access: string,
+	id: [16]u8,
+	cancel: ^bool,
+	unavailable: ^bool = nil,
+) -> (
+	source: Source,
+	ok: bool,
+) {
+	metadata, have_metadata := fetch_track_metadata(access, id, cancel, unavailable)
 	if !have_metadata {return}
 	source.name = metadata.name
 	source.format, source.file_id, source.duration_ms =
@@ -233,10 +274,12 @@ fetch_track_metadata :: proc(
 	access: string,
 	id: [16]u8,
 	cancel: ^bool,
+	unavailable: ^bool = nil,
 ) -> (
 	metadata: track.Metadata,
 	ok: bool,
 ) {
+	if unavailable != nil {unavailable^ = false}
 	if cancelled(cancel) {return}
 	short := track.base62_id(id, context.temp_allocator)
 	uri := fmt.aprintf("spotify:track:%s", short, allocator = context.temp_allocator)
@@ -251,7 +294,19 @@ fetch_track_metadata :: proc(
 	)
 	defer delete(body)
 	if !received || status != 200 {fmt.eprintln("track metadata request failed"); return}
-	track_payload, track_found, track_valid := ap.extension_message(body[:], ap.TRACK_V4)
+	return parse_track_response(body[:], id, unavailable)
+}
+
+parse_track_response :: proc(
+	body: []u8,
+	id: [16]u8,
+	unavailable: ^bool = nil,
+) -> (
+	metadata: track.Metadata,
+	ok: bool,
+) {
+	if unavailable != nil {unavailable^ = false}
+	track_payload, track_found, track_valid := ap.extension_message(body, ap.TRACK_V4, unavailable)
 	if !track_valid || !track_found {
 		fmt.eprintln("track metadata response carried no Track")
 		return
@@ -264,14 +319,18 @@ fetch_track_metadata :: proc(
 	metadata = parsed
 	// The dedicated file list is authoritative: some tracks carry no file on
 	// the Track message itself but still have playable files here.
-	if files, files_found, files_valid := ap.extension_message(body[:], ap.AUDIO_FILES);
-	   files_valid && files_found {
+	files, files_found, files_valid := ap.extension_message(body, ap.AUDIO_FILES, unavailable)
+	if files_valid && files_found {
 		track.parse_audio_files(files, &metadata)
+		// A successful, empty dedicated file list confirms there is no audio.
+		// Missing/malformed extensions and unsupported codecs remain failures.
+		if unavailable != nil && len(files) == 0 && metadata.file_id == {} {unavailable^ = true}
 	}
 	if metadata.file_id == {} {
 		diagnose_track_metadata(track_payload)
 		return {}, false
 	}
+	if unavailable != nil {unavailable^ = false}
 	// The name points into the response body, which is freed here.
 	metadata.name = strings.clone(metadata.name)
 	return metadata, true

@@ -13,6 +13,7 @@ Packet_Kind :: enum {
 	Audio,
 	End,
 	Failed,
+	Unavailable,
 }
 Packet :: struct {
 	kind:            Packet_Kind,
