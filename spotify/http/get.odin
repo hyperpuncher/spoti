@@ -140,8 +140,9 @@ write :: proc(
 	if method != "PUT" && method != "POST" && method != "DELETE" {return 0, false}
 	opts := options
 	opts.method = method
-	_, status, ok = request(address, opts, reuse = reuse)
-	return status, ok
+	body, code, sent := request(address, opts, reuse = reuse)
+	delete(body)
+	return code, sent
 }
 
 // OAuth uses the same curl lifetime and bounded response handling as GETs.
@@ -157,9 +158,9 @@ post_form :: proc(
 	return request(address, {limit = 64 * 1024}, form, 20, reuse = reuse)
 }
 
-// Binary protobuf bodies may contain NUL bytes; POSTFIELDSIZE bounds the upload.
-post_protobuf :: proc(
-	address: string,
+// Upload sizes are explicit, including NUL bytes in protobuf payloads.
+protobuf_request :: proc(
+	method, address: string,
 	body: []u8,
 	options: Options = {},
 	reuse: rawptr = nil,
@@ -168,28 +169,9 @@ post_protobuf :: proc(
 	status: int,
 	ok: bool,
 ) {
-	if len(body) == 0 {return nil, 0, false}
-	return request(
-		address,
-		options,
-		transmute(string)body,
-		content_type = "Content-Type: application/x-protobuf",
-		reuse = reuse,
-	)
-}
-
-put_protobuf :: proc(
-	address: string,
-	body: []u8,
-	options: Options = {},
-	reuse: rawptr = nil,
-) -> (
-	response: [dynamic]u8,
-	status: int,
-	ok: bool,
-) {
+	if method != "POST" && method != "PUT" || method == "POST" && len(body) == 0 {return}
 	opts := options
-	opts.method = "PUT"
+	opts.method = method
 	return request(
 		address,
 		opts,
@@ -199,10 +181,9 @@ put_protobuf :: proc(
 	)
 }
 
-// Authenticated JSON POST, e.g. adding items to a playlist. The body is a
-// plain string, never logged; POSTFIELDSIZE bounds the upload.
-post_json :: proc(
-	address, body: string,
+// JSON writes share validation and response ownership.
+json_request :: proc(
+	method, address, body: string,
 	options: Options = {},
 	reuse: rawptr = nil,
 ) -> (
@@ -210,53 +191,9 @@ post_json :: proc(
 	status: int,
 	ok: bool,
 ) {
-	if len(body) == 0 {return nil, 0, false}
-	return request(
-		address,
-		options,
-		body,
-		content_type = "Content-Type: application/json",
-		reuse = reuse,
-	)
-}
-
-// Authenticated JSON PUT, e.g. transferring Connect playback. The body
-// is a plain string, never logged; POSTFIELDSIZE bounds the upload.
-put_json :: proc(
-	address, body: string,
-	options: Options = {},
-	reuse: rawptr = nil,
-) -> (
-	response: [dynamic]u8,
-	status: int,
-	ok: bool,
-) {
-	if len(body) == 0 {return nil, 0, false}
+	if len(body) == 0 || method != "POST" && method != "PUT" && method != "DELETE" {return}
 	opts := options
-	opts.method = "PUT"
-	return request(
-		address,
-		opts,
-		body,
-		content_type = "Content-Type: application/json",
-		reuse = reuse,
-	)
-}
-
-// Authenticated JSON DELETE, e.g. removing items from a playlist. The body
-// is a plain string, never logged; POSTFIELDSIZE bounds the upload.
-delete_json :: proc(
-	address, body: string,
-	options: Options = {},
-	reuse: rawptr = nil,
-) -> (
-	response: [dynamic]u8,
-	status: int,
-	ok: bool,
-) {
-	if len(body) == 0 {return nil, 0, false}
-	opts := options
-	opts.method = "DELETE"
+	opts.method = method
 	return request(
 		address,
 		opts,
@@ -332,13 +269,14 @@ request :: proc(
 		   easy_setopt(client, CURL_XFERINFOFUNCTION, transfer_progress) != 0 ||
 		   easy_setopt(client, CURL_XFERINFODATA, options.cancel) != 0 {return nil, 0, false}
 	}
+	// curl keeps this pointer until perform completes, not just until setopt.
+	capture := Header_Capture {
+		range       = options.range_info,
+		retry_after = options.retry_after,
+	}
 	if options.range_info != nil || options.retry_after != nil {
 		if options.range_info != nil {options.range_info^ = {}}
 		if options.retry_after != nil {options.retry_after^ = 0}
-		capture := Header_Capture {
-			range       = options.range_info,
-			retry_after = options.retry_after,
-		}
 		if easy_setopt(client, CURL_HEADERFUNCTION, read_headers) != 0 ||
 		   easy_setopt(client, CURL_HEADERDATA, &capture) != 0 {return nil, 0, false}
 	}

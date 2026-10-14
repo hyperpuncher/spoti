@@ -55,6 +55,7 @@ add_items_body_builds_bounded_spotify_uris :: proc(t: ^testing.T) {
 	testing.expect(t, !too_many)
 }
 
+@(test)
 remove_items_body_wraps_uris_in_items :: proc(t: ^testing.T) {
 	body, ok := remove_items_body([]string{"spotify:track:one", "spotify:track:two"})
 	testing.expect(t, ok)

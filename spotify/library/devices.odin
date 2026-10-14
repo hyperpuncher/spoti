@@ -192,7 +192,13 @@ transfer_playback :: proc(
 ) {
 	if !valid_device_id(device_id) {return 0, false}
 	body := fmt.aprintf(`{"device_ids":["%s"],"play":%v}`, device_id, play, context.temp_allocator)
-	response, code, sent := http.put_json(TRANSFER_ADDRESS, body, {bearer = access}, reuse)
+	response, code, sent := http.json_request(
+		"PUT",
+		TRANSFER_ADDRESS,
+		body,
+		{bearer = access},
+		reuse,
+	)
 	defer delete(response)
 	diagnostic.writef("connect transfer status=%d ok=%v", code, sent)
 	return code, sent && code == 204

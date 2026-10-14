@@ -77,7 +77,8 @@ fetch_playlist_rows :: proc(
 		cache_write("api", window_key, body[:])
 		return nil, window.total, window.next_offset, window.next_offset < window.total, 200, true
 	}
-	metadata, metadata_code, received := http.post_protobuf(
+	metadata, metadata_code, received := http.protobuf_request(
+		"POST",
 		"https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata",
 		request[:],
 		{bearer = access, limit = 2 * 1024 * 1024},

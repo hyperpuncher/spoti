@@ -259,7 +259,8 @@ fetch_release_feed :: proc(
 	}
 	request, encoded := release_feed_request(offset)
 	if !encoded {result.status = RELEASE_INVALID_RESPONSE; return}
-	body, status, fetched := http.post_json(
+	body, status, fetched := http.json_request(
+		"POST",
 		RELEASE_FEED_ADDRESS,
 		string(request),
 		{

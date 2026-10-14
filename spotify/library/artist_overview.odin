@@ -145,7 +145,8 @@ fetch_artist_overview :: proc(
 	}
 	encoded, err := json.marshal(request, allocator = context.temp_allocator)
 	if err != nil {return false}
-	body, status, fetched := http.post_json(
+	body, status, fetched := http.json_request(
+		"POST",
 		RELEASE_FEED_ADDRESS,
 		string(encoded),
 		{bearer = access, limit = ARTIST_METADATA_LIMIT, cancel = cancel},

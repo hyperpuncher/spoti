@@ -287,7 +287,8 @@ fetch_track_metadata :: proc(
 	defer delete(request)
 	ap.extension_request(&request, uri, ap.TRACK_V4)
 	ap.extension_request(&request, uri, ap.AUDIO_FILES)
-	body, status, received := http.post_protobuf(
+	body, status, received := http.protobuf_request(
+		"POST",
 		ap.EXTENDED_METADATA_ADDRESS,
 		request[:],
 		{bearer = access, limit = TRACK_METADATA_LIMIT, cancel = cancel},

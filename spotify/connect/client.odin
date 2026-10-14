@@ -166,7 +166,8 @@ put_state :: proc(
 		client.device_id,
 		allocator = context.temp_allocator,
 	)
-	response, code, ok := http.put_protobuf(
+	response, code, ok := http.protobuf_request(
+		"PUT",
 		address,
 		body[:],
 		{

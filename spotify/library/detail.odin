@@ -838,7 +838,8 @@ add_to_playlist :: proc(
 	if !body_ok {return 0, false}
 	address := fmt.aprintf("https://api.spotify.com/v1/playlists/%s/items", playlist_id)
 	defer delete(address)
-	body, code, fetched := http.post_json(
+	body, code, fetched := http.json_request(
+		"POST",
 		address,
 		body_text,
 		{bearer = access, limit = 4096},
@@ -881,7 +882,8 @@ remove_from_playlist :: proc(
 	if !body_ok {return 0, false}
 	address := fmt.aprintf("https://api.spotify.com/v1/playlists/%s/items", playlist_id)
 	defer delete(address)
-	body, code, fetched := http.delete_json(
+	body, code, fetched := http.json_request(
+		"DELETE",
 		address,
 		body_text,
 		{bearer = access, limit = 4096},
