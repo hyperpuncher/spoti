@@ -151,6 +151,13 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						caption.y + caption.height < banner.y + banner.height,
 					)
 				}
+				play := clay.GetElementData(clay.ID("hero_play")).boundingBox
+				rows := clay.GetElementData(clay.ID("detail_rows")).boundingBox
+				testing.expect(
+					t,
+					math.abs(rows.y - (play.y + play.height) - 32 * d) < 1,
+					"all collection pages need the same gap below controls",
+				)
 				input := clay.GetElementData(clay.ID("track_input")).boundingBox
 				player := clay.GetElementData(clay.ID("footer_play")).boundingBox
 				if source == .Album {

@@ -942,7 +942,7 @@ artist_page :: proc(
 		layout = {
 			layoutDirection = .TopToBottom,
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
-			padding = {left = u16(20 * d), right = u16(20 * d), top = u16(24 * d)},
+			padding = {left = u16(20 * d), right = u16(20 * d)},
 			childGap = u16(8 * d),
 		},
 		clip = {horizontal = true, vertical = true, childOffset = clay.GetScrollOffset()},
@@ -953,7 +953,7 @@ artist_page :: proc(
 		card_width := min(usable / f32(columns), RELEASE_CARD_MAX * d)
 		row_height := card_row_height(card_width, card_text_height, d)
 		row_gap := f32(u16(8 * d))
-		leading := f32(u16(24 * d))
+		leading: f32
 		// Popular keeps the track table's tighter row gap inside its own
 		// wrapper, so the container gap never enters the row stride.
 		if len(detail.rows) > 0 {
@@ -1734,6 +1734,8 @@ detail_page :: proc(
 				d,
 			)
 		}
+		// All collection pages share the same space below their controls.
+		list_spacer(24 * d)
 		if library.detail_loading_visible(client) {
 			loading_track_table(d)
 		} else if detail.source == .Artist {
