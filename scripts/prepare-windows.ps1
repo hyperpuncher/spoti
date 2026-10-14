@@ -23,3 +23,10 @@ $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Componen
 & "$vs/Common7/Tools/Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
 cl /nologo /MD /O2 /std:c11 /c "/I$root/include" spotify/audio/vorbisfile.c /Fobuild/vorbisfile.obj
 lib /nologo /OUT:build/vorbisfile.a build/vorbisfile.obj
+
+# Compile the app icon resource. Odin's -resource: flag takes the compiled
+# .res output, not the .rc source. Rebuild when the script or icon changes.
+$rcChanged = !(Test-Path build/app.res) `
+	-or (Get-Item packaging/windows/app.rc).LastWriteTime -gt (Get-Item build/app.res).LastWriteTime `
+	-or (Get-Item assets/app/icon.ico).LastWriteTime -gt (Get-Item build/app.res).LastWriteTime
+if ($rcChanged) { rc /nologo /fo build/app.res packaging/windows/app.rc }
