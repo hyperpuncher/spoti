@@ -42,7 +42,7 @@ jobs:
         run: just release
       - name: archive
         if: github.event_name == 'workflow_dispatch'
-        run: tar --zstd -cf "build/spoti-linux-x64-${GITHUB_SHA:0:12}.tar.zst" build/spoti assets/icons assets/fonts assets/app packaging/linux/app.spoti.desktop
+        run: sh packaging/linux/bundle.sh "build/spoti-linux-x64-${GITHUB_SHA:0:12}.tar.zst"
       - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch'
         with:
@@ -71,19 +71,7 @@ jobs:
           echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
       - run: just release
       - name: bundle
-        run: |
-          app=build/Spoti.app/Contents
-          mkdir -p "$app/MacOS" "$app/Resources/app"
-          cp build/spoti "$app/MacOS/"
-          cp -R assets/icons "$app/Resources/"
-          cp -R assets/fonts "$app/Resources/"
-          cp assets/app/icon.png "$app/Resources/app/"
-          cp assets/app/icon.icns "$app/Resources/AppIcon.icns"
-          cp packaging/macos/Info.plist "$app/"
-          codesign --force --deep --sign - build/Spoti.app
-          codesign --verify --strict build/Spoti.app
-      - name: archive
-        run: tar --zstd -cf "build/spoti-macos-arm64-${GITHUB_SHA:0:12}.tar.zst" -C build Spoti.app
+        run: sh packaging/macos/bundle.sh "build/spoti-macos-arm64-${GITHUB_SHA:0:12}.tar.zst"
       - uses: actions/upload-artifact@v7
         with:
           path: build/spoti-macos-arm64-*.tar.zst
@@ -109,18 +97,21 @@ jobs:
           winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements
           vcpkg install --triplet x64-windows fontconfig curl[websockets] libvorbis libwebp
           $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
+          $odin = Get-ChildItem "$env:LOCALAPPDATA/Microsoft/WinGet/Packages" -Filter odin.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($odin) {
+            $odin.DirectoryName >> $env:GITHUB_PATH
+            $env:PATH = "$($odin.DirectoryName);$env:PATH"
+          }
           "$env:LOCALAPPDATA/Microsoft/WinGet/Links", "$root/bin" >> $env:GITHUB_PATH
+          $env:PATH = "$env:LOCALAPPDATA/Microsoft/WinGet/Links;$root/bin;$env:PATH"
+          odin version
+          just --version
           "SPOTI_LINKER_FLAGS=/LIBPATH:$PWD/build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:$PWD/build/deps/SDL3_ttf-3.2.2/lib/x64 /LIBPATH:$root/lib" >> $env:GITHUB_ENV
           "FONTCONFIG_FILE=$root/etc/fonts/fonts.conf" >> $env:GITHUB_ENV
           "FONTCONFIG_PATH=$root/etc/fonts" >> $env:GITHUB_ENV
       - run: just release
       - name: archive
-        run: |
-          Copy-Item build/deps/SDL3-3.4.18/lib/x64/SDL3.dll build/
-          Copy-Item build/deps/SDL3_ttf-3.2.2/lib/x64/SDL3_ttf.dll build/
-          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/*.dll" build/
-          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/etc/fonts" build/fontconfig -Recurse
-          tar --zstd -cf "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst" build/spoti.exe build/*.dll build/fontconfig assets/icons assets/fonts assets/app
+        run: pwsh -NoProfile -File packaging/windows/bundle.ps1 "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst"
       - uses: actions/upload-artifact@v7
         with:
           path: build/spoti-windows-x64-*.tar.zst
