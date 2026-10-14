@@ -36,10 +36,31 @@ G_Error :: struct {
 Slot :: enum {
 	Playback,
 	Library,
+	Library_Client,
 }
 
 slot_name :: proc(slot: Slot) -> cstring {
-	return slot == .Library ? cstring("library") : cstring("playback")
+	switch slot {
+	case .Library:
+		return cstring("library")
+	case .Library_Client:
+		return cstring("library_client")
+	case .Playback:
+		return cstring("playback")
+	}
+	return cstring("playback")
+}
+
+slot_label :: proc(slot: Slot) -> cstring {
+	switch slot {
+	case .Library:
+		return cstring("spoti Spotify library")
+	case .Library_Client:
+		return cstring("spoti Spotify app ID")
+	case .Playback:
+		return cstring("spoti Spotify playback")
+	}
+	return cstring("spoti Spotify playback")
 }
 
 new_schema :: proc() -> rawptr {
@@ -82,7 +103,7 @@ save :: proc(token: string, slot: Slot = .Playback) -> bool {
 	ok := password_store_sync(
 		schema,
 		nil,
-		slot == .Library ? cstring("spoti Spotify library") : cstring("spoti Spotify playback"),
+		slot_label(slot),
 		c_token,
 		nil,
 		&failure,

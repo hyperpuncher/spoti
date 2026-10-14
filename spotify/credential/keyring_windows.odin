@@ -36,10 +36,31 @@ foreign advapi32 {
 Slot :: enum {
 	Playback,
 	Library,
+	Library_Client,
 }
 
 slot_target :: proc(slot: Slot) -> string {
-	return slot == .Library ? "spoti/library" : "spoti/playback"
+	switch slot {
+	case .Library:
+		return "spoti/library"
+	case .Library_Client:
+		return "spoti/library_client"
+	case .Playback:
+		return "spoti/playback"
+	}
+	return "spoti/playback"
+}
+
+slot_comment :: proc(slot: Slot) -> string {
+	switch slot {
+	case .Library:
+		return "spoti Spotify library"
+	case .Library_Client:
+		return "spoti Spotify app ID"
+	case .Playback:
+		return "spoti Spotify playback"
+	}
+	return "spoti Spotify playback"
 }
 
 load :: proc(slot: Slot = .Playback) -> (token: string, found: bool) {
@@ -58,9 +79,7 @@ save :: proc(token: string, slot: Slot = .Playback) -> bool {
 	cred := CREDENTIALW {
 		type                 = CRED_TYPE_GENERIC,
 		target_name          = win.utf8_to_wstring(slot_target(slot)),
-		comment              = win.utf8_to_wstring(
-			slot == .Library ? "spoti Spotify library" : "spoti Spotify playback",
-		),
+		comment              = win.utf8_to_wstring(slot_comment(slot)),
 		credential_blob_size = u32(len(token)),
 		credential_blob      = raw_data(token),
 		persist              = CRED_PERSIST_LOCAL_MACHINE,

@@ -1,6 +1,7 @@
 package main
 
 import library "spotify/library"
+import oauth "spotify/oauth"
 import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
@@ -106,6 +107,7 @@ View :: struct {
 	volume:         f32,
 	input_active:   bool,
 	select_all:     bool, // the whole query is selected
+	setup_error:    string, // borrowed; setup screen error line
 	album_linked:   bool, // footer title opens the playing album
 	artist_linked:  bool, // footer artist opens the playing artist
 	pinned:         bool,
@@ -691,7 +693,16 @@ sign_in_pending :: proc(state: library.State) -> bool {
 	return state == .Authorizing || state == .Sign_In_Failed || state == .Missing_Client_ID
 }
 
-sign_in_screen :: proc(state: library.State, browser_ready: bool, d: f32) {
+// First-run setup stores the personal Spotify app key in the system
+// keyring, so no environment variable is needed afterwards.
+SPOTIFY_DASHBOARD :: "https://developer.spotify.com/dashboard"
+
+sign_in_screen :: proc(
+	state: library.State,
+	browser_ready: bool,
+	setup_input, setup_error: string,
+	d: f32,
+) {
 	if clay.UI()(
 	{
 		layout = {
@@ -716,28 +727,85 @@ sign_in_screen :: proc(state: library.State, browser_ready: bool, d: f32) {
 			title := "Signing in..."
 			line := "Checking your saved Spotify approval."
 			button_id, button_label := "", ""
-			switch state {
-			case .Authorizing:
-				if browser_ready {
-					title = "Connect to Spotify"
-					line = "Approve access in your browser to load your library."
-					button_id, button_label = "library_sign_in", "Sign in with Spotify"
+			if state == .Missing_Client_ID {
+				setup_screen(setup_input, setup_error, d)
+			} else {
+				switch state {
+				case .Authorizing:
+					if browser_ready {
+						title = "Connect to Spotify"
+						line = "Approve access in your browser to load your library."
+						button_id, button_label = "library_sign_in", "Sign in with Spotify"
+					}
+				case .Sign_In_Failed:
+					title = "Could not sign in"
+					line = "Browser approval did not complete."
+					button_id, button_label = "library_retry", "Try again"
+				case .Idle, .Loading, .Ready, .Missing_Client_ID, .Failed:
 				}
-			case .Sign_In_Failed:
-				title = "Could not sign in"
-				line = "Browser approval did not complete."
-				button_id, button_label = "library_retry", "Try again"
-			case .Missing_Client_ID:
-				title = "Spotify app key missing"
-				line = "Set WEB_CLIENT_ID in your environment and restart spoti."
-			case .Idle, .Loading, .Ready, .Failed:
-			}
-			clay.Text(title, clay.TextElementConfig{fontSize = 28, textColor = WHITE})
-			clay.Text(line, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
-			if len(button_id) > 0 {
-				sign_in_button(button_id, button_label, d)
+				clay.Text(title, clay.TextElementConfig{fontSize = 28, textColor = WHITE})
+				clay.Text(line, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+				if len(button_id) > 0 {
+					sign_in_button(button_id, button_label, d)
+				}
 			}
 		}
+	}
+}
+
+setup_screen :: proc(setup_input, setup_error: string, d: f32) {
+	clay.Text("Connect your Spotify app", clay.TextElementConfig{fontSize = 28, textColor = WHITE})
+	clay.Text(
+		"spoti reads your account through your own Spotify app.",
+		clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+	)
+	clay.Text(
+		"1. Open the Spotify dashboard and create an app.",
+		clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+	)
+	clay.Text(
+		"2. Add this redirect URI in the app settings:",
+		clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+	)
+	clay.Text(oauth.WEB_REDIRECT_URI, clay.TextElementConfig{fontSize = 14, textColor = WHITE})
+	clay.Text(
+		"3. Paste the 32-character client id below and save.",
+		clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+	)
+	if clay.UI_WithId(clay.ID("setup_field"))(
+	{
+		layout = {
+			sizing = {width = clay.SizingFit({}), height = clay.SizingFixed(40 * d)},
+			padding = {left = u16(16 * d), right = u16(16 * d)},
+			childAlignment = {y = .Center},
+		},
+		backgroundColor = CARD,
+		cornerRadius = clay.CornerRadiusAll(20 * d),
+	},
+	) {
+		if len(setup_input) > 0 {
+			clay.Text(setup_input, clay.TextElementConfig{fontSize = 14, textColor = WHITE})
+		} else {
+			clay.Text(
+				"paste your client id",
+				clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+			)
+		}
+	}
+	if len(setup_error) > 0 {
+		clay.Text(setup_error, clay.TextElementConfig{fontSize = 14, textColor = WHITE})
+	}
+	if clay.UI()(
+	{
+		layout = {
+			layoutDirection = .LeftToRight,
+			sizing = {width = clay.SizingFit({})},
+			childGap = u16(12 * d),
+		},
+	},
+	) {
+		sign_in_button("setup_dashboard", "Open dashboard", d)
+		sign_in_button("setup_save", "Save and continue", d)
 	}
 }
 
@@ -785,7 +853,7 @@ layout :: proc(
 			backgroundColor = BG,
 		},
 		) {
-			sign_in_screen(client.state, view.sign_in, d)
+			sign_in_screen(client.state, view.sign_in, view.input, view.setup_error, d)
 		}
 	} else if clay.UI()(
 	{

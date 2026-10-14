@@ -8,6 +8,7 @@ import "core:crypto"
 import "core:fmt"
 import "core:net"
 import "core:os"
+import "core:strings"
 import "core:sync"
 
 Auth_Result :: enum {
@@ -27,13 +28,26 @@ valid_client_id :: proc(id: string) -> bool {
 	return true
 }
 
+// The app key lives in the system keyring after the in-app setup; the
+// environment overrides it for headless and development use. The caller
+// owns the returned id.
+resolve_client_id :: proc(allocator := context.allocator) -> (id: string, ok: bool) {
+	env := os.get_env("WEB_CLIENT_ID", allocator)
+	if valid_client_id(env) {return env, true}
+	delete(env)
+	stored, have := credential.load(.Library_Client)
+	defer delete(stored)
+	if !have || !valid_client_id(stored) {return "", false}
+	return strings.clone(stored, allocator), true
+}
+
 // Tokens belong to the caller and must be wiped with oauth.wipe_tokens.
 // A browser approval persists its refresh grant in the system keyring, so
 // later launches refresh silently; rotation re-saves over the same entry.
 authorize :: proc(cancel: ^bool = nil) -> (tokens: oauth.Tokens, result: Auth_Result) {
-	client_id := os.get_env("WEB_CLIENT_ID", context.allocator)
+	client_id, key_ok := resolve_client_id()
 	defer delete(client_id)
-	if !valid_client_id(client_id) {return {}, .Missing_Client_ID}
+	if !key_ok {return {}, .Missing_Client_ID}
 	grant := oauth.web_grant(client_id)
 	saved, found := credential.load(.Library)
 	diagnostic.writef("library authorize saved=%v", found)

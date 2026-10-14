@@ -11,7 +11,6 @@ import oauth "../oauth"
 import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
-import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:sync/chan"
@@ -225,8 +224,9 @@ queue_request :: proc(client: ^Client, request: ^Request) -> bool {
 ensure_tokens :: proc(client: ^Client, tokens: ^oauth.Tokens) -> bool {
 	if !oauth.expired(tokens^) {return true}
 	if sync.atomic_load(&client.cancel) {return false}
-	client_id := os.get_env("WEB_CLIENT_ID", context.temp_allocator)
-	valid_client_id(client_id) or_return
+	client_id, found := resolve_client_id()
+	defer delete(client_id)
+	found or_return
 	grant := oauth.web_grant(client_id)
 	fresh, status := oauth.refresh(tokens.refresh, grant)
 	if status != .Authorized {return false}
@@ -645,10 +645,9 @@ free_result :: proc(result: Result) {
 start :: proc(client: ^Client) -> bool {
 	if client.worker != nil {return true}
 	client.cancel, client.failed = false, false
-	id := os.get_env("WEB_CLIENT_ID", context.allocator)
-	valid := valid_client_id(id)
+	id, found := resolve_client_id()
 	delete(id)
-	if !valid {
+	if !found {
 		client.state = .Missing_Client_ID
 		return false
 	}

@@ -100,7 +100,8 @@ Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
 ## runtime settings
 
 - Linux requires native Wayland. there is no XWayland fallback.
-- `WEB_CLIENT_ID` selects the personal Spotify Web API app.
+- the first-run setup screen stores the personal Spotify Web API app ID
+  in the system keyring; `WEB_CLIENT_ID` overrides it for headless use.
 - `SPOTI_FONTS` overrides the font search directory.
 - `SPOTI_THEME` selects `light` or `dark`.
 - credentials use Secret Service, Keychain, or Credential Manager.

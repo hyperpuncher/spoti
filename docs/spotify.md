@@ -5,7 +5,11 @@ spoti requires Spotify Premium for local playback.
 ## separate approvals
 
 - the personal Web API app handles account reads and supported writes.
-  configure its public client ID with `WEB_CLIENT_ID`.
+  on first launch spoti shows a setup screen: create an app in the
+  Spotify dashboard, add `http://127.0.0.1:8989/login` as a redirect URI,
+  then paste the 32-character client ID. spoti stores it in the operating
+  system's credential store beside the sign-in grants. `WEB_CLIENT_ID`
+  remains as an override for headless and development use.
 - streaming approval handles native playback, Connect, and session reads.
   play a track locally to approve streaming on a new installation.
 

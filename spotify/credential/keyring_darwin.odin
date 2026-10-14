@@ -11,14 +11,31 @@ SERVICE :: "org.spoti.playback"
 Slot :: enum {
 	Playback,
 	Library,
+	Library_Client,
 }
 
 slot_account :: proc(slot: Slot) -> string {
-	return slot == .Library ? "library" : "playback"
+	switch slot {
+	case .Library:
+		return "library"
+	case .Library_Client:
+		return "library_client"
+	case .Playback:
+		return "playback"
+	}
+	return "playback"
 }
 
 slot_label :: proc(slot: Slot) -> string {
-	return slot == .Library ? "spoti Spotify library" : "spoti Spotify playback"
+	switch slot {
+	case .Library:
+		return "spoti Spotify library"
+	case .Library_Client:
+		return "spoti Spotify app ID"
+	case .Playback:
+		return "spoti Spotify playback"
+	}
+	return "spoti Spotify playback"
 }
 
 load :: proc(slot: Slot = .Playback) -> (token: string, found: bool) {

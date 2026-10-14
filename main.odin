@@ -12,6 +12,7 @@ import "core:thread"
 import "core:unicode/utf8"
 import diagnostic "diagnostic"
 import connect "spotify/connect"
+import credential "spotify/credential"
 import library "spotify/library"
 import mpris "spotify/mpris"
 import oauth "spotify/oauth"
@@ -320,6 +321,32 @@ open_spotify_detail :: proc(detail: ^library.Detail) {
 	c_address := strings.clone_to_cstring(address)
 	defer delete(c_address)
 	_ = sdl.OpenURL(c_address)
+}
+
+open_dashboard :: proc() {
+	c_url := strings.clone_to_cstring(SPOTIFY_DASHBOARD)
+	defer delete(c_url)
+	_ = sdl.OpenURL(c_url)
+}
+
+// Validate the pasted app key and store it in the system keyring. The
+// library worker starts on the next frame; a bad key or an unavailable
+// keyring stays on the setup screen with an error line.
+submit_setup :: proc(app: ^App) {
+	id := strings.trim_space(app.input)
+	if !library.valid_client_id(id) {
+		replace_string(&app.setup_error, "That key is not a 32-character client id.")
+		return
+	}
+	if !credential.save(id, .Library_Client) {
+		replace_string(&app.setup_error, "Could not store the key in the system keyring.")
+		return
+	}
+	replace_string(&app.setup_error, "")
+	delete(app.input)
+	app.input = ""
+	app.input_active = false
+	_ = sdl.StopTextInput(app.state.window)
 }
 
 // Search accepts any text; only ASCII controls are rejected. Track links
@@ -649,6 +676,7 @@ App :: struct {
 	picker_smooth:          Smooth,
 	device_smooth:          Smooth,
 	toast:                  string,
+	setup_error:            string, // setup screen error, owned
 	toast_until:            u64,
 	last_write_pending:     bool,
 	last_transfer_pending:  bool,
@@ -806,6 +834,7 @@ main :: proc() {
 	autoscroll_moving = false
 	toast = ""
 	defer delete(toast)
+	defer delete(setup_error)
 	last_write_pending = false
 	drag_candidate = false
 	dragging = false
@@ -1093,6 +1122,10 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 						}
 					case .RETURN, .KP_ENTER:
 						select_all = false
+						if library_client.state == .Missing_Client_ID {
+							submit_setup(app)
+							break
+						}
 						_, valid := track.parse_id(input)
 						if valid {
 							delete(selected)
@@ -1654,10 +1687,12 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		)
 	}
 	shown_input := input
-	if len(shown_input) == 0 {
-		shown_input = input_active ? "" : "Search Spotify or paste a track link"
+	if library_client.state != .Missing_Client_ID {
+		if len(shown_input) == 0 {
+			shown_input = input_active ? "" : "Search Spotify or paste a track link"
+		}
+		if input_active {shown_input = fmt.aprintf("%s|", shown_input, allocator = context.temp_allocator)}
 	}
-	if input_active {shown_input = fmt.aprintf("%s|", shown_input, allocator = context.temp_allocator)}
 	times: [2][16]u8
 	retain_player_cover(&displayed_cover, player_cover, &textures)
 	// The footer links the playing collection: the title its album, the
@@ -1742,6 +1777,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		search_mode    = search_mode,
 		releases       = library_client.release_feed.open,
 		sign_in        = library_prompt,
+		setup_error    = setup_error,
 		can_back       = nav_can_back(&nav),
 		can_forward    = nav_can_forward(&nav),
 		search_kind    = search_kind,
@@ -2059,6 +2095,12 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			resizing = true
 		} else if hit("sort_button", mouse_click) {
 			open_sort_menu(&menu, mouse_click, app_state.sort[filter])
+		} else if hit("setup_field", mouse_click) {
+			if !input_active {input_active = sdl.StartTextInput(state.window)}
+		} else if hit("setup_dashboard", mouse_click) {
+			open_dashboard()
+		} else if hit("setup_save", mouse_click) {
+			submit_setup(app)
 		} else if hit("library_sign_in", mouse_click) {
 			_ = open_prompt_url(.Library)
 		} else if hit("library_retry", mouse_click) {
