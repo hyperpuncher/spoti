@@ -2,7 +2,9 @@ package main
 
 import "base:runtime"
 import "core:math"
+import "core:sync/chan"
 import "core:testing"
+import "core:thread"
 import library "spotify/library"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
@@ -461,6 +463,48 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 		!hit_index("album_link", {album.x + album.width - 1, link.y + link.height / 2}, 0),
 	)
 	testing.expect(t, !clay.GetElementData(clay.ID("album_link", 1)).found)
+	// A collection card must use normal navigation, including a back entry.
+	fake_worker: thread.Thread
+	opened := library.Client {
+		state  = .Ready,
+		worker = &fake_worker,
+	}
+	opened.requests, _ = chan.create_buffered(chan.Chan(library.Request), 1, context.allocator)
+	defer {for request in chan.try_recv(opened.requests) {library.free_request(request)}
+		chan.destroy(opened.requests)
+		library.free_detail(&opened.detail)
+		delete(opened.detail_request_id)}
+	nav: Nav
+	defer nav_free_all(&nav)
+	nav_commit(&nav, Nav_State{filter = .Artists})
+	input: string
+	pinned, armed := false, true
+	ctx := Nav_Ctx {
+		client        = &opened,
+		nav           = &nav,
+		app_state     = &app_state,
+		textures      = &textures,
+		detail_pinned = &pinned,
+		scroll_armed  = &armed,
+		input         = &input,
+		filter        = .Artists,
+	}
+	entry := library.Entry {
+		name = "Album title",
+		uri  = "spotify:album:fixture",
+	}
+	testing.expect(
+		t,
+		open_release_card(
+			&ctx,
+			{link.x + 1, link.y + 1},
+			"album_link",
+			[]library.Entry{entry},
+			{last = 1},
+		),
+	)
+	testing.expect(t, nav_can_back(&nav) && !armed)
+	testing.expect_value(t, nav.states[nav.index].detail.uri, entry.uri)
 	testing.expect_value(t, errors, 0)
 }
 

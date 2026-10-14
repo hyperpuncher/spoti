@@ -148,6 +148,20 @@ queue_detail_rows :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
 	stamp_queue_album(items, detail)
 }
 
+// Row, menu, and hero playback share queue ownership and shuffle selection.
+app_queue_detail :: proc(app: ^App, index: int) -> bool {
+	queue_detail_rows(&app.play_queue, &app.library_client.detail)
+	stamp_play_queue(&app.queue_detail, &app.queue_gen, app.library_client.detail)
+	app.play_index = app.shuffle ? reorder_play_queue(app.play_queue[:], index, true) : index
+	return select_play_item(
+		app.play_queue[:],
+		app.play_index,
+		&app.selected,
+		&app.player_cover,
+		&app.artist,
+	)
+}
+
 // The footer's single artist link: the first artist with a page. Search
 // queues carry one link; detail rows carry them all.
 // Idempotent, so paged-in tails stamp just their new rows.

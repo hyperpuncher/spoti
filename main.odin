@@ -102,14 +102,7 @@ wake_app :: proc "c" (_: rawptr) {
 
 hit_index :: proc(id: string, point: sdl.FPoint, index: u32) -> bool {
 	data := clay.GetElementData(clay.ID(id, index))
-	box := data.boundingBox
-	return(
-		data.found &&
-		point.x >= box.x &&
-		point.x < box.x + box.width &&
-		point.y >= box.y &&
-		point.y < box.y + box.height \
-	)
+	return data.found && point_in_box(point, data.boundingBox)
 }
 
 hit :: proc(id: string, point: sdl.FPoint) -> bool {
@@ -147,6 +140,13 @@ grid_card_at :: proc(page: ^library.Page, visible: Visible_Items, point: sdl.FPo
 
 pointer_over :: proc(id: string, index: u32 = 0) -> bool {
 	return clay.PointerOver(clay.ID(id, index))
+}
+
+range_hovered :: proc(id: string, visible: Visible_Items) -> bool {
+	for index in visible.first ..< visible.last {
+		if pointer_over(id, u32(index)) {return true}
+	}
+	return false
 }
 
 // One hover scan for both artist link namespaces: the hero uses its own id
@@ -220,12 +220,7 @@ update_cursor :: proc(
 			return
 		}
 	}
-	for index in visible.cards.first ..< visible.cards.last {
-		if pointer_over("card", u32(index)) {
-			ui.set_cursor(state, .Pointer)
-			return
-		}
-	}
+	if range_hovered("card", visible.cards) {ui.set_cursor(state, .Pointer); return}
 	if link_album && pointer_over("footer_title") {
 		ui.set_cursor(state, .Pointer)
 		return
@@ -234,84 +229,39 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Pointer)
 		return
 	}
-	if client.release_feed.open {
-		for index in visible.feed.first ..< visible.feed.last {
-			if pointer_over("feed_row", u32(index)) {
-				ui.set_cursor(state, .Pointer)
-				return
-			}
-		}
+	if client.release_feed.open && range_hovered("feed_row", visible.feed) {
+		ui.set_cursor(state, .Pointer)
+		return
 	}
 	if client.detail.ready {
 		if artist_links_hovered(client.detail.artist_links, "hero_artist_link", 0) {
 			ui.set_cursor(state, .Pointer)
 			return
 		}
-		for index in visible.tracks.first ..< visible.tracks.last {
-			if index < len(client.detail.rows) {
-				row := client.detail.rows[index]
-				if artist_links_hovered(
-					row.artist_links,
-					"artist_link",
-					artist_link_id(u32(index - visible.tracks.first), 0),
-				) {
-					ui.set_cursor(state, .Pointer)
-					return
-				}
-			}
-			if pointer_over("track_row", u32(index)) {
-				ui.set_cursor(state, .Pointer)
-				return
-			}
-		}
-		for index in visible.releases.first ..< visible.releases.last {
-			if pointer_over("release_card", u32(index)) {
-				ui.set_cursor(state, .Pointer)
-				return
-			}
-		}
-		for index in visible.singles.first ..< visible.singles.last {
-			if pointer_over("single_card", u32(index)) {
-				ui.set_cursor(state, .Pointer)
-				return
-			}
+		if range_hovered("track_row", visible.tracks) ||
+		   range_hovered("release_card", visible.releases) ||
+		   range_hovered("single_card", visible.singles) {
+			ui.set_cursor(state, .Pointer)
+			return
 		}
 	}
 	ui.set_cursor(state, .Default)
 }
 
-// One artist section's card clicks: opens the album page through the same
-// navigation recording as any card click. Indices past the loaded cards
-// are skeleton tails with no element to hit.
+// Artist release cards use the same history and preview path as other albums.
 open_release_card :: proc(
-	client: ^library.Client,
-	nav: ^Nav,
-	detail_scroll_armed: ^bool,
-	mouse_click: sdl.FPoint,
-	card_id: string,
+	ctx: ^Nav_Ctx,
+	point: sdl.FPoint,
+	id: string,
 	items: []library.Entry,
-	first, last: int,
-) -> (
-	handled: bool,
-) {
-	for index in first ..< last {
-		if index >= len(items) {continue}
-		release := items[index]
-		if !hit_clipped(card_id, "detail_rows", mouse_click, u32(index)) {continue}
-		id := release.uri
-		if strings.has_prefix(id, "spotify:album:") {
-			id = id[len("spotify:album:"):]
-			if detail_already_open(client, release.uri) {
-				handled = true
-			} else {
-				nav_save_scroll(nav, detail_scroll_y())
-				detail_scroll_armed^ = false
-				handled = library.open_detail(client, .Album, id, release)
-			}
+	visible: Visible_Items,
+) -> bool {
+	for index in visible.first ..< min(visible.last, len(items)) {
+		if hit_clipped(id, "detail_rows", point, u32(index)) {
+			return open_entry_page(ctx, items[index])
 		}
-		break
 	}
-	return
+	return false
 }
 
 // One value threads the navigation state through every click target instead
@@ -347,24 +297,6 @@ open_entry_page :: proc(ctx: ^Nav_Ctx, entry: library.Entry) -> bool {
 		nav_capture(ctx.client, ctx.filter, ctx.search_mode, ctx.search_kind, ctx.input^),
 	)
 	return true
-}
-
-open_spotify_detail :: proc(detail: ^library.Detail) {
-	kind := "playlist"
-	switch detail.source {
-	case .Album:
-		kind = "album"
-	case .Artist:
-		kind = "artist"
-	case .Liked:
-		return
-	case .Playlist:
-	}
-	address := fmt.aprintf("https://open.spotify.com/%s/%s", kind, detail.id)
-	defer delete(address)
-	c_address := strings.clone_to_cstring(address)
-	defer delete(c_address)
-	_ = sdl.OpenURL(c_address)
 }
 
 show_toast :: proc(app: ^App, message: string) {
@@ -848,15 +780,8 @@ main :: proc() {
 		{handler = clay_error},
 	)
 	clay.SetMeasureTextFunction(measure_text, &state)
-	cancel, closed = false, false
 	selected = strings.clone(session.TRACK_URL)
 	play_index = -1
-	queue_detail = ""
-	input_active = false
-	select_all = false
-	search_mode = false
-	search_kind = library.Kind.Playlists
-	search_pending = false
 	textures = Textures {
 		by_key    = make(map[u64]^sdl.Texture),
 		requested = make(map[u64]Cover_Request_State),
@@ -879,34 +804,14 @@ main :: proc() {
 	_ = connect.start(&connect_client, app_state.connect_device, WAKE_EVENT != 0 ? wake_app : nil)
 	filter = app_state.tab
 	sidebar_width = app_state.sidebar_width
-	state_dirty = false
-	order_dirty = false
-	pending_redraw = false
-	detail_pinned = false
-	library_prompt_shown = false
-	playback_prompt_opened = false
-	resizing = false
-	detail_scroll_armed = false
-	last_detail_uri = ""
 	defer delete(last_detail_uri)
 	defer delete(release_play_uri)
-	autoscroll_container = ""
-	autoscroll_anchor = sdl.FPoint{}
-	autoscroll_moving = false
-	toast = ""
 	defer delete(toast)
 	defer delete(setup_error)
-	last_write_pending = false
-	drag_candidate = false
-	dragging = false
 	drag_index = -1
-	drag_start = sdl.FPoint{}
-	drag_uri = ""
 	defer delete(drag_uri)
-	drag_label = ""
 	defer delete(drag_label)
 	drop_target = -1
-	stage_n = 0
 	// Resume the last played track and reopen its collection. The footer
 	// shows it without starting playback; pressing play resumes it.
 	played := &app_state.last_played
@@ -949,16 +854,7 @@ main :: proc() {
 		delete(button_anims)
 		if mpris_active {mpris.close()}
 	}
-	stage = Stage.Idle
-	finished = false
-	repeat, replay_pending, play_after_stop = false, false, false
-	fx_animating = false
-	volume_dragging = false
 	volume = app_state.volume
-	seek_dragging, start_paused = false, false
-	seek_ms = 0
-	sent_frames, sample_rate, duration_ms = 0, 0, 0
-	displayed_ms = 0
 	last = sdl.GetTicksNS()
 	first_frame = true
 	running = true
@@ -2117,17 +2013,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 							replace_string(&release_play_uri, menu.uri)
 						}
 					} else if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
-						queue_detail_rows(&play_queue, &library_client.detail)
-						stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
-						play_index =
-							shuffle ? reorder_play_queue(play_queue[:], menu.track, true) : menu.track
-						track_selected = select_play_item(
-							play_queue[:],
-							play_index,
-							&selected,
-							&player_cover,
-							&artist,
-						)
+						track_selected = app_queue_detail(app, menu.track)
 					}
 				case .Add_To_Playlist:
 					menu.picker_open = true
@@ -2220,53 +2106,26 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				handled = true
 			}
 			if !handled {
-				if search_mode {
-					search_tabs := SEARCH_TABS
-					for index in 0 ..< len(search_tabs) {
-						if hit_index("chip", mouse_click, u32(index)) {
-							if search_kind != search_tabs[index] {
-								search_kind = search_tabs[index]
-								nav_save_scroll(&nav, detail_scroll_y())
-								nav_commit(
-									&nav,
-									nav_capture(
-										&library_client,
-										filter,
-										search_mode,
-										search_kind,
-										input,
-									),
-								)
-							}
-							handled = true
-							break
+				library_tabs, search_tabs := LIBRARY_TABS, SEARCH_TABS
+				tabs := library_tabs[:]
+				if search_mode {tabs = search_tabs[:]}
+				for tab, index in tabs {
+					if !hit_index("chip", mouse_click, u32(index)) {continue}
+					current := search_mode ? search_kind : filter
+					if current != tab {
+						if search_mode {search_kind = tab} else {
+							filter, app_state.tab = tab, tab
+							state_dirty = true
 						}
+						nav_save_scroll(&nav, detail_scroll_y())
+						nav_commit(
+							&nav,
+							nav_capture(&library_client, filter, search_mode, search_kind, input),
+						)
 					}
-				} else {
-					library_tabs := LIBRARY_TABS
-					for index in 0 ..< len(library_tabs) {
-						if hit_index("chip", mouse_click, u32(index)) {
-							if filter != library_tabs[index] {
-								filter = library_tabs[index]
-								app_state.tab = filter
-								state_dirty = true
-								nav_save_scroll(&nav, detail_scroll_y())
-								nav_commit(
-									&nav,
-									nav_capture(
-										&library_client,
-										filter,
-										search_mode,
-										search_kind,
-										input,
-									),
-								)
-							}
-							retry_failed_covers(&textures)
-							handled = true
-							break
-						}
-					}
+					if !search_mode {retry_failed_covers(&textures)}
+					handled = true
+					break
 				}
 			}
 			if !handled {
@@ -2333,29 +2192,23 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					copy_link(app, detail_card_uri(library_client.detail))
 					handled = true
 				} else if hit("spotify_link", mouse_click) && !library_client.detail_loading {
-					open_spotify_detail(&library_client.detail)
+					open_spotify_uri(detail_card_uri(library_client.detail))
 					handled = true
 				} else if library_client.detail.source == .Artist {
 					handled =
 						open_release_card(
-							&library_client,
-							&nav,
-							&detail_scroll_armed,
+							&nav_ctx,
 							mouse_click,
 							"release_card",
 							library_client.detail.albums.items[:],
-							visible.releases.first,
-							visible.releases.last,
+							visible.releases,
 						) ||
 						open_release_card(
-							&library_client,
-							&nav,
-							&detail_scroll_armed,
+							&nav_ctx,
 							mouse_click,
 							"single_card",
 							library_client.detail.singles.items[:],
-							visible.singles.first,
-							visible.singles.last,
+							visible.singles,
 						)
 				} else {
 					for index in visible.tracks.first ..< visible.tracks.last {
@@ -2455,16 +2308,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			}
 		} else if drag_index >= 0 && drag_index < len(library_client.detail.rows) {
 			index := drag_index
-			queue_detail_rows(&play_queue, &library_client.detail)
-			stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
-			play_index = shuffle ? reorder_play_queue(play_queue[:], index, true) : index
-			track_selected = select_play_item(
-				play_queue[:],
-				play_index,
-				&selected,
-				&player_cover,
-				&artist,
-			)
+			track_selected = app_queue_detail(app, index)
 			if track_selected {
 				state_note_recent(&app_state, detail_card_uri(library_client.detail))
 				order_dirty = true
@@ -2709,10 +2553,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		remote_control = false
 	}
 	if hero_start {
-		queue_detail_rows(&play_queue, &library_client.detail)
-		stamp_play_queue(&queue_detail, &queue_gen, library_client.detail)
-		play_index = shuffle ? reorder_play_queue(play_queue[:], 0, true) : 0
-		_ = select_play_item(play_queue[:], play_index, &selected, &player_cover, &artist)
+		_ = app_queue_detail(app, 0)
 		state_note_recent(&app_state, detail_card_uri(library_client.detail))
 		order_dirty = true
 		state_dirty = true
