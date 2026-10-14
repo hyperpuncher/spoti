@@ -30,6 +30,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/odin"
           gh release download --repo odin-lang/Odin --pattern 'odin-linux-amd64-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
           tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
+          "$RUNNER_TEMP/odin/vendor/stb/src/build_stb.sh"
           echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
       - name: check and test
         run: |
