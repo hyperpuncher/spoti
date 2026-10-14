@@ -902,7 +902,11 @@ layout :: proc(
 	{
 		layout = {
 			layoutDirection = .TopToBottom,
-			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+			// Page minimum sizes must not expand the shared toolbar and player.
+			sizing = {
+				width = clay.SizingFixed(viewport_width),
+				height = clay.SizingFixed(viewport_height),
+			},
 		},
 		backgroundColor = BG,
 	},

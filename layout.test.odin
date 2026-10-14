@@ -101,8 +101,10 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		clay.ResetMeasureTextCache()
 		clay.SetLayoutDimensions({1280 * d, 820 * d})
 		for width in ([]f32{SIDEBAR_MIN, SIDEBAR_MAX}) {
+			input_box, player_box: clay.BoundingBox
 			for source in ([]library.Source{.Album, .Artist}) {
 				client.detail.source = source
+				client.detail.name = source == .Artist ? "Starfoxlaflare" : "Album"
 				// Allow dimensions from the previous layout to settle after resizing.
 				for _ in 0 ..< 2 {
 					clay.UpdateScrollContainers(false, {}, 0)
@@ -120,6 +122,18 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						0,
 						d,
 						nil,
+					)
+				}
+				input := clay.GetElementData(clay.ID("track_input")).boundingBox
+				player := clay.GetElementData(clay.ID("footer_play")).boundingBox
+				if source == .Album {
+					input_box, player_box = input, player
+				} else {
+					testing.expect(t, input == input_box, "page changes must not move search")
+					testing.expect(
+						t,
+						player == player_box,
+						"page changes must not move playback controls",
 					)
 				}
 				for fraction in ([]f32{0, 0.5, 1}) {
