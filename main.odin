@@ -158,7 +158,11 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Text)
 		return
 	}
-	for id in ([]string{"toolbar_back", "toolbar_library", "toolbar_releases", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "hero_copy_link", "hero_pin", "autoscroll"}) {
+	if pointer_over("setup_field") {
+		ui.set_cursor(state, .Text)
+		return
+	}
+	for id in ([]string{"toolbar_back", "toolbar_library", "toolbar_releases", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "hero_copy_link", "hero_pin", "autoscroll", "setup_redirect", "setup_dashboard", "setup_save"}) {
 		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
 		if id == "hero_copy_link" && library.detail_loading_visible(client) {continue}
 		if id == "hero_pin" &&
@@ -1111,7 +1115,9 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 							clipboard := sdl.GetClipboardText()
 							if clipboard != nil {
 								value := strings.trim_space(string(cstring(clipboard)))
-								if len(value) <= 512 && input_text_ok(value) {
+								paste_limit :=
+									library_client.state == .Missing_Client_ID ? 64 : 512
+								if len(value) <= paste_limit && input_text_ok(value) {
 									delete(input)
 									input = strings.clone(value)
 									select_all = false
@@ -1190,14 +1196,17 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 				   .LGUI not_in sdl.GetModState() &&
 				   .RGUI not_in sdl.GetModState() {
 					added := string(event.text.text)
+					// The setup field holds at most a 32-character key;
+					// search keeps its longer limit.
+					limit := library_client.state == .Missing_Client_ID ? 64 : 512
 					if select_all {
-						if len(added) <= 512 && input_text_ok(added) {
+						if len(added) <= limit && input_text_ok(added) {
 							delete(input)
 							input = strings.clone(added)
 							select_all = false
 							input_changed = true
 						}
-					} else if len(input) + len(added) <= 512 && input_text_ok(added) {
+					} else if len(input) + len(added) <= limit && input_text_ok(added) {
 						updated := fmt.aprintf("%s%s", input, added)
 						delete(input)
 						input = updated
@@ -2097,6 +2106,14 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			open_sort_menu(&menu, mouse_click, app_state.sort[filter])
 		} else if hit("setup_field", mouse_click) {
 			if !input_active {input_active = sdl.StartTextInput(state.window)}
+		} else if hit("setup_redirect", mouse_click) {
+			c_uri := strings.clone_to_cstring(oauth.WEB_REDIRECT_URI)
+			defer delete(c_uri)
+			if sdl.SetClipboardText(c_uri) {
+				delete(toast)
+				toast = strings.clone("Redirect URI copied")
+				toast_until = sdl.GetTicksNS() + 2_500_000_000
+			}
 		} else if hit("setup_dashboard", mouse_click) {
 			open_dashboard()
 		} else if hit("setup_save", mouse_click) {
