@@ -69,7 +69,8 @@ saved_tracks_and_playlist_items_use_current_shapes :: proc(t: ^testing.T) {
 	allocator := virtual.arena_allocator(&arena)
 
 	saved: string = `{"items":[{"track":{"name":"Song","uri":"spotify:track:1TifAMm1r1MascYZ5xGiQk","duration_ms":1000,"artists":[{"name":"X"}],"album":{"images":[{"url":"https://i.scdn.co/image/c","width":300}]}}}],"offset":0,"total":1}`
-	saved_rows, saved_total, saved_next, saved_more, saved_status, saved_ok := parse_saved_tracks(
+	saved_rows, saved_total, saved_next, saved_more, saved_status, saved_ok := parse_track_rows(
+		Saved_Track,
 		transmute([]u8)saved,
 		allocator,
 	)
@@ -87,7 +88,7 @@ saved_tracks_and_playlist_items_use_current_shapes :: proc(t: ^testing.T) {
 
 	playlist: string = `{"items":[{"item":{"name":"Song","uri":"spotify:track:1TifAMm1r1MascYZ5xGiQk","duration_ms":1000}}],"offset":0,"total":50,"next":"yes"}`
 	playlist_rows, playlist_total, playlist_next, playlist_more, _, playlist_ok :=
-		parse_playlist_items(transmute([]u8)playlist, allocator)
+		parse_track_rows(Playlist_Item, transmute([]u8)playlist, allocator)
 	testing.expect(
 		t,
 		playlist_ok &&
@@ -131,7 +132,8 @@ album_tracks_decode_without_album_art :: proc(t: ^testing.T) {
 	defer virtual.arena_destroy(&arena)
 
 	album: string = `{"items":[{"name":"Song","uri":"spotify:track:1TifAMm1r1MascYZ5xGiQk","duration_ms":1000,"artists":[{"name":"Y"}]}],"offset":0,"total":1}`
-	rows, total, next, more, status, ok := parse_album_tracks(
+	rows, total, next, more, status, ok := parse_track_rows(
+		Track_Ref,
 		transmute([]u8)album,
 		virtual.arena_allocator(&arena),
 	)
@@ -158,9 +160,13 @@ malformed_and_unsafe_responses_are_rejected :: proc(t: ^testing.T) {
 	defer virtual.arena_destroy(&arena)
 	allocator := virtual.arena_allocator(&arena)
 	negative_offset := `{"items":[],"total":0,"offset":-1}`
-	_, _, _, _, _, valid := parse_album_tracks(transmute([]u8)negative_offset, allocator)
+	_, _, _, _, _, valid := parse_track_rows(Track_Ref, transmute([]u8)negative_offset, allocator)
 	testing.expect(t, !valid)
-	_, _, _, _, _, valid = parse_playlist_items(transmute([]u8)negative_offset, allocator)
+	_, _, _, _, _, valid = parse_track_rows(
+		Playlist_Item,
+		transmute([]u8)negative_offset,
+		allocator,
+	)
 	testing.expect(t, !valid)
 	testing.expect(t, safe_id("abcdef0123456789"))
 	testing.expect(t, !safe_id("../../etc/passwd"))

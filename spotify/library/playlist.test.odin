@@ -103,7 +103,8 @@ web_playlist_items_parse_track_objects :: proc(t: ^testing.T) {
 	arena: virtual.Arena
 	if virtual.arena_init_growing(&arena) != nil {testing.fail_now(t, "arena")}
 	defer virtual.arena_destroy(&arena)
-	rows, total, next_offset, has_more, status, ok := parse_playlist_items(
+	rows, total, next_offset, has_more, status, ok := parse_track_rows(
+		Playlist_Item,
 		transmute([]u8)body,
 		virtual.arena_allocator(&arena),
 	)

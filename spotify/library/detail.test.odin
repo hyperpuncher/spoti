@@ -77,7 +77,8 @@ unplayable_rows_are_hidden_without_changing_server_pagination :: proc(t: ^testin
 	arena: virtual.Arena
 	if !testing.expect(t, virtual.arena_init_growing(&arena) == nil) {return}
 	defer virtual.arena_destroy(&arena)
-	rows, total, next, more, _, ok := parse_saved_tracks(
+	rows, total, next, more, _, ok := parse_track_rows(
+		Saved_Track,
 		transmute([]u8)body,
 		virtual.arena_allocator(&arena),
 	)

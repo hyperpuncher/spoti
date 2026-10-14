@@ -373,11 +373,11 @@ fetch_track_page :: proc(
 	if !fetched || body_status != 200 {return nil, 0, 0, false, body_status, false}
 	switch source {
 	case .Album:
-		return parse_album_tracks(body[:], allocator)
+		return parse_track_rows(Track_Ref, body[:], allocator)
 	case .Playlist:
-		return parse_playlist_items(body[:], allocator)
+		return parse_track_rows(Playlist_Item, body[:], allocator)
 	case .Liked:
-		return parse_saved_tracks(body[:], allocator)
+		return parse_track_rows(Saved_Track, body[:], allocator)
 	case .Artist:
 	}
 	return
@@ -459,84 +459,40 @@ fetch_track_body :: proc(
 	)
 }
 
-parse_saved_tracks :: proc(
+// The three public track windows share filtering and raw pagination.
+// Their wire item wrappers differ; only playlist occurrences carry dates.
+parse_track_rows :: proc(
+	$T: typeid,
 	body: []u8,
 	allocator: runtime.Allocator,
 ) -> (
 	rows: [dynamic]Track_Row,
-	total: int,
-	next_offset: int,
+	total, next_offset: int,
 	has_more: bool,
 	status: int,
 	ok: bool,
 ) {
-	decoded: Offset_Page(Saved_Track)
-	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return}
-	return saved_track_rows(
-		decoded.items,
-		decoded.total,
-		decoded.offset,
-		len(decoded.next) > 0,
-		allocator,
-	)
-}
-
-parse_playlist_items :: proc(
-	body: []u8,
-	allocator: runtime.Allocator,
-) -> (
-	rows: [dynamic]Track_Row,
-	total: int,
-	next_offset: int,
-	has_more: bool,
-	status: int,
-	ok: bool,
-) {
-	decoded: Offset_Page(Playlist_Item)
-	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return}
-	if !sane_page(decoded.total, len(decoded.items), decoded.offset) {return}
+	decoded: Offset_Page(T)
+	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil ||
+	   !sane_page(decoded.total, len(decoded.items), decoded.offset) {return}
 	rows = make([dynamic]Track_Row, 0, len(decoded.items), allocator)
 	for item in decoded.items {
-		row, valid := track_row(item.item, allocator)
+		ref: Track_Ref
+		when T == Track_Ref {ref = item} else when T == Saved_Track {ref = item.track} else {ref = item.item}
+		row, valid := track_row(ref, allocator)
 		if !valid {continue}
-		if at, consumed := time.rfc3339_to_time_utc(item.added_at);
-		   consumed == len(item.added_at) && consumed > 0 {
-			row.added_at = max(0, time.time_to_unix(at) * 1000)
+		when T == Playlist_Item {
+			if at, consumed := time.rfc3339_to_time_utc(item.added_at);
+			   consumed == len(item.added_at) && consumed > 0 {
+				row.added_at = max(0, time.time_to_unix(at) * 1000)
+			}
 		}
 		append(&rows, row)
 	}
 	return rows,
 		decoded.total,
 		decoded.offset + len(decoded.items),
-		len(decoded.next) > 0 && len(decoded.items) > 0,
-		200,
-		true
-}
-
-parse_album_tracks :: proc(
-	body: []u8,
-	allocator: runtime.Allocator,
-) -> (
-	rows: [dynamic]Track_Row,
-	total: int,
-	next_offset: int,
-	has_more: bool,
-	status: int,
-	ok: bool,
-) {
-	decoded: Offset_Page(Track_Ref)
-	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return}
-	if !sane_page(decoded.total, len(decoded.items), decoded.offset) {return}
-	rows = make([dynamic]Track_Row, 0, len(decoded.items), allocator)
-	for track in decoded.items {
-		row, valid := track_row(track, allocator)
-		if !valid {continue}
-		append(&rows, row)
-	}
-	return rows,
-		decoded.total,
-		decoded.offset + len(decoded.items),
-		len(decoded.next) > 0 && len(decoded.items) > 0,
+		decoded.next != "" && len(decoded.items) > 0,
 		200,
 		true
 }
@@ -635,29 +591,6 @@ parse_artist_albums :: proc(
 		len(decoded.next) > 0 && len(decoded.items) > 0,
 		200,
 		true
-}
-
-saved_track_rows :: proc(
-	items: []Saved_Track,
-	total, offset: int,
-	next: bool,
-	allocator: runtime.Allocator,
-) -> (
-	rows: [dynamic]Track_Row,
-	out_total: int,
-	next_offset: int,
-	has_more: bool,
-	status: int,
-	ok: bool,
-) {
-	if !sane_page(total, len(items), offset) {return}
-	rows = make([dynamic]Track_Row, 0, len(items), allocator)
-	for item in items {
-		row, valid := track_row(item.track, allocator)
-		if !valid {continue}
-		append(&rows, row)
-	}
-	return rows, total, offset + len(items), next && len(items) > 0, 200, true
 }
 
 // One Artist_Link per artist, in display order. Empty stays nil so plain
