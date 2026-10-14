@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:math"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 import library "spotify/library"
 import ui "ui"
@@ -551,11 +552,14 @@ track_list_row :: proc(
 	columns: bool,
 	row_text, title_max, column_box: f32,
 	d: f32,
+	playlist: bool = false,
 ) {
 	// Each line is pre-shortened to its box: clay clips pixels but
 	// never draws an ellipsis itself. With no fonts (layout tests)
 	// everything below is the identity.
-	title_box := column_box
+	album_width, date_width, title_fraction := f32(0), f32(0), f32(0.5)
+	if playlist {album_width, date_width, title_fraction = playlist_columns(row_text, d)}
+	title_box := column_box * title_fraction / 0.5
 	if !columns {
 		title_box = min(hero_text_width(ui_state, row.name, 15, 3), title_max)
 	}
@@ -564,7 +568,9 @@ track_list_row :: proc(
 	// ellipsis. A first artist that alone overflows truncates with
 	// one like before. Sources that omit URIs render plain text.
 	count_width := row.play_count > 0 && row_text >= 380 * d ? 100 * d : 0
-	artist_box := max(0, row_text - title_box - (count_width > 0 ? count_width + ROW_GAP * d : 0))
+	extra := album_width + date_width + count_width
+	for width in ([]f32{album_width, date_width, count_width}) {if width > 0 {extra += ROW_GAP * d}}
+	artist_box := max(0, row_text - title_box - extra)
 	hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
 	if clay.UI_WithId(clay.ID("track_row", u32(index)))(
 	{
@@ -607,7 +613,7 @@ track_list_row :: proc(
 		{
 			layout = {
 				sizing = {
-					width = columns ? clay.SizingPercent(0.5) : clay.SizingFit({max = title_max}),
+					width = columns ? clay.SizingPercent(title_fraction) : clay.SizingFit({max = title_max}),
 				},
 				childAlignment = {y = .Center},
 			},
@@ -637,6 +643,33 @@ track_list_row :: proc(
 				"artist_link",
 				artist_link_id(slot, 0),
 			)
+		}
+		for width, i in ([]f32{album_width, date_width}) {
+			if width <= 0 {continue}
+			id := i == 0 ? "track_album" : "track_added"
+			if clay.UI_WithId(clay.ID(id, u32(index)))(
+			{layout = {sizing = {width = clay.SizingFixed(width)}}},
+			) {
+				if i == 0 {
+					name := hero_fit_text(
+						ui_state,
+						row.album,
+						max(0, width - 24 * d),
+						14,
+						0,
+						1,
+						context.temp_allocator,
+					)
+					metadata_link("album_link", u32(index), name, row.album_uri != "")
+				} else {
+					fitted_text(
+						ui_state,
+						added_at_text(row.added_at),
+						width,
+						{fontId = 1, fontSize = 14, textColor = MUTED, wrapMode = .None},
+					)
+				}
+			}
 		}
 		if count_width > 0 {
 			if clay.UI()(
@@ -680,6 +713,41 @@ track_list_row :: proc(
 			)
 		}
 	}
+}
+
+// Shared by playlist headers and rows. Narrow panes hide date, then album.
+playlist_columns :: proc(row_text, d: f32) -> (album_width, date_width, title_fraction: f32) {
+	album_width = row_text >= 700 * d ? row_text * 0.26 : 0
+	date_width = row_text >= 1000 * d ? 140 * d : 0
+	title_fraction = album_width > 0 ? 0.35 : 0.5
+	return
+}
+
+added_at_text :: proc(milliseconds: i64) -> string {
+	if milliseconds <= 0 {return ""}
+	at := time.unix(milliseconds / 1000, milliseconds % 1000 * 1_000_000)
+	year, month, day := time.date(at)
+	months := [12]string {
+		"Jan",
+		"Feb",
+		"Mar",
+		"Apr",
+		"May",
+		"Jun",
+		"Jul",
+		"Aug",
+		"Sep",
+		"Oct",
+		"Nov",
+		"Dec",
+	}
+	return fmt.aprintf(
+		"%s %d, %d",
+		months[int(month) - 1],
+		day,
+		year,
+		allocator = context.temp_allocator,
+	)
 }
 
 // Track-row text budgets for one container width: the flowing title cap,
@@ -729,6 +797,7 @@ track_row_list :: proc(
 			title_max,
 			column_box,
 			d,
+			playlist = detail.source == .Playlist,
 		)
 	}
 	list_spacer(visible.after - gap)
@@ -743,6 +812,10 @@ track_table :: proc(
 ) -> (
 	visible: Visible_Items,
 ) {
+	row_text, title_max, column_box, gap, columns := track_row_boxes(available_width, d)
+	album_width, date_width, title_fraction := f32(0), f32(0), f32(0.5)
+	if detail.source ==
+	   .Playlist {album_width, date_width, title_fraction = playlist_columns(row_text, d)}
 	if clay.UI_WithId(clay.ID("detail_rows"))(
 	{
 		layout = {
@@ -779,11 +852,23 @@ track_table :: proc(
 			// Same percent column as the rows below, so the artist label
 			// sits exactly over the artist column: Grow pairs would split
 			// their joint share instead of the whole base.
-			if clay.UI()({layout = {sizing = {width = clay.SizingPercent(0.5)}}}) {
+			if clay.UI()({layout = {sizing = {width = clay.SizingPercent(title_fraction)}}}) {
 				clay.Text("TITLE", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
 			}
 			if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {
 				clay.Text("ARTIST", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+			}
+			for width, i in ([]f32{album_width, date_width}) {
+				if width <= 0 {continue}
+				id := i == 0 ? "album_header" : "added_header"
+				if clay.UI_WithId(clay.ID(id))(
+				{layout = {sizing = {width = clay.SizingFixed(width)}}},
+				) {
+					clay.Text(
+						i == 0 ? "ALBUM" : "DATE ADDED",
+						clay.TextElementConfig{fontSize = 13, textColor = MUTED},
+					)
+				}
 			}
 			if clay.UI()(
 			{
@@ -807,7 +892,6 @@ track_table :: proc(
 		// Row padding (12/92), the number slot and the gaps come off the top.
 		// Wide rows columnate under the header labels; narrow rows flow with
 		// the title taking most of what is left and the artist the rest.
-		row_text, title_max, column_box, gap, columns := track_row_boxes(available_width, d)
 		visible = scroll_items(
 			"detail_rows",
 			detail_item_count(len(detail.rows), detail.total, detail.has_more),
@@ -1043,7 +1127,7 @@ release_section :: proc(
 // it is a single ellipsized line. Clay only wraps on whitespace and offers
 // no max-lines, so sizes and cuts have to be picked up front by replaying
 // its greedy word wrap with the same measurer the layout itself uses.
-HERO_TITLE_SIZES := [?]u16{54, 44, 36, 30}
+HERO_TITLE_SIZES := [?]u16{96, 80, 64, 54, 44, 36, 30}
 HERO_TITLE_LINES :: 2
 HERO_TITLE_FONT :: 2
 
@@ -1092,10 +1176,15 @@ hero_wrapped_lines :: proc(state: ^ui.State, text: string, size, font: u16, widt
 	return lines
 }
 
-hero_title_size :: proc(state: ^ui.State, name: string, width: f32) -> u16 {
-	// Layout tests run without fonts; they keep the default size.
-	if state == nil || len(name) == 0 {return HERO_TITLE_SIZES[0]}
+hero_max_title_size :: proc(viewport_height, d: f32) -> u16 {
+	return u16(clamp(54 + max(0, viewport_height / d - 900) * 0.08, 54, 96))
+}
+
+hero_title_size :: proc(state: ^ui.State, name: string, width: f32, max_size: u16 = 54) -> u16 {
+	// Layout tests run without fonts; they keep the permitted maximum.
+	if state == nil || len(name) == 0 {return max_size}
 	for size in HERO_TITLE_SIZES {
+		if size > max_size {continue}
 		if hero_wrapped_lines(state, name, size, HERO_TITLE_FONT, width) <= HERO_TITLE_LINES {
 			return size
 		}
@@ -1154,9 +1243,9 @@ artist_link_id :: proc(slot: u32, ai: int) -> u32 {
 	return slot * 64 + u32(ai)
 }
 
-// One artist segment: a hug box when linked (hover brightens, clicks open
-// the page), plain text otherwise. The caller owns truncation.
-artist_segment :: proc(id: string, index: u32, name: string, linked: bool) {
+// Artist and album links hug the fitted text, not the whole column.
+// Missing URIs remain plain text. The caller owns truncation.
+metadata_link :: proc(id: string, index: u32, name: string, linked: bool) {
 	if !linked {
 		clay.Text(name, clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None})
 		return
@@ -1195,7 +1284,7 @@ artist_links_row :: proc(
 		if used + need > box {
 			if ai == 0 {
 				fit := hero_fit_text(ui_state, link.name, box, 14, 0, 1, context.temp_allocator)
-				artist_segment(id, base + u32(ai), fit, linked)
+				metadata_link(id, base + u32(ai), fit, linked)
 			} else {
 				clay.Text(
 					"…",
@@ -1204,7 +1293,7 @@ artist_links_row :: proc(
 			}
 			return
 		}
-		artist_segment(id, base + u32(ai), link.name, linked)
+		metadata_link(id, base + u32(ai), link.name, linked)
 		if separator != "" {
 			clay.Text(
 				separator,
@@ -1291,11 +1380,12 @@ hero_banner :: proc(
 	)
 	height := min(available * h / w, height_limit)
 	title_width := max(0, available - 48 * d)
+	title_size := hero_max_title_size(viewport_height, d)
 	title := hero_fit_text(
 		ui_state,
 		detail.name,
 		title_width,
-		54,
+		title_size,
 		HERO_TITLE_FONT,
 		1,
 		context.temp_allocator,
@@ -1312,7 +1402,7 @@ hero_banner :: proc(
 			image = {imageData = rawptr(uintptr(cover_key(detail.banner)))},
 		},
 		)
-		fade_height := min(height, 320 * d)
+		fade_height := min(height, max(320 * d, f32(title_size) * 4 * d))
 		fade_image(
 			textures,
 			textures.hero_fade,
@@ -1343,7 +1433,7 @@ hero_banner :: proc(
 				title,
 				clay.TextElementConfig {
 					fontId = HERO_TITLE_FONT,
-					fontSize = 54,
+					fontSize = title_size,
 					textColor = WHITE,
 					wrapMode = .None,
 				},
@@ -1372,7 +1462,12 @@ detail_hero :: proc(
 	// A density unit of slack keeps knife-edge words from spilling a third
 	// line over floating-point summation order.
 	title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d - d)
-	title_size := hero_title_size(ui_state, detail.name, title_width)
+	title_size := hero_title_size(
+		ui_state,
+		detail.name,
+		title_width,
+		hero_max_title_size(viewport_height, d),
+	)
 	title_text := hero_fit_text(
 		ui_state,
 		detail.name,

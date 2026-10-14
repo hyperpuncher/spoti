@@ -12,7 +12,7 @@ when ODIN_OS == .Windows {
 
 WEIGHT_REGULAR :: 80
 WEIGHT_MEDIUM :: 100
-WEIGHT_BOLD :: 200
+WEIGHT_EXTRABOLD :: 205
 
 Config :: struct {}
 Pattern :: struct {}

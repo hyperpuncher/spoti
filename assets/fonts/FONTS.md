@@ -2,7 +2,8 @@
 
 Geist is the primary face on Linux, macOS, and Windows.
 
-- `Geist[wght].ttf`: regular by default, with named Medium and Bold instances.
+- `Geist[wght].ttf`: regular by default, Medium for track titles, and
+  ExtraBold for hero titles and headings.
 - `GeistMono-Regular.ttf`: numeric fields.
 - `OFL.txt`: the SIL Open Font License for both files.
 

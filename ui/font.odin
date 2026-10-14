@@ -24,7 +24,7 @@ GEIST_VAR :: "Geist[wght].ttf"
 GEIST_MONO :: "GeistMono-Regular.ttf"
 GEIST_FACE_REGULAR :: 0
 GEIST_FACE_MEDIUM :: (5 << 16)
-GEIST_FACE_BOLD :: (7 << 16)
+GEIST_FACE_EXTRA_BOLD :: (8 << 16)
 
 FONT_ROLE_COUNT :: u16(4)
 
@@ -72,7 +72,7 @@ resolve_role :: proc(role: Font_Role) -> (path: string, index: int, ok: bool) {
 	case .Numeric:
 		file, face, pattern = GEIST_MONO, 0, "monospace"
 	case .Bold:
-		face, pattern = GEIST_FACE_BOLD, "sans-serif:style=Bold"
+		face, pattern = GEIST_FACE_EXTRA_BOLD, "sans-serif:style=ExtraBold"
 	case .Medium:
 		face, pattern = GEIST_FACE_MEDIUM, "sans-serif:style=Medium"
 	}
@@ -184,7 +184,7 @@ font_for_text :: proc(state: ^State, value: string, size: f32, font_id: u16 = 0)
 			// Fallback symbols keep their designed outline instead of taking
 			// the title's bold weight. Script letters still follow the role.
 			if !unicode.is_symbol(character) {
-				if font_id == u16(Font_Role.Bold) {weight = fontconfig.WEIGHT_BOLD}
+				if font_id == u16(Font_Role.Bold) {weight = fontconfig.WEIGHT_EXTRABOLD}
 				if font_id == u16(Font_Role.Medium) {weight = fontconfig.WEIGHT_MEDIUM}
 			}
 			path, face := fontconfig.match(

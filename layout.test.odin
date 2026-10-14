@@ -288,7 +288,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 }
 
 @(test)
-artist_sections_skip_off_screen_cards :: proc(t: ^testing.T) {
+wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 	memory := make([]u8, int(clay.MinMemorySize()))
 	defer delete(memory)
 	errors := 0
@@ -390,6 +390,51 @@ artist_sections_skip_off_screen_cards :: proc(t: ^testing.T) {
 		// must render no cards instead of a full viewport each.
 		testing.expect_value(t, errors, 0)
 	}
+	client.detail.source = .Playlist
+	client.detail.rows[0].album = "Album title"
+	client.detail.rows[0].album_uri = "spotify:album:fixture"
+	client.detail.rows[1].album = "Unlinked album"
+	clay.GetScrollContainerData(clay.ID("detail_rows")).scrollPosition.y = 0
+	_, _ = layout(
+		{button = "pause"},
+		&client,
+		&app_state,
+		.Albums,
+		&textures,
+		&fx,
+		SIDEBAR_MAX,
+		2500,
+		1424,
+		26,
+		0,
+		1,
+		nil,
+	)
+	for ids in ([][2]string{{"album_header", "track_album"}, {"added_header", "track_added"}}) {
+		header := clay.GetElementData(clay.ID(ids[0]))
+		row := clay.GetElementData(clay.ID(ids[1], 0))
+		testing.expect(t, header.found && row.found)
+		testing.expect(t, math.abs(header.boundingBox.x - row.boundingBox.x) < 0.01)
+		testing.expect_value(t, header.boundingBox.width, row.boundingBox.width)
+	}
+	album := clay.GetElementData(clay.ID("track_album", 0)).boundingBox
+	link := clay.GetElementData(clay.ID("album_link", 0)).boundingBox
+	testing.expect(t, link.width > 0 && link.width < album.width)
+	testing.expect(
+		t,
+		hit_clipped(
+			"album_link",
+			"detail_rows",
+			{link.x + link.width / 2, link.y + link.height / 2},
+			0,
+		),
+	)
+	testing.expect(
+		t,
+		!hit_index("album_link", {album.x + album.width - 1, link.y + link.height / 2}, 0),
+	)
+	testing.expect(t, !clay.GetElementData(clay.ID("album_link", 1)).found)
+	testing.expect_value(t, errors, 0)
 }
 
 @(test)
@@ -726,4 +771,18 @@ play_counts_use_grouped_numbers :: proc(t: ^testing.T) {
 	testing.expect_value(t, count_text(999), "999")
 	testing.expect_value(t, count_text(1000), "1,000")
 	testing.expect_value(t, count_text(563387486), "563,387,486")
+}
+
+@(test)
+playlist_columns_and_dates_handle_narrow_panes_and_unknown_dates :: proc(t: ^testing.T) {
+	album, date, _ := playlist_columns(600, 1)
+	testing.expect(t, album == 0 && date == 0)
+	album, date, _ = playlist_columns(800, 1)
+	testing.expect(t, album > 0 && date == 0)
+	album, date, _ = playlist_columns(1200, 1)
+	testing.expect(t, album > 0 && date > 0)
+	testing.expect_value(t, added_at_text(1726617600000), "Sep 18, 2024")
+	testing.expect_value(t, added_at_text(0), "")
+	testing.expect_value(t, hero_max_title_size(713 * 1.5, 1.5), 54)
+	testing.expect_value(t, hero_max_title_size(1425 * 0.8, 0.8), 96)
 }

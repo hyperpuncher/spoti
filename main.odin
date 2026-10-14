@@ -2386,6 +2386,18 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 								handled = open_entry_page(&nav_ctx, preview)
 								break
 							}
+							if !handled &&
+							   row.album_uri != "" &&
+							   hit_clipped("album_link", "detail_rows", mouse_click, u32(index)) {
+								handled = open_entry_page(
+									&nav_ctx,
+									library.Entry {
+										name = row.album,
+										uri = row.album_uri,
+										image = row.image,
+									},
+								)
+							}
 							if handled {break}
 						}
 						// Arm a drag instead of playing: the play only fires

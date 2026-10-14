@@ -10,6 +10,7 @@ import "core:fmt"
 import "core:mem/virtual"
 import "core:net"
 import "core:strings"
+import "core:time"
 
 Source :: enum {
 	Liked,
@@ -34,6 +35,7 @@ Track_Row :: struct {
 	album_uri:    string, // empty for album pages, stamped from the detail
 	duration_ms:  int,
 	play_count:   i64, // zero means no count was supplied
+	added_at:     i64, // playlist occurrence timestamp, Unix milliseconds; zero is unknown
 	image:        string,
 	image_small:  string,
 }
@@ -113,6 +115,7 @@ clone_row :: proc(row: Track_Row, allocator: runtime.Allocator) -> Track_Row {
 		album_uri = strings.clone(row.album_uri, allocator),
 		duration_ms = row.duration_ms,
 		play_count = row.play_count,
+		added_at = row.added_at,
 		image = strings.clone(row.image, allocator),
 		image_small = strings.clone(row.image_small, allocator),
 	}
@@ -412,7 +415,7 @@ track_page_address :: proc(
 		)
 	case .Playlist:
 		address = fmt.aprintf(
-			"https://api.spotify.com/v1/playlists/%s/items?limit=50&offset=%d&fields=total,offset,next,items(item(%s))",
+			"https://api.spotify.com/v1/playlists/%s/items?limit=50&offset=%d&fields=total,offset,next,items(added_at,item(%s))",
 			id,
 			offset,
 			TRACK_FIELDS,
@@ -496,6 +499,10 @@ parse_playlist_items :: proc(
 	for item in decoded.items {
 		row, valid := track_row(item.item, allocator)
 		if !valid {continue}
+		if at, consumed := time.rfc3339_to_time_utc(item.added_at);
+		   consumed == len(item.added_at) && consumed > 0 {
+			row.added_at = max(0, time.time_to_unix(at) * 1000)
+		}
 		append(&rows, row)
 	}
 	return rows,

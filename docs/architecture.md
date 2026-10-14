@@ -66,7 +66,16 @@ on larger windows. rounded top corners are applied after cropping. captions
 use theme text colors over a smooth mask that reaches the page background
 color at the lower edge. square cover art stays uncropped and is never used
 as a wide banner. play counts are shown only when supplied and when the pane
-has space for the numeric column.
+has space for the numeric column. hero titles keep the smaller-window size
+and can grow to 96 on larger windows; the headline face uses Geist ExtraBold.
+
+playlist tables show album and date-added columns when space is available.
+header and row widths use the same calculation. album names link to their
+album page; only the fitted text is clickable. date-added timestamps belong
+to playlist occurrences, not track IDs: duplicate tracks can have different
+dates. native reads use `ItemAttributes.timestamp` in Unix milliseconds;
+Web API reads use `added_at` from `/playlists/{id}/items`. missing dates stay
+blank, and filtering does not change the raw pagination offset.
 
 native rootlist offsets count folder markers as well as playlists. keep the
 native account on each page and request so those offsets never enter Web API

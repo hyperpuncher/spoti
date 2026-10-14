@@ -21,6 +21,7 @@ PLAYLIST_INVALID_RESPONSE :: -2
 
 Playlist_Window :: struct {
 	uris:        []string,
+	added_at:    []i64, // same raw occurrence order as uris, not keyed by track
 	total:       int,
 	next_offset: int,
 }
@@ -95,7 +96,7 @@ fetch_playlist_rows :: proc(
 		}
 		return nil, 0, 0, false, metadata_code, false
 	}
-	rows, valid = parse_playlist_metadata(metadata[:], window.uris, allocator)
+	rows, valid = parse_playlist_metadata(metadata[:], window.uris, allocator, window.added_at)
 	if !valid {return nil, 0, 0, false, PLAYLIST_INVALID_RESPONSE, false}
 	write_playlist_cache(id, offset, body[:], metadata[:])
 	return rows, window.total, window.next_offset, window.next_offset < window.total, 200, true
@@ -200,7 +201,12 @@ read_playlist_cache :: proc(
 	meta_body, meta_hit := cache_read("api", meta_key, ttl)
 	if !meta_hit {return}
 	defer delete(meta_body)
-	parsed, parsed_ok := parse_playlist_metadata(meta_body[:], window.uris, allocator)
+	parsed, parsed_ok := parse_playlist_metadata(
+		meta_body[:],
+		window.uris,
+		allocator,
+		window.added_at,
+	)
 	if !parsed_ok {return {}, 0, 0, false, false}
 	return parsed, window.total, window.next_offset, window.next_offset < window.total, true
 }
@@ -224,6 +230,7 @@ parse_playlist_window :: proc(body: []u8, offset: int) -> (window: Playlist_Wind
 	truncated, marked, decoded := ap.get_number(contents, 2)
 	if !decoded || !marked || truncated > 1 {return}
 	uris := make([dynamic]string, 0, PLAYLIST_PAGE_SIZE, context.temp_allocator)
+	added_at := make([dynamic]i64, 0, PLAYLIST_PAGE_SIZE, context.temp_allocator)
 	pos := 0
 	for pos < len(contents) {
 		field, wire, item, _, field_valid := ap.next_field(contents, &pos)
@@ -232,13 +239,18 @@ parse_playlist_window :: proc(body: []u8, offset: int) -> (window: Playlist_Wind
 		if wire != 2 || len(uris) >= PLAYLIST_PAGE_SIZE {return}
 		uri, uri_found, item_valid := ap.get_bytes(item, 1)
 		if !item_valid || !uri_found || len(uri) == 0 || len(uri) > 512 {return}
+		attributes, _, attrs_valid := ap.get_bytes(item, 2)
+		timestamp, _, timestamp_valid := ap.get_number(attributes, 2)
+		if !attrs_valid || !timestamp_valid {return}
 		append(&uris, string(uri))
+		append(&added_at, timestamp <= u64(max(i64)) ? i64(timestamp) : 0)
 	}
 	window.total = int(length)
 	window.next_offset = offset + len(uris)
 	if len(uris) < PLAYLIST_PAGE_SIZE && window.next_offset < window.total {return}
 	if len(uris) > 0 && window.next_offset > window.total {return}
 	window.uris = uris[:]
+	window.added_at = added_at[:]
 	return window, true
 }
 
@@ -268,6 +280,7 @@ parse_playlist_metadata :: proc(
 	body: []u8,
 	uris: []string,
 	allocator: runtime.Allocator,
+	added_at: []i64 = nil,
 ) -> (
 	rows: [dynamic]Track_Row,
 	ok: bool,
@@ -317,9 +330,13 @@ parse_playlist_metadata :: proc(
 		if !answer.seen {return}
 	}
 	rows = make([dynamic]Track_Row, 0, len(uris), allocator)
-	for uri in uris {
+	for uri, index in uris {
 		answer, present := answers[uri]
-		if present && answer.row.uri != "" {append(&rows, answer.row)}
+		if present && answer.row.uri != "" {
+			row := answer.row
+			if index < len(added_at) {row.added_at = added_at[index]}
+			append(&rows, row)
+		}
 	}
 	return rows, true
 }
@@ -344,10 +361,10 @@ playlist_track_row :: proc(
 	duration, _, decoded := ap.get_number(body, 7)
 	if !decoded || duration & 1 != 0 || duration >> 1 > u64(max(i32)) {return}
 	ref := Track_Ref {
-			uri         = uri,
-			name        = string(name),
-			duration_ms = int(duration >> 1),
-		}
+		uri         = uri,
+		name        = string(name),
+		duration_ms = int(duration >> 1),
+	}
 	artists := make([dynamic]Artist, context.temp_allocator)
 	images := make([dynamic]Image, context.temp_allocator)
 	album_name, album_uri := "", ""

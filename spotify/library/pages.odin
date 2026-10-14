@@ -130,7 +130,8 @@ Saved_Track :: struct {
 }
 
 Playlist_Item :: struct {
-	item: Track_Ref,
+	added_at: string,
+	item:     Track_Ref,
 }
 
 Saved_Album :: struct {
