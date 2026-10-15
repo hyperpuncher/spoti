@@ -176,43 +176,25 @@ parse_artist_top_message :: proc(
 	uris: []string,
 	ok: bool,
 ) {
-	Block :: struct {
-		country: string,
-		body:    []u8,
-	}
-	blocks: [16]Block
-	count := 0
+	block: []u8
+	best_priority := -1
 	pos := 0
 	for pos < len(body) {
 		field, wire, bytes, _, valid := ap.next_field(body, &pos)
 		if !valid {return nil, false}
 		if field != 4 {continue}
 		if wire != 2 {return nil, false}
-		if count == len(blocks) {break}
 		name, _, name_valid := ap.get_bytes(bytes, 1)
 		if !name_valid {return nil, false}
-		blocks[count] = {
-			country = string(name),
-			body    = bytes,
-		}
-		count += 1
+		priority := len(name) == 0 ? 1 : 0
+		if country != "" && string(name) == country {priority = 2}
+		if priority > best_priority {block, best_priority = bytes, priority}
 	}
-	if count == 0 {return nil, true}
-	chosen := 0
-	for i in 0 ..< count {
-		if country != "" && blocks[i].country == country {
-			chosen = i
-			break
-		}
-		if blocks[i].country == "" {
-			chosen = i
-			break
-		}
-	}
-	found := make([dynamic]string, 0, TOP_TRACKS_MAX, allocator)
+	if best_priority < 0 {return nil, true}
+	found: [TOP_TRACKS_MAX]string
+	count := 0
 	pos = 0
-	block := blocks[chosen].body
-	for pos < len(block) && len(found) < TOP_TRACKS_MAX {
+	for pos < len(block) && count < TOP_TRACKS_MAX {
 		field, wire, message, _, valid := ap.next_field(block, &pos)
 		if !valid {return nil, false}
 		if field != 2 {continue}
@@ -223,10 +205,11 @@ parse_artist_top_message :: proc(
 		raw: [16]u8
 		copy(raw[:], gid)
 		short := track.base62_id(raw, context.temp_allocator)
-		append(&found, fmt.aprintf("spotify:track:%s", short, allocator = context.temp_allocator))
+		found[count] = fmt.aprintf("spotify:track:%s", short, allocator = context.temp_allocator)
+		count += 1
 	}
-	if len(found) == 0 {return nil, true}
-	uris = make([]string, len(found), allocator)
-	copy(uris, found[:])
+	if count == 0 {return nil, true}
+	uris = make([]string, count, allocator)
+	copy(uris, found[:count])
 	return uris, true
 }

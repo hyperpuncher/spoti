@@ -74,8 +74,8 @@ artist_top_tracks_choose_the_country_block :: proc(t: ^testing.T) {
 
 	artist := make([dynamic]u8)
 	defer delete(artist)
-	ap.put_bytes(&artist, 4, account_block[:])
 	ap.put_bytes(&artist, 4, worldwide_block[:])
+	ap.put_bytes(&artist, 4, account_block[:])
 	body := test_artist_response(artist[:])
 	defer delete(body)
 
