@@ -1,5 +1,6 @@
 package library
 
+import "core:strings"
 import "core:testing"
 
 @(test)
@@ -28,6 +29,31 @@ search_results_split_into_four_relevance_pages :: proc(t: ^testing.T) {
 		pages[.Playlists].items[0].subtitle == "igor" &&
 		pages[.Playlists].items[0].total == 14,
 	)
+	client := Client {
+		search_serial  = 2,
+		search_loading = true,
+	}
+	defer stop(&client)
+	apply(
+		&client,
+		Result {
+			kind = .Search,
+			serial = 2,
+			query = strings.clone("Song"),
+			search_pages = pages,
+			ok = true,
+		},
+	)
+	pages = {} // ownership moved to the client through the result
+	apply(&client, Result{kind = .Search, serial = 1, query = strings.clone("Old"), status = 403})
+	testing.expect_value(t, client.search_query, "Song")
+	testing.expect(t, !client.search_loading && client.search_error == 0)
+	for kind in Kind {
+		testing.expect(
+			t,
+			client.search_pages[kind].ready && len(client.search_pages[kind].items) == 1,
+		)
+	}
 }
 
 @(test)

@@ -22,9 +22,11 @@ thread. each network worker owns its reusable curl handle. workers exchange
 bounded messages with the UI rather than change UI-owned state directly.
 
 library requests transfer ownership to the queue, including rejected sends.
-each handled request creates one owned result and sends it on scope exit, so
-failure paths retain the same identity as successful reads. partial worker
-startup uses the normal shutdown path to close, drain, and release its queues.
+each handled request moves into one owned result, which is sent on scope exit.
+the result retains the request fields without duplicate strings. the receiver
+adopts fields it needs, then frees the request with the remaining result data.
+failed sends release the same owned result. partial worker startup uses the
+normal shutdown path to close, drain, and release its queues.
 
 `main.odin` keeps an owned `App` and a short-lived `Frame`. its frame stages
 handle events, navigation, library results, playback, scrolling, layout,

@@ -74,16 +74,7 @@ advance_releases :: proc(client: ^Client) {
 	if queue_request(client, &request) {feed.pending = true}
 }
 
-handle_release_feed :: proc(
-	client: ^Client,
-	tokens: ^oauth.Tokens,
-	request: Request,
-	reuse: rawptr,
-) {
-	result := Result {
-		kind = .Release_Feed,
-	}
-	defer send(client, result)
+read_release_feed :: proc(client: ^Client, tokens: ^oauth.Tokens, result: ^Result, reuse: rawptr) {
 	if !authorize_session(client, tokens, interactive = false) {
 		result.status = PLAYLIST_AUTH_REQUIRED
 		return
@@ -91,10 +82,10 @@ handle_release_feed :: proc(
 	account := session.account_name(tokens.access, &client.cancel)
 	defer delete(account)
 	if account == "" || virtual.arena_init_growing(&result.rows_arena) != nil {return}
-	fetch_release_feed(tokens.access, account, request.offset, &result, reuse, &client.cancel)
+	fetch_release_feed(tokens.access, account, result.offset, result, reuse, &client.cancel)
 	if result.status == 401 &&
 	   authorize_session(client, tokens, force = true, interactive = false) {
-		fetch_release_feed(tokens.access, account, request.offset, &result, reuse, &client.cancel)
+		fetch_release_feed(tokens.access, account, result.offset, result, reuse, &client.cancel)
 	}
 }
 

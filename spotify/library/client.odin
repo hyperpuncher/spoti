@@ -69,36 +69,23 @@ Request :: struct {
 }
 
 Result :: struct {
-	kind:          Request_Kind,
-	list:          Kind,
+	using request: Request, // owned; moved from the worker's input queue
 	page:          Page,
 	detail:        Detail,
-	group:         Album_Group, // More; which artist section the payload belongs to
 	rows:          [dynamic]Track_Row, // allocated in rows_arena
 	releases:      [dynamic]Entry, // allocated in rows_arena
 	new_releases:  [dynamic]New_Release, // allocated in rows_arena
 	rows_arena:    virtual.Arena,
 	search_pages:  [Kind]Page, // Search; receiver frees or adopts
-	search_query:  string, // Search; receiver frees or adopts
-	search_serial: u64, // Search; only the latest applies
 	total:         int,
 	next_offset:   int,
 	has_more:      bool,
-	source:        Source,
-	id:            string, // Detail, More; receiver frees
 	status:        int,
 	ok:            bool,
-	liked:         bool, // Like; echoes the requested membership
 	auth:          Auth_Result, // Auth; why sign-in stopped
 	retry_after:   int, // Index; seconds the server asked us to wait
-	refresh:       bool, // Index; a revalidation that replaces the page
 	me_id:         string, // Me; receiver frees
-	playlist_id:   string, // Add/Remove_From_Playlist; receiver frees
-	playlist_name: string, // Add/Remove_From_Playlist; receiver frees
-	track_uri:     string, // Remove_From_Playlist; receiver frees
 	devices:       [dynamic]Device, // Devices; receiver frees or adopts
-	device_id:     string, // Transfer; receiver frees
-	command:       Command, // Command; echoes the sent command
 	player:        Player_State, // Player_State; receiver frees or adopts
 }
 
@@ -188,8 +175,7 @@ run :: proc(pointer: rawptr) {
 	defer oauth.wipe_tokens(&streaming)
 	for request in chan.recv(client.requests) {
 		defer free_all(context.temp_allocator)
-		defer free_request(request)
-		if sync.atomic_load(&client.cancel) {break}
+		if sync.atomic_load(&client.cancel) {free_request(request); break}
 		handle(client, &tokens, &streaming, request, reuse)
 	}
 }
@@ -235,28 +221,7 @@ ensure_tokens :: proc(client: ^Client, tokens: ^oauth.Tokens) -> bool {
 	return true
 }
 
-// Replies own the metadata that must survive the request's cleanup.
-// Both success and failure use the same identity and search serial.
-request_result :: proc(request: Request) -> Result {
-	result := Result {
-		kind          = request.kind,
-		list          = request.list,
-		source        = request.source,
-		group         = request.group,
-		id            = strings.clone(request.id),
-		search_serial = request.serial,
-		search_query  = strings.clone(request.query),
-		liked         = request.liked,
-		refresh       = request.refresh,
-		playlist_id   = strings.clone(request.playlist_id),
-		playlist_name = strings.clone(request.playlist_name),
-		device_id     = strings.clone(request.device_id),
-		command       = request.command,
-	}
-	if request.kind == .Remove_From_Playlist {result.track_uri = strings.clone(request.item_uri)}
-	return result
-}
-
+// Consumes the request. Success and failure return the same owned input fields.
 handle :: proc(
 	client: ^Client,
 	tokens, streaming: ^oauth.Tokens,
@@ -264,13 +229,15 @@ handle :: proc(
 	reuse: rawptr = nil,
 ) {
 	diagnostic.writef("library request=%v offset=%d", request.kind, request.offset)
-	if request.kind == .Auth {return} 	// sign-in failures are results, not requests
+	if request.kind == .Auth {free_request(request); return} 	// result-only
+	result := Result {
+		request = request,
+	}
+	defer send(client, result)
 	if request.kind == .Release_Feed {
-		handle_release_feed(client, streaming, request, reuse)
+		read_release_feed(client, streaming, &result, reuse)
 		return
 	}
-	result := request_result(request)
-	defer send(client, result)
 	if !ensure_tokens(client, tokens) {result.status = -1; return}
 	#partial switch request.kind {
 	case .Index:
@@ -487,15 +454,10 @@ free_result :: proc(result: Result) {
 	free_detail(&local.detail)
 	virtual.arena_destroy(&local.rows_arena)
 	free_search_pages(&local.search_pages)
-	delete(local.search_query)
-	delete(local.id)
+	free_request(local.request)
 	delete(local.me_id)
 	free_devices(local.devices)
-	delete(local.device_id)
 	free_player_state(local.player)
-	delete(local.playlist_id)
-	delete(local.playlist_name)
-	delete(local.track_uri)
 }
 
 start :: proc(client: ^Client) -> (ok: bool) {
@@ -1274,7 +1236,7 @@ apply :: proc(client: ^Client, result: Result) {
 			)
 		}
 	case .Search:
-		if local.search_serial != client.search_serial {return}
+		if local.serial != client.search_serial {return}
 		client.search_loading = false
 		if !local.ok {
 			client.search_error = local.status
@@ -1293,8 +1255,8 @@ apply :: proc(client: ^Client, result: Result) {
 			)
 		}
 		delete(client.search_query)
-		client.search_query = local.search_query
-		local.search_query = ""
+		client.search_query = local.query
+		local.query = ""
 		diagnostic.result("search", local.ok, local.status, 0, 0, false)
 	case .Me:
 		diagnostic.writef(
@@ -1365,7 +1327,7 @@ apply :: proc(client: ^Client, result: Result) {
 			   local.ok &&
 			   client.detail.source == .Playlist &&
 			   client.detail.id == local.playlist_id {
-				_ = remove_detail_row(client, local.track_uri)
+				_ = remove_detail_row(client, local.item_uri)
 			}
 		}
 		verb := removed ? "remove-from-playlist" : "add-to-playlist"

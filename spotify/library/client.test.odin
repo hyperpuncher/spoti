@@ -222,7 +222,7 @@ failed_worker_requests_keep_owned_identity_and_finish_once :: proc(t: ^testing.T
 	streaming: oauth.Tokens
 	// Expired tokens plus cancellation cannot start auth or make a request.
 	for kind in Request_Kind {
-		if kind == .Auth || kind == .Release_Feed {continue}
+		if kind == .Auth {continue}
 		request := Request {
 			kind          = kind,
 			source        = .Playlist,
@@ -230,6 +230,9 @@ failed_worker_requests_keep_owned_identity_and_finish_once :: proc(t: ^testing.T
 			group         = .Single,
 			id            = strings.clone("page"),
 			query         = strings.clone("query"),
+			cursor        = strings.clone("cursor"),
+			account       = strings.clone("account"),
+			command_state = strings.clone("context"),
 			serial        = 7,
 			playlist_id   = strings.clone("playlist"),
 			playlist_name = strings.clone("name"),
@@ -239,22 +242,18 @@ failed_worker_requests_keep_owned_identity_and_finish_once :: proc(t: ^testing.T
 			liked         = true,
 			refresh       = true,
 		}
-		handle(&client, &tokens, &streaming, request)
-		free_request(request)
+		handle(&client, &tokens, &streaming, request) // consumes the owned request
 		result, received := chan.try_recv(client.results)
 		if !testing.expect(t, received) {continue}
 		defer free_result(result)
-		testing.expect(t, !result.ok && result.status == -1 && result.kind == kind)
+		testing.expect(t, !result.ok && result.kind == kind)
+		testing.expect_value(t, result.status, kind == .Release_Feed ? PLAYLIST_AUTH_REQUIRED : -1)
 		testing.expect_value(t, result.id, "page")
-		testing.expect_value(t, result.search_query, "query")
-		testing.expect_value(t, result.search_serial, u64(7))
+		testing.expect_value(t, result.query, "query")
+		testing.expect_value(t, result.serial, u64(7))
 		testing.expect_value(t, result.playlist_id, "playlist")
 		testing.expect_value(t, result.playlist_name, "name")
-		testing.expect_value(
-			t,
-			result.track_uri,
-			kind == .Remove_From_Playlist ? "spotify:track:item" : "",
-		)
+		testing.expect_value(t, result.item_uri, "spotify:track:item")
 		_, extra := chan.try_recv(client.results)
 		testing.expect(t, !extra)
 	}
@@ -305,6 +304,17 @@ failed_worker_requests_keep_owned_identity_and_finish_once :: proc(t: ^testing.T
 	_ = chan.send(client.results, Result{kind = .Detail, id = strings.clone("reply")})
 	stop_workers(&client)
 	testing.expect(t, client.requests.impl == nil && client.results.impl == nil)
+	// A closed result queue and a result-only request must release owned input.
+	client.results, _ = chan.create_buffered(chan.Chan(Result), 1, context.allocator)
+	chan.close(client.results)
+	for kind in ([]Request_Kind{.Search, .Release_Feed, .Auth}) {
+		handle(
+			&client,
+			&tokens,
+			&streaming,
+			Request{kind = kind, id = strings.clone("closed"), query = strings.clone("query")},
+		)
+	}
 }
 
 @(test)
