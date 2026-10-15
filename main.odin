@@ -969,7 +969,8 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		}
 		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
 	}
-	page_wait := library_client.state == .Ready && time.since(library_client.page_at) < 0
+	page_wait :=
+		wait_ms != 0 && library_client.state == .Ready && time.since(library_client.page_at) < 0
 	if page_wait {
 		delay := -time.since(library_client.page_at)
 		remaining_ms := i32(
