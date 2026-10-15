@@ -62,7 +62,6 @@ authorize :: proc(
 		fresh, result := oauth.refresh(refresh)
 		switch result {
 		case .Authorized:
-			if fresh.refresh == "" {fresh.refresh = strings.clone(refresh)}
 			if keyring_mode != .None && !credential.save(fresh.refresh) {
 				fmt.eprintln("keyring did not save rotated streaming sign-in")
 			}

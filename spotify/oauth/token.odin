@@ -112,7 +112,12 @@ refresh :: proc(refresh_token: string, grant: Grant = PLAYBACK_GRANT) -> (Tokens
 		encoded,
 	)
 	defer {crypto.zero_explicit(raw_data(form), len(form)); delete(form)}
-	return token_request(form, false, grant.required_scope)
+	tokens, result := token_request(form, false, grant.required_scope)
+	// Spotify can omit a replacement refresh token. Keep an owned copy.
+	if result == .Authorized && tokens.refresh == "" {
+		tokens.refresh = strings.clone(refresh_token)
+	}
+	return tokens, result
 }
 
 token_request :: proc(
