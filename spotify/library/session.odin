@@ -62,7 +62,9 @@ read_artist_overview :: proc(
 	reuse: rawptr = nil,
 ) {
 	if !authorize_session(client, tokens, interactive = false) {return}
-	country := session.cached_country()
+	code := session.cached_country()
+	country := ""
+	if code != {} {country = string(code[:])}
 	if fetch_artist_overview(tokens.access, detail, country, reuse, &client.cancel) {return}
 	rows, _, ok := fetch_artist_top_tracks(
 		tokens.access,

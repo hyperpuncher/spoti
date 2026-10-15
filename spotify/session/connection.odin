@@ -40,15 +40,13 @@ connection: AP_Connection
 connection_mutex: sync.Mutex
 connection_worker: ^thread.Thread
 connection_stop: bool
-// Account country from the AP CountryCode packet. Best effort: it arrives
-// only once a playback connection exists, and an empty value just means the
-// caller falls back to the worldwide list. Two bytes, so no lock is taken.
-connection_country: [2]u8
-connection_country_ready: bool
+// CountryCode can arrive while library workers read it. Pack both letters
+// into one atomic value; zero means the worldwide fallback is still needed.
+connection_country: u32
 
-cached_country :: proc() -> string {
-	if !connection_country_ready {return ""}
-	return string(connection_country[:])
+cached_country :: proc() -> [2]u8 {
+	country := sync.atomic_load(&connection_country)
+	return {u8(country >> 8), u8(country)}
 }
 
 // Returns an owned account name from the authenticated AP welcome.
@@ -118,8 +116,7 @@ handle_keep_alive :: proc(c: ^AP_Connection, command: u8, payload: []u8) -> bool
 		   payload[0] <= 'Z' &&
 		   payload[1] >= 'A' &&
 		   payload[1] <= 'Z' {
-			connection_country = {payload[0], payload[1]}
-			connection_country_ready = true
+			sync.atomic_store(&connection_country, u32(payload[0]) << 8 | u32(payload[1]))
 		}
 		return true
 	case 0x04:

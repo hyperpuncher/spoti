@@ -196,18 +196,17 @@ resolve_source :: proc(
 	source: Source,
 	ok: bool,
 ) {
+	defer if !ok {close_source(&source)}
 	metadata, have_metadata := fetch_track_metadata(access, id, cancel, unavailable)
 	if !have_metadata {return}
 	source.name = metadata.name
 	source.format, source.file_id, source.duration_ms =
 		metadata.format, metadata.file_id, metadata.duration_ms
-	if cancelled(cancel) {close_source(&source); return}
-	if !lock_connection(cancel) {close_source(&source); return}
+	if cancelled(cancel) || !lock_connection(cancel) {return}
 	defer sync.unlock(&connection_mutex)
-	if !start_connection_worker() {close_source(&source); return}
+	if !start_connection_worker() {return}
 	source.key, ok = fetch_audio_key(&connection, access, id, source.file_id, cancel)
-	if !ok {close_source(&source); return}
-	return source, true
+	return
 }
 
 // The audio key request is the only transaction the shared transport serves
@@ -361,8 +360,8 @@ probe :: proc(source: ^Source) -> bool {
 		return true
 	}
 	chunk, status, fetched := http.get(source.url, {range = "0-65535", limit = 65536})
-	if !fetched {fmt.eprintln("CDN audio range request failed"); return false}
 	defer {crypto.zero_explicit(raw_data(chunk), len(chunk)); delete(chunk)}
+	if !fetched {fmt.eprintln("CDN audio range request failed"); return false}
 	if status != 206 ||
 	   len(chunk) < 171 {fmt.eprintln("CDN audio range invalid:", status); return false}
 	dec := audio.init(source.key)

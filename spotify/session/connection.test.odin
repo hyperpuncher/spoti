@@ -91,6 +91,10 @@ shared_ap_transport_requests_two_audio_keys_without_resetting_cipher_nonces :: p
 
 @(test)
 idle_ap_connection_handles_ping_pong_ack_and_dropped_connections :: proc(t: ^testing.T) {
+	country := sync.atomic_load(&connection_country)
+	defer sync.atomic_store(&connection_country, country)
+	sync.atomic_store(&connection_country, 0)
+	testing.expect_value(t, cached_country(), [2]u8{})
 	c, server, connected := test_connection(t)
 	if !connected {return}
 	defer close_connection(&c)
@@ -104,6 +108,14 @@ idle_ap_connection_handles_ping_pong_ack_and_dropped_connections :: proc(t: ^tes
 		time.sleep(time.Millisecond)
 	}
 	testing.expect_value(t, c.keep_alive, Keep_Alive.Pong)
+	testing.expect(t, handle_keep_alive(&c, 0x1b, []u8{'U', 'S'}))
+	snapshot := cached_country()
+	testing.expect_value(t, snapshot, [2]u8{'U', 'S'})
+	testing.expect(t, handle_keep_alive(&c, 0x1b, []u8{'G', 'B'}))
+	testing.expect_value(t, snapshot, [2]u8{'U', 'S'})
+	testing.expect_value(t, cached_country(), [2]u8{'G', 'B'})
+	testing.expect(t, handle_keep_alive(&c, 0x1b, []u8{'G', 0}))
+	testing.expect_value(t, cached_country(), [2]u8{'G', 'B'})
 	c.deadline = time.tick_add(time.tick_now(), -time.Second)
 	poll_connection(&c, nil)
 	command, payload, received := ap.read_packet(server, &receiver)

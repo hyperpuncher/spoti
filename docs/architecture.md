@@ -90,7 +90,8 @@ pagination. show folder contents in the flat grid without adding folder UI.
 
 playback owns the queue. prefer Vorbis at 320, then 160, then 96 kbps.
 AP requests share one serialized connection and cipher state. Connect and
-AP use the same persistent device identity.
+AP use the same persistent device identity. library workers read the AP country
+code as an atomic two-letter copy, not a view into connection memory.
 
 the last-played record stores an owned queue snapshot, its current index,
 shuffle order, and playback source. the last browsed collection is separate.
