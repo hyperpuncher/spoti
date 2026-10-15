@@ -4,10 +4,11 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import artwork "spotify/artwork"
+import ui "ui"
 
 @(test)
 app_icon_has_transparent_edges_and_resolves_outside_the_checkout_cwd :: proc(t: ^testing.T) {
-	path, found := asset_path("app/icon.png")
+	path, found := ui.asset_path("app/icon.png")
 	if !testing.expect(t, found) {return}
 	defer delete(path)
 	encoded, err := os.read_entire_file_from_path(path, context.allocator)
@@ -30,7 +31,10 @@ app_icon_has_transparent_edges_and_resolves_outside_the_checkout_cwd :: proc(t: 
 	if !testing.expect(t, temp_err == nil) {return}
 	if !testing.expect(t, os.set_working_directory(outside) == nil) {return}
 	defer _ = os.set_working_directory(cwd)
-	installed, resolved := asset_path("app/icon.png")
+	installed, resolved := ui.asset_path("app/icon.png")
 	defer delete(installed)
 	testing.expect(t, resolved && strings.has_suffix(installed, "app/icon.png"))
+	font, font_found := ui.resolve_bundled(ui.GEIST_VAR)
+	defer delete(font)
+	testing.expect(t, font_found && strings.has_suffix(font, ui.GEIST_VAR))
 }

@@ -5,8 +5,6 @@ package main
 import c "core:c"
 import "core:fmt"
 import "core:os"
-import filepath "core:path/filepath"
-import "core:strings"
 import artwork "spotify/artwork"
 import library "spotify/library"
 import ui "ui"
@@ -100,29 +98,8 @@ icon_key :: proc(name: string, tint: Icon_Tint) -> u64 {
 	return library.url_key(fmt.bprintf(buffer[:], "icon:%s:%d", name, int(tint)))
 }
 
-// Assets resolve around the executable before the development checkout.
-// The returned path is owned; candidate strings use the frame allocator.
-asset_path :: proc(relative: string) -> (path: string, ok: bool) {
-	if exe, err := os.get_executable_path(context.temp_allocator); err == nil {
-		dir := filepath.dir(string(exe))
-		for root in ([]string{"../Resources", "../share/spoti", ".", "assets", "../assets"}) {
-			candidate := fmt.aprintf(
-				"%s/%s/%s",
-				dir,
-				root,
-				relative,
-				allocator = context.temp_allocator,
-			)
-			if os.exists(candidate) {return strings.clone(candidate), true}
-		}
-	}
-	candidate := fmt.aprintf("assets/%s", relative, allocator = context.temp_allocator)
-	if os.exists(candidate) {return strings.clone(candidate), true}
-	return "", false
-}
-
 load_app_icon :: proc(state: ^ui.State) {
-	path, found := asset_path("app/icon.png")
+	path, found := ui.asset_path("app/icon.png")
 	if !found {return}
 	defer delete(path)
 	encoded, err := os.read_entire_file_from_path(path, context.allocator)
@@ -150,7 +127,7 @@ load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 	load_app_icon(state)
 	for name in ICON_NAMES {
 		relative := fmt.aprintf("icons/%s.png", name, allocator = context.temp_allocator)
-		path, found := asset_path(relative)
+		path, found := ui.asset_path(relative)
 		if !found {continue}
 		bytes, read_error := os.read_entire_file_from_path(path, context.allocator)
 		delete(path)

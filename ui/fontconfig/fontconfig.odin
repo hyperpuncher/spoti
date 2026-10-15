@@ -46,6 +46,7 @@ match :: proc(
 	weight: int,
 	allocator := context.allocator,
 	color_emoji: bool = false,
+	family: cstring = "sans-serif",
 ) -> (
 	path: string,
 	index: int,
@@ -61,9 +62,9 @@ match :: proc(
 		if CharSetAddChar(set, u32(codepoint)) == 0 ||
 		   PatternAddCharSet(pattern, "charset", set) == 0 {return}
 	}
-	family: cstring = color_emoji ? "emoji" : "sans-serif"
+	selected_family: cstring = color_emoji ? "emoji" : family
 	property: cstring = color_emoji ? "color" : "outline"
-	if PatternAddString(pattern, "family", family) == 0 ||
+	if PatternAddString(pattern, "family", selected_family) == 0 ||
 	   PatternAddInteger(pattern, "weight", c.int(weight)) == 0 ||
 	   PatternAddBool(pattern, property, 1) == 0 ||
 	   ConfigSubstitute(config, pattern, 0) == 0 {return}

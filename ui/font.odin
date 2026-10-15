@@ -39,25 +39,34 @@ resolve_fallbacks :: proc(state: ^State) {
 	state.fallback_matches = make(map[u64]int)
 }
 
-// First existing file wins: an override dir, the install layout around
-// the binary, then the dev checkout. The caller owns the returned path.
-resolve_bundled :: proc(file: string) -> (path: string, ok: bool) {
-	candidates := make([dynamic]string, context.temp_allocator)
-	defer {for candidate in candidates {delete(candidate)}}
-	if override, found := os.lookup_env("SPOTI_FONTS", context.temp_allocator); found {
-		append(&candidates, fmt.aprintf("%s/%s", override, file))
-	}
+// Assets resolve around the executable before the development checkout.
+// The returned path is owned; candidate strings use the frame allocator.
+asset_path :: proc(relative: string) -> (path: string, ok: bool) {
 	if exe, err := os.get_executable_path(context.temp_allocator); err == nil {
 		dir := filepath.dir(string(exe))
-		append(&candidates, fmt.aprintf("%s/../share/spoti/fonts/%s", dir, file))
-		append(&candidates, fmt.aprintf("%s/../Resources/fonts/%s", dir, file))
-		append(&candidates, fmt.aprintf("%s/fonts/%s", dir, file))
+		for root in ([]string{"../Resources", "../share/spoti", ".", "assets", "../assets"}) {
+			candidate := fmt.aprintf(
+				"%s/%s/%s",
+				dir,
+				root,
+				relative,
+				allocator = context.temp_allocator,
+			)
+			if os.exists(candidate) {return strings.clone(candidate), true}
+		}
 	}
-	append(&candidates, fmt.aprintf("assets/fonts/%s", file))
-	for candidate in candidates {
+	candidate := fmt.aprintf("assets/%s", relative, allocator = context.temp_allocator)
+	if os.exists(candidate) {return strings.clone(candidate), true}
+	return "", false
+}
+
+// An existing override wins; all other font paths use the asset lookup.
+resolve_bundled :: proc(file: string) -> (path: string, ok: bool) {
+	if override, found := os.lookup_env("SPOTI_FONTS", context.temp_allocator); found {
+		candidate := fmt.aprintf("%s/%s", override, file, allocator = context.temp_allocator)
 		if os.exists(candidate) {return strings.clone(candidate), true}
 	}
-	return "", false
+	return asset_path(fmt.aprintf("fonts/%s", file, allocator = context.temp_allocator))
 }
 
 // Bundled faces first; Linux falls back to fontconfig when the checkout
@@ -66,44 +75,29 @@ resolve_bundled :: proc(file: string) -> (path: string, ok: bool) {
 resolve_role :: proc(role: Font_Role) -> (path: string, index: int, ok: bool) {
 	file := GEIST_VAR
 	face := GEIST_FACE_REGULAR
-	pattern := "sans-serif"
+	family: cstring = "sans-serif"
+	weight := fontconfig.WEIGHT_REGULAR
 	switch role {
 	case .Regular:
 	case .Numeric:
-		file, face, pattern = GEIST_MONO, 0, "monospace"
+		file, face, family = GEIST_MONO, 0, "monospace"
 	case .Bold:
-		face, pattern = GEIST_FACE_EXTRA_BOLD, "sans-serif:style=ExtraBold"
+		face, weight = GEIST_FACE_EXTRA_BOLD, fontconfig.WEIGHT_EXTRABOLD
 	case .Medium:
-		face, pattern = GEIST_FACE_MEDIUM, "sans-serif:style=Medium"
+		face, weight = GEIST_FACE_MEDIUM, fontconfig.WEIGHT_MEDIUM
 	}
 	if bundled, found := resolve_bundled(file); found {return bundled, face, true}
 	when ODIN_OS == .Linux {
-		return resolve_font(pattern)
+		config := fontconfig.InitLoadConfigAndFonts()
+		if config == nil {return}
+		defer fontconfig.ConfigDestroy(config)
+		path, index = fontconfig.match(config, 0, weight, family = family)
+		return path, index, path != ""
 	} else {
 		fmt.eprintln("missing bundled font:", file)
 		return "", 0, false
 	}
 }
-resolve_font :: proc(pattern: string) -> (path: string, index: int, ok: bool) {
-	state, output, errors, err := os.process_exec(
-		{command = {"fc-match", "-f", "%{file}\n%{index}\n", pattern}},
-		context.allocator,
-	)
-	defer delete(output)
-	defer delete(errors)
-	if err != nil || !state.exited || state.exit_code != 0 {
-		fmt.eprintln("could not find a system font with fc-match:", err)
-		return
-	}
-	fields := strings.split_lines(string(output))
-	defer delete(fields)
-	if len(fields) < 2 {return}
-	face, parsed := strconv.parse_int(fields[1])
-	if !parsed {return}
-	path = strings.clone(fields[0])
-	return path, face, len(path) > 0
-}
-
 // Read the desktop's fontconfig hinting so text matches system apps.
 // Falls back to normal hinting when fontconfig is unavailable. Subpixel
 // (rgba) has no SDL GPU-text equivalent, so system text stays slightly

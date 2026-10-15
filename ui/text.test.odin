@@ -12,7 +12,7 @@ text_pool_reuses_updates_and_releases_visible_frame_slots :: proc(t: ^testing.T)
 	defer sdl.Quit()
 	if !testing.expect(t, ttf.Init()) {return}
 	defer ttf.Quit()
-	path, face, ok := resolve_font("sans-serif")
+	path, face, ok := resolve_role(.Regular)
 	if !testing.expect(t, ok) {return}
 	defer delete(path)
 	state := State {
