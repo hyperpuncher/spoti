@@ -3,7 +3,7 @@ package artwork
 import "core:c"
 
 when ODIN_OS == .Windows {
-	foreign import libwebp "libwebp.lib"
+	foreign import libwebp "system:libwebp.lib"
 } else {
 	foreign import libwebp "system:webp"
 }

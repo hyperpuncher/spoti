@@ -8,7 +8,7 @@ package http
 import c "core:c/libc"
 
 when ODIN_OS == .Windows {
-	foreign import libcurl "libcurl.lib"
+	foreign import libcurl "system:libcurl.lib"
 } else {
 	foreign import libcurl "system:curl"
 }
