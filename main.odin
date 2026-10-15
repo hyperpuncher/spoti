@@ -710,41 +710,34 @@ App :: struct {
 // Per-frame scratch. Zeroed every iteration; stages share it instead of
 // threading temps through signatures.
 Frame :: struct {
-	wheel:                sdl.FPoint,
-	mouse_click:          sdl.FPoint,
-	mouse_right:          sdl.FPoint,
-	middle_click:         sdl.FPoint,
-	clicked:              bool,
-	right_clicked:        bool,
-	space_pressed:        bool,
-	stop_pressed:         bool,
-	middle_clicked:       bool,
-	input_changed:        bool,
-	track_selected:       bool,
-	hero_pressed:         bool,
-	hero_start:           bool,
-	restart_playback:     bool,
-	track_delta:          int,
-	seek_requested:       bool,
-	mpris_delta:          int,
-	mpris_seek_ms:        int,
-	mpris_seek_requested: bool,
-	redraw:               bool,
-	mouse:                sdl.FPoint,
-	buttons:              sdl.MouseButtonFlags,
-	density:              f32,
-	seek_enabled:         bool,
-	link_album:           bool,
-	link_artist:          bool,
-	queue_at:             bool,
-	foot_album:           string,
-	foot_album_uri:       string,
-	foot_first:           string,
-	foot_first_uri:       string,
-	library_prompt:       bool,
-	playback_prompt:      bool,
-	display_page:         ^library.Page,
-	display_kind:         library.Kind,
+	wheel:            sdl.FPoint,
+	mouse_click:      sdl.FPoint,
+	mouse_right:      sdl.FPoint,
+	middle_click:     sdl.FPoint,
+	clicked:          bool,
+	right_clicked:    bool,
+	space_pressed:    bool,
+	stop_pressed:     bool,
+	middle_clicked:   bool,
+	input_changed:    bool,
+	track_selected:   bool,
+	restart_playback: bool,
+	redraw:           bool,
+	mouse:            sdl.FPoint,
+	buttons:          sdl.MouseButtonFlags,
+	density:          f32,
+	seek_enabled:     bool,
+	link_album:       bool,
+	link_artist:      bool,
+	queue_at:         bool,
+	foot_album:       string,
+	foot_album_uri:   string,
+	foot_first:       string,
+	foot_first_uri:   string,
+	library_prompt:   bool,
+	playback_prompt:  bool,
+	display_page:     ^library.Page,
+	display_kind:     library.Kind,
 }
 
 main :: proc() {
@@ -2415,9 +2408,9 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			   !point_in_box(mouse_click, panel) {device_open = false}
 		}
 	}
-	mpris_delta = 0
-	mpris_seek_ms = 0
-	mpris_seek_requested = false
+	track_delta := 0
+	requested_ms := 0
+	seek_requested := false
 	for {
 		command, value, received := mpris.poll()
 		if !received {break}
@@ -2439,15 +2432,13 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		case .Stop:
 			stop_pressed = true
 		case .Next:
-			mpris_delta += 1
+			track_delta += 1
 		case .Previous:
-			mpris_delta -= 1
+			track_delta -= 1
 		case .Seek:
-			mpris_seek_ms = displayed_ms + value
-			mpris_seek_requested = true
+			requested_ms, seek_requested = displayed_ms + value, true
 		case .Set_Position:
-			mpris_seek_ms = value
-			mpris_seek_requested = true
+			requested_ms, seek_requested = value, true
 		case .Quit:
 			running = false
 		}
@@ -2491,12 +2482,12 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			} else if stage == .Buffering || stage == .Signing_In {start_paused = true}
 		case .Seek:
 			accepted = !remote_control && duration_ms > 0
-			if accepted {mpris_seek_ms, mpris_seek_requested = event.position, true}
+			if accepted {requested_ms, seek_requested = event.position, true}
 		case .Next, .Previous:
 			accepted =
 				!remote_control &&
 				(event.action == .Next ? play_index >= 0 && play_index + 1 < len(play_queue) : play_index > 0 || displayed_ms >= PREVIOUS_RESTART_MS)
-			if accepted {mpris_delta = event.action == .Next ? 1 : -1}
+			if accepted {track_delta = event.action == .Next ? 1 : -1}
 		case .Volume:
 			volume = event.volume
 			app_state.volume = volume
@@ -2521,7 +2512,6 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		connect.acknowledge(&connect_client, event, accepted)
 		connect.free_event(event)
 	}
-	track_delta = mpris_delta
 	if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
 	if clicked && hit("footer_next", mouse_click) {track_delta = 1}
 	if remote_control && track_delta != 0 {
@@ -2531,12 +2521,11 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	// All local previous commands share the seek path and preserve pause state.
 	if track_delta < 0 && displayed_ms >= PREVIOUS_RESTART_MS {
 		track_delta += 1
-		mpris_seek_ms, mpris_seek_requested = 0, true
+		requested_ms, seek_requested = 0, true
 		displayed_ms = 0 // a second press can now select the previous track
 	}
-	seek_requested = mpris_seek_requested
-	if mpris_seek_requested {
-		seek_ms = clamp(mpris_seek_ms, 0, max(0, duration_ms))
+	if seek_requested {
+		seek_ms = clamp(requested_ms, 0, max(0, duration_ms))
 		start_paused = stage == .Paused
 		mpris.seeked(seek_ms)
 		if remote_control {
@@ -2561,8 +2550,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			first_frame = true
 		}
 	}
-	hero_pressed = clicked && hit("hero_play", mouse_click)
-	hero_start = hero_pressed && detail_play_enabled(&library_client)
+	hero_start := clicked && hit("hero_play", mouse_click) && detail_play_enabled(&library_client)
 	if release_play_uri != "" {
 		if track_selected ||
 		   stop_pressed ||
