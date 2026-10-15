@@ -107,8 +107,8 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 	defer sdl.DestroyTexture(banner_texture)
 	textures.by_key[cover_key("banner")] = banner_texture
 	fake_icon: sdl.Texture
-	textures.by_key[icon_key("play-filled", .Dark)] = &fake_icon
-	textures.by_key[icon_key("pause-filled", .Dark)] = &fake_icon
+	textures.by_key[icon_key("play-filled")] = &fake_icon
+	textures.by_key[icon_key("pause-filled")] = &fake_icon
 	defer {
 		delete(textures.by_key)
 		delete(textures.requested)
@@ -226,8 +226,8 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						for command in commands.internalArray[:commands.length] {
 							if command.commandType == .Image {
 								key := u64(uintptr(command.renderData.image.imageData))
-								if key == icon_key("play-filled", .Dark) {hero_play = true}
-								if key == icon_key("pause-filled", .Dark) {footer_pause = true}
+								if key == icon_key("play-filled") {hero_play = true}
+								if key == icon_key("pause-filled") {footer_pause = true}
 							}
 							if command.id == clay.ID("card", 0).id &&
 							   command.commandType == .Rectangle {

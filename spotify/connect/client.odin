@@ -75,7 +75,7 @@ stop :: proc(client: ^Client) {
 	chan.close(client.events)
 	chan.close(client.replies)
 	chan.close(client.states)
-	if client.worker != nil {thread.join(client.worker); thread.destroy(client.worker)}
+	if client.worker != nil {thread.destroy(client.worker)}
 	for event in chan.try_recv(client.events) {free_event(event)}
 	for reply in chan.try_recv(client.replies) {delete(reply.key)}
 	for state in chan.try_recv(client.states) {

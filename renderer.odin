@@ -10,14 +10,21 @@ import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
+COVER_TEXTURE_BUDGET :: 128 * 1024 * 1024
+
 Cover_Request_State :: struct {
 	pending:  bool,
 	attempts: u8,
+	bytes:    int,
+	used:     u64,
 }
 
 Textures :: struct {
 	by_key:                   map[u64]^sdl.Texture,
 	requested:                map[u64]Cover_Request_State,
+	icon_colors:              [Icon_Tint]sdl.Color,
+	cover_bytes:              int,
+	cover_frame:              u64,
 	fade_top:                 u64,
 	fade_bottom:              u64,
 	hero_fade:                u64,
@@ -87,6 +94,38 @@ retry_failed_covers :: proc(textures: ^Textures) {
 	}
 }
 
+// Evict old covers only after presentation. Keep this frame's images and both
+// player covers, even when the visible working set exceeds the soft budget.
+trim_cover_textures :: proc(
+	textures: ^Textures,
+	displayed, desired: string,
+	budget: int = COVER_TEXTURE_BUDGET,
+) {
+	if textures.cover_bytes <= budget {return}
+	displayed_key, desired_key := cover_key(displayed), cover_key(desired)
+	for textures.cover_bytes > budget {
+		oldest_key: u64
+		oldest_frame := max(u64)
+		found := false
+		for key, request in textures.requested {
+			if request.bytes == 0 ||
+			   request.pending ||
+			   request.used >= textures.cover_frame ||
+			   key == displayed_key ||
+			   key == desired_key {continue}
+			if request.used < oldest_frame {
+				oldest_key, oldest_frame, found = key, request.used, true
+			}
+		}
+		if !found {break}
+		sdl.DestroyTexture(textures.by_key[oldest_key])
+		textures.cover_bytes -= textures.requested[oldest_key].bytes
+		delete_key(&textures.by_key, oldest_key)
+		// An evicted cover can be requested again; failures keep their retry cap.
+		delete_key(&textures.requested, oldest_key)
+	}
+}
+
 // A backtrace on InternalError is the only way to identify which Clay
 // array overflowed, so it stays even in non-verbose runs. Errors are rare.
 clay_error :: proc "c" (data: clay.ErrorData) {
@@ -135,6 +174,7 @@ render :: proc(
 	textures: ^Textures,
 ) {
 	ui.poll_emoji(state)
+	textures.cover_frame += 1
 	clip_stack: [64]sdl.Rect
 	clip_depth := 0
 	for i in 0 ..< commands.length {
@@ -153,12 +193,16 @@ render :: proc(
 		case .Image:
 			key := u64(uintptr(command.renderData.image.imageData))
 			banner := command.id == clay.ID("hero_banner_image").id
-			ui.draw_texture(
-				state,
-				textures.by_key[key],
-				{box.x, box.y, box.width, box.height},
-				crop = banner,
-			)
+			texture := textures.by_key[key]
+			if request, found := &textures.requested[key]; found {
+				request.used = textures.cover_frame
+			}
+			color := (^sdl.Color)(command.userData)
+			// Icons always carry their next tint; covers and fades use other textures.
+			if texture != nil && color != nil {
+				_ = sdl.SetTextureColorMod(texture, color.r, color.g, color.b)
+			}
+			ui.draw_texture(state, texture, {box.x, box.y, box.width, box.height}, crop = banner)
 			if banner {
 				ui.mask_top_corners(
 					state,
@@ -210,11 +254,13 @@ cover_key :: proc(url: string) -> u64 {
 }
 
 // Covers and icons both draw as Clay image elements keyed by a u64.
-image_element :: proc(key: u64, size: f32) {
+// The optional tint borrows the UI-owned icon palette through presentation.
+image_element :: proc(key: u64, size: f32, tint: ^sdl.Color = nil) {
 	clay.UI()(
 	{
 		layout = {sizing = {width = clay.SizingFixed(size), height = clay.SizingFixed(size)}},
 		image = {imageData = rawptr(uintptr(key))},
+		userData = tint,
 	},
 	)
 }
@@ -235,7 +281,7 @@ cover_element :: proc(textures: ^Textures, url: string, size, radius: f32) {
 }
 
 icon_element :: proc(textures: ^Textures, name: string, tint: Icon_Tint, size: f32) {
-	key := icon_key(name, tint)
+	key := icon_key(name)
 	if textures.by_key[key] == nil {return}
-	image_element(key, size)
+	image_element(key, size, &textures.icon_colors[tint])
 }

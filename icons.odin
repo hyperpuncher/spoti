@@ -1,10 +1,8 @@
-// Icon textures are rasterized from the vendored Lucide SVGs and tinted at
-// load time, so drawing an icon costs one texture blit like a cover.
+// Each Lucide PNG has one texture. Clay carries its tint on each image draw.
 package main
 
 import c "core:c"
 import "core:fmt"
-import "core:hash"
 import "core:os"
 import artwork "spotify/artwork"
 import library "spotify/library"
@@ -82,20 +80,14 @@ icon_tint_color :: proc(tint: Icon_Tint, dark: bool) -> (r, g, b: u8) {
 }
 
 retint_icons :: proc(textures: ^Textures, dark: bool) {
-	for name in ICON_NAMES {
-		for tint in Icon_Tint {
-			texture := textures.by_key[icon_key(name, tint)]
-			if texture == nil {continue}
-			r, g, b := icon_tint_color(tint, dark)
-			_ = sdl.SetTextureColorMod(texture, r, g, b)
-		}
+	for tint in Icon_Tint {
+		r, g, b := icon_tint_color(tint, dark)
+		textures.icon_colors[tint] = {r, g, b, 255}
 	}
 }
 
-icon_key :: proc(name: string, tint: Icon_Tint) -> u64 {
-	// Keys are process-local; separate the name and tint without formatting.
-	suffix := [2]u8{0, u8(tint)}
-	return hash.fnv64a(suffix[:], library.url_key(name))
+icon_key :: proc(name: string) -> u64 {
+	return library.url_key(name)
 }
 
 load_app_icon :: proc(state: ^ui.State) {
@@ -125,6 +117,7 @@ load_app_icon :: proc(state: ^ui.State) {
 // through the same decode path as covers.
 load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 	load_app_icon(state)
+	retint_icons(textures, dark)
 	for name in ICON_NAMES {
 		relative := fmt.aprintf("icons/%s.png", name, allocator = context.temp_allocator)
 		path, found := ui.asset_path(relative)
@@ -135,14 +128,8 @@ load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 		image, decoded := artwork.decode(bytes)
 		delete(bytes)
 		if !decoded {continue}
-		for tint in Icon_Tint {
-			texture := ui.create_texture(state, image.pixels, image.width, image.height)
-			if texture != nil {
-				r, g, b := icon_tint_color(tint, dark)
-				_ = sdl.SetTextureColorMod(texture, r, g, b)
-				textures.by_key[icon_key(name, tint)] = texture
-			}
-		}
+		texture := ui.create_texture(state, image.pixels, image.width, image.height)
+		if texture != nil {textures.by_key[icon_key(name)] = texture}
 		delete(image.pixels)
 	}
 }

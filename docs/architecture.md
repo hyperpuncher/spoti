@@ -117,6 +117,13 @@ steady playback redraws at up to 30 fps. input events wake the loop at once;
 scrolling, dragging, and UI animations use the display rate. paused views do
 not redraw continuously when no other work needs a frame.
 
+icon tint variants share one texture per icon. image commands borrow their
+tint from the UI-owned palette. rounded masks not used in the current frame
+are released after presentation. cover textures use a soft 128 MiB RGBA budget;
+old unused covers are evicted after presentation and can load again from disk.
+visible images and the displayed and requested player covers stay protected,
+even when they exceed the budget. icons and fades do not use the cover budget.
+
 virtualize grids and track rows with full-height spacers. Clay can cull draw
 commands but still processes layout, and only supports 100 clip containers.
 keep offscreen rows out of layout and clip pointer hits to their visible area.

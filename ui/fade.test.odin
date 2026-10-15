@@ -50,10 +50,10 @@ cropped_banner_rounds_only_the_displayed_top_corners :: proc(t: ^testing.T) {
 	defer sdl.DestroyRenderer(renderer)
 	state := State {
 		renderer = renderer,
-		masks    = make(map[u64]^sdl.Texture),
+		masks    = make(map[u64]Rounded_Mask),
 	}
 	defer {
-		for _, mask in state.masks {sdl.DestroyTexture(mask)}
+		for _, mask in state.masks {sdl.DestroyTexture(mask.texture)}
 		delete(state.masks)
 	}
 	_ = sdl.SetRenderDrawColor(renderer, 255, 255, 255, 255)

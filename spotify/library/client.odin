@@ -1367,7 +1367,6 @@ stop_workers :: proc(client: ^Client) {
 	chan.close(client.cover_results)
 	for worker in ([]^thread.Thread{client.worker, client.cover_worker}) {
 		if worker == nil {continue}
-		thread.join(worker)
 		thread.destroy(worker)
 	}
 	for request in chan.try_recv(client.requests) {free_request(request)}

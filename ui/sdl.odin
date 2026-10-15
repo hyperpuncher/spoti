@@ -19,6 +19,11 @@ Cursor_Kind :: enum {
 	Resize,
 }
 
+Rounded_Mask :: struct {
+	texture: ^sdl.Texture,
+	used:    bool,
+}
+
 State :: struct {
 	window:            ^sdl.Window,
 	renderer:          ^sdl.Renderer,
@@ -32,7 +37,7 @@ State :: struct {
 	measured_texts:    Text_Pool,
 	emoji:             ^Emoji_Cache,
 	density:           f32,
-	masks:             map[u64]^sdl.Texture,
+	masks:             map[u64]Rounded_Mask,
 	cursors:           [Cursor_Kind]^sdl.Cursor,
 	cursor:            Cursor_Kind,
 	vsync:             bool,
@@ -94,7 +99,7 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 	state.hinting = system_hinting()
 	resolve_fallbacks(&state)
 	state.fonts = make(map[int]^ttf.Font)
-	state.masks = make(map[u64]^sdl.Texture)
+	state.masks = make(map[u64]Rounded_Mask)
 	state.cursors[.Default] = sdl.GetDefaultCursor()
 	state.cursors[.Pointer] = sdl.CreateSystemCursor(.POINTER)
 	state.cursors[.Text] = sdl.CreateSystemCursor(.TEXT)
@@ -123,7 +128,7 @@ close :: proc(state: ^State) {
 	delete(state.fallback_sources)
 	delete(state.fallback_matches)
 	if state.font_config != nil {fontconfig.ConfigDestroy(state.font_config)}
-	for _, texture in state.masks {sdl.DestroyTexture(texture)}
+	for _, mask in state.masks {sdl.DestroyTexture(mask.texture)}
 	delete(state.masks)
 	if state.cursors[.Default] != nil {_ = sdl.SetCursor(state.cursors[.Default])}
 	for kind := Cursor_Kind.Pointer; kind <= .Resize; kind = Cursor_Kind(int(kind) + 1) {
@@ -371,7 +376,10 @@ rounded_mask :: proc(
 ) -> ^sdl.Texture {
 	key := mask_key(width, height, radius)
 	if inverse {key |= 1 << 63}
-	if texture, found := state.masks[key]; found {return texture}
+	if mask, found := &state.masks[key]; found {
+		mask.used = true
+		return mask.texture
+	}
 	// Compute coverage at the final texture size. SDL's linear minification only
 	// interpolates nearby texels; it does not average an entire supersampled
 	// source image, which is why the previous 8x masks still looked jagged.
@@ -407,7 +415,7 @@ rounded_mask :: proc(
 		}
 	}
 	texture := create_texture(state, pixels, width, height)
-	if texture != nil {state.masks[key] = texture}
+	if texture != nil {state.masks[key] = {texture, true}}
 	return texture
 }
 
@@ -457,6 +465,15 @@ fill_rounded :: proc(state: ^State, rect: sdl.FRect, radius: [4]f32, color: sdl.
 	_ = sdl.SetTextureAlphaMod(texture, 255)
 }
 
+// Call after presentation, when queued draws no longer need old masks.
+trim_masks :: proc(state: ^State) {
+	for key, &mask in state.masks {
+		if mask.used {mask.used = false; continue}
+		sdl.DestroyTexture(mask.texture)
+		delete_key(&state.masks, key)
+	}
+}
+
 frame_done :: proc(state: ^State) {
 	state.fps_frames += 1
 	now := sdl.GetTicks()
@@ -492,5 +509,6 @@ frame_done :: proc(state: ^State) {
 	}
 	finish_text_frame(state)
 	_ = sdl.RenderPresent(state.renderer)
+	trim_masks(state)
 	if !state.vsync {sdl.Delay(16)}
 }

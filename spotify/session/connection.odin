@@ -82,7 +82,6 @@ clear_connection :: proc() {
 	// Called only after the playback and library workers have joined.
 	sync.atomic_store(&connection_stop, true)
 	if connection_worker != nil {
-		thread.join(connection_worker)
 		thread.destroy(connection_worker)
 		connection_worker = nil
 	}

@@ -1406,7 +1406,13 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 				cover.image.width,
 				cover.image.height,
 			)
-			if texture != nil {textures.by_key[cover.key] = texture}
+			if texture != nil {
+				textures.by_key[cover.key] = texture
+				request.bytes = cover.image.width * cover.image.height * 4
+				request.used = textures.cover_frame + 1
+				textures.requested[cover.key] = request
+				textures.cover_bytes += request.bytes
+			}
 			delete(cover.image.pixels)
 		}
 	}
@@ -1935,6 +1941,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	_ = sdl.RenderClear(state.renderer)
 	render(&commands, &state, &textures)
 	ui.frame_done(&state)
+	trim_cover_textures(&textures, displayed_cover, player_cover)
 	t3 := sdl.GetTicksNS()
 	stage_sum[0] += f64(t1 - t0) / 1e6
 	stage_sum[1] += f64(t2 - t1) / 1e6
