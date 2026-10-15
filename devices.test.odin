@@ -6,7 +6,7 @@ import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
 @(test)
-device_panel_keeps_two_line_rows_inside_panel :: proc(t: ^testing.T) {
+floating_picker_panels_keep_rows_bounded :: proc(t: ^testing.T) {
 	errors := 0
 	density: f32 = 1
 	memory := layout_test_init(&density, &errors, {1280, 820})
@@ -19,7 +19,10 @@ device_panel_keeps_two_line_rows_inside_panel :: proc(t: ^testing.T) {
 		{name = "Redmi Note 12 Turbo", type = "Smartphone", active = true},
 		{name = "Living room", type = "Speaker"},
 	}
-	for d in ([]f32{1, 1.5}) {
+	playlists := make([]library.Entry, 300)
+	defer delete(playlists)
+	for &entry in playlists {entry.name = "Playlist"; entry.subtitle = "Account"}
+	for d in ([]f32{1, 1.2, 1.5}) {
 		density = d
 		clay.ResetMeasureTextCache()
 		clay.SetLayoutDimensions({1280 * d, 820 * d})
@@ -56,6 +59,47 @@ device_panel_keeps_two_line_rows_inside_panel :: proc(t: ^testing.T) {
 		first := clay.GetElementData(clay.ID("device_item", 0)).boundingBox
 		second := clay.GetElementData(clay.ID("device_item", 1)).boundingBox
 		testing.expect(t, second.y >= first.y + first.height, "device rows must not overlap")
+		picker := View {
+			menu_open      = true,
+			menu_count     = 1,
+			menu_selected  = -1,
+			menu_add_index = 0,
+			picker_open    = true,
+			picker_rows    = playlists,
+		}
+		picker.menu_labels[0] = "Add to playlist"
+		for fraction in ([]f32{0, 0.5, 1}) {
+			for _ in 0 ..< 3 {
+				scroll := clay.GetScrollContainerData(clay.ID("playlist_picker"))
+				if scroll.found {
+					scroll.scrollPosition.y =
+						fraction *
+						min(
+							0,
+							scroll.scrollContainerDimensions.height -
+							scroll.contentDimensions.height,
+						)
+				}
+				clay.BeginLayout()
+				context_menu(picker, &textures, d)
+				commands := clay.EndLayout(0)
+				testing.expect(t, commands.length < 150)
+			}
+			scroll := clay.GetScrollContainerData(clay.ID("playlist_picker"))
+			gap := f32(u16(2 * d))
+			expected := f32(len(playlists)) * ((PICKER_ROW - 2) * d + gap) - gap
+			testing.expect(t, abs(scroll.contentDimensions.height - expected) < 0.5)
+			if fraction == 1 {
+				last := clay.GetElementData(clay.ID("picker_item", u32(len(playlists) - 1)))
+				panel := clay.GetElementData(clay.ID("playlist_picker_panel")).boundingBox
+				testing.expect(
+					t,
+					last.found &&
+					last.boundingBox.y >= panel.y &&
+					last.boundingBox.y < panel.y + panel.height,
+				)
+			}
+		}
 	}
 	testing.expect_value(t, errors, 0)
 }

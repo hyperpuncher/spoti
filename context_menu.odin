@@ -50,12 +50,21 @@ menu_add_index :: proc(menu: ^Context_Menu) -> int {
 	return -1
 }
 
-open_card_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, pinned: bool) {
+open_context_menu :: proc(
+	menu: ^Context_Menu,
+	point: sdl.FPoint,
+	uri: string = "",
+	track: int = -1,
+) {
 	free_context_menu(menu)
 	menu.open = true
 	menu.point = point
-	menu.track = -1
+	menu.track = track
 	menu.uri = strings.clone(uri)
+}
+
+open_card_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, pinned: bool) {
+	open_context_menu(menu, point, uri)
 	menu.items[0] = .Pin
 	menu.labels[0] = pinned ? "Unpin" : "Pin"
 	menu.items[1] = .Copy_Link
@@ -72,11 +81,7 @@ open_track_menu :: proc(
 	uri: string,
 	removable: bool = false,
 ) {
-	free_context_menu(menu)
-	menu.open = true
-	menu.point = point
-	menu.track = track
-	menu.uri = strings.clone(uri)
+	open_context_menu(menu, point, uri, track)
 	menu.items[0] = .Play
 	menu.labels[0] = "Play"
 	if removable {
@@ -95,11 +100,7 @@ open_track_menu :: proc(
 
 // Search tracks play with a left click; the menu only links out.
 open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
-	free_context_menu(menu)
-	menu.open = true
-	menu.point = point
-	menu.track = -1
-	menu.uri = strings.clone(uri)
+	open_context_menu(menu, point, uri)
 	menu.items[0] = .Copy_Link
 	menu.labels[0] = "Copy link"
 	menu.items[1] = .Open_In_Spotify
@@ -124,10 +125,7 @@ open_release_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, s
 // itself comes from the sidebar filter when an item is picked.
 open_sort_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, current: Sort) {
 	options := [2]Sort{.Default, .Played}
-	free_context_menu(menu)
-	menu.open = true
-	menu.point = point
-	menu.track = -1
+	open_context_menu(menu, point)
 	for option in options {
 		index := menu.count
 		menu.items[index] = .Pick_Sort
@@ -244,7 +242,17 @@ playlist_picker :: proc(view: View, d: f32) {
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 		},
 		) {
-			for entry, index in view.picker_rows {
+			gap := f32(u16(2 * d))
+			visible := scroll_items(
+				"playlist_picker",
+				len(view.picker_rows),
+				1,
+				(PICKER_ROW - 2) * d + gap,
+				panel_height,
+			)
+			list_spacer(visible.before - gap)
+			for index in visible.first ..< visible.last {
+				entry := view.picker_rows[index]
 				hovered := clay.PointerOver(clay.ID("picker_item", u32(index)))
 				if clay.UI_WithId(clay.ID("picker_item", u32(index)))(
 				{
@@ -292,6 +300,7 @@ playlist_picker :: proc(view: View, d: f32) {
 					}
 				}
 			}
+			list_spacer(visible.after - gap)
 		}
 	}
 }
