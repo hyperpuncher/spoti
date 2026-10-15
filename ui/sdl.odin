@@ -20,28 +20,27 @@ Cursor_Kind :: enum {
 }
 
 State :: struct {
-	window:           ^sdl.Window,
-	renderer:         ^sdl.Renderer,
-	font_sources:     [Font_Role]Font_Source,
-	hinting:          ttf.Hinting,
-	font_config:      ^fontconfig.Config,
-	fallback_sources: [dynamic]Font_Source,
-	fallback_matches: map[u64]int,
-	fonts:            map[int]^ttf.Font,
-	text_engine:      ^ttf.TextEngine,
-	texts:            [dynamic]^ttf.Text,
-	text_count:       int,
-	emoji:            ^Emoji_Cache,
-	density:          f32,
-	masks:            map[u64]^sdl.Texture,
-	cursors:          [Cursor_Kind]^sdl.Cursor,
-	cursor:           Cursor_Kind,
-	vsync:            bool,
-	debug:            bool,
-	fps_started:      u64,
-	fps_frames:       u32,
-	fps:              u32,
-	text_measures:    u64,
+	window:            ^sdl.Window,
+	renderer:          ^sdl.Renderer,
+	font_sources:      [Font_Role]Font_Source,
+	hinting:           ttf.Hinting,
+	font_config:       ^fontconfig.Config,
+	fallback_sources:  [dynamic]Font_Source,
+	fallback_matches:  map[u64]int,
+	fonts:             map[int]^ttf.Font,
+	using drawn_texts: Text_Pool,
+	measured_texts:    Text_Pool,
+	emoji:             ^Emoji_Cache,
+	density:           f32,
+	masks:             map[u64]^sdl.Texture,
+	cursors:           [Cursor_Kind]^sdl.Cursor,
+	cursor:            Cursor_Kind,
+	vsync:             bool,
+	debug:             bool,
+	fps_started:       u64,
+	fps_frames:        u32,
+	fps:               u32,
+	text_measures:     u64,
 }
 
 open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
@@ -112,8 +111,10 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 
 close :: proc(state: ^State) {
 	stop_emoji(state)
-	for text in state.texts {ttf.DestroyText(text)}
-	delete(state.texts)
+	for pool in ([]^Text_Pool{&state.drawn_texts, &state.measured_texts}) {
+		for text in pool.texts {ttf.DestroyText(text)}
+		delete(pool.texts)
+	}
 	if state.text_engine != nil {ttf.DestroyRendererTextEngine(state.text_engine)}
 	for _, font in state.fonts {ttf.CloseFont(font)}
 	delete(state.fonts)

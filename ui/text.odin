@@ -1,13 +1,20 @@
 package ui
 
 import c "core:c/libc"
+import "core:strings"
 import "core:unicode/utf8"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
-// Text slots follow draw order, so storage is bounded by one visible frame.
-// SDL_ttf owns each slot's copied string; no borrowed Clay text survives a frame.
-cached_text :: proc(state: ^State, font: ^ttf.Font, value: string) -> ^ttf.Text {
+// Each pool retains one frame's text objects in call order. SDL_ttf owns the
+// copied strings and updates cached layouts when their font or text changes.
+Text_Pool :: struct {
+	text_engine: ^ttf.TextEngine,
+	texts:       [dynamic]^ttf.Text,
+	text_count:  int,
+}
+
+cached_text :: proc(state: ^Text_Pool, font: ^ttf.Font, value: string) -> ^ttf.Text {
 	content: ^ttf.Text
 	if state.text_count == len(state.texts) {
 		content = ttf.CreateText(state.text_engine, font, raw_data(value), len(value))
@@ -39,9 +46,23 @@ text_size :: proc(
 	for piece in text_pieces(value) {
 		if piece.emoji {width += emoji_side(font); continue}
 		span_font := font_for_text(state, piece.value, size, font_id)
+		if span_font == nil {continue}
 		w, h: c.int
-		if span_font != nil &&
-		   ttf.GetStringSize(span_font, raw_data(piece.value), uint(len(piece.value)), &w, &h) {
+		measured := false
+		if strings.contains_any(piece.value, "\r\n") {
+			// Text objects lay out hard line breaks; string sizing does not.
+			measured = ttf.GetStringSize(
+				span_font,
+				raw_data(piece.value),
+				uint(len(piece.value)),
+				&w,
+				&h,
+			)
+		} else {
+			content := cached_text(&state.measured_texts, span_font, piece.value)
+			measured = content != nil && ttf.GetTextSize(content, &w, &h)
+		}
+		if measured {
 			width += f32(w)
 			height = max(height, f32(h))
 		}
@@ -76,7 +97,7 @@ text :: proc(
 		}
 		span_font := font_for_text(state, piece.value, font_size, font_id)
 		if span_font == nil {continue}
-		content := cached_text(state, span_font, piece.value)
+		content := cached_text(&state.drawn_texts, span_font, piece.value)
 		if content == nil {continue}
 		_ = ttf.SetTextColor(content, color.r, color.g, color.b, color.a)
 		pen := cursor
@@ -96,6 +117,8 @@ glyph_left_bearing :: proc(font: ^ttf.Font, value: string) -> f32 {
 }
 
 finish_text_frame :: proc(state: ^State) {
-	for len(state.texts) > state.text_count {ttf.DestroyText(pop(&state.texts))}
-	state.text_count = 0
+	for pool in ([]^Text_Pool{&state.drawn_texts, &state.measured_texts}) {
+		for len(pool.texts) > pool.text_count {ttf.DestroyText(pop(&pool.texts))}
+		pool.text_count = 0
+	}
 }

@@ -20,8 +20,10 @@ text_pool_reuses_updates_and_releases_visible_frame_slots :: proc(t: ^testing.T)
 		fonts = make(map[int]^ttf.Font),
 	}
 	defer {
-		for content in state.texts {ttf.DestroyText(content)}
-		delete(state.texts)
+		for pool in ([]^Text_Pool{&state.drawn_texts, &state.measured_texts}) {
+			for content in pool.texts {ttf.DestroyText(content)}
+			delete(pool.texts)
+		}
 		if state.text_engine != nil {ttf.DestroySurfaceTextEngine(state.text_engine)}
 		for _, font in state.fonts {ttf.CloseFont(font)}
 		delete(state.fonts)
@@ -32,27 +34,38 @@ text_pool_reuses_updates_and_releases_visible_frame_slots :: proc(t: ^testing.T)
 	font := font_for_size(&state, 14)
 	if !testing.expect(t, font != nil) {return}
 	borrowed := strings.clone("héllo library")
-	first := cached_text(&state, font, borrowed)
+	first := cached_text(&state.drawn_texts, font, borrowed)
 	delete(borrowed)
 	if !testing.expect(t, first != nil) {return}
 	testing.expect_value(t, string(cstring(first.text)), "héllo library")
-	second := cached_text(&state, font, "0:30")
+	second := cached_text(&state.drawn_texts, font, "0:30")
 	testing.expect(t, second != nil && first != second)
 	finish_text_frame(&state)
 	testing.expect_value(t, len(state.texts), 2)
-	testing.expect(t, cached_text(&state, font, "héllo library") == first)
+	testing.expect(t, cached_text(&state.drawn_texts, font, "héllo library") == first)
 	finish_text_frame(&state)
 	testing.expect(t, len(state.texts) == 1, "unused slots must not accumulate while browsing")
 	large := font_for_size(&state, 28)
 	if !testing.expect(t, large != nil) {return}
-	testing.expect(t, cached_text(&state, large, "new title") == first)
+	testing.expect(t, cached_text(&state.drawn_texts, large, "new title") == first)
 	testing.expect(t, ttf.GetTextFont(first) == large)
 	testing.expect_value(t, string(cstring(first.text)), "new title")
 	width, height: c.int
 	testing.expect(t, ttf.GetTextSize(first, &width, &height))
 	expected_width, expected_height := text_size(&state, "new title", 28)
 	testing.expect(t, f32(width) == expected_width && f32(height) == expected_height)
+	line_break := "new\ntitle"
+	testing.expect(
+		t,
+		ttf.GetStringSize(large, raw_data(line_break), uint(len(line_break)), &width, &height),
+	)
+	expected_width, expected_height = text_size(&state, line_break, 28)
+	testing.expect(t, f32(width) == expected_width && f32(height) == expected_height)
+	measured := state.measured_texts.texts[0]
+	finish_text_frame(&state)
+	_, _ = text_size(&state, "new title", 28)
+	testing.expect(t, state.measured_texts.texts[0] == measured)
 	finish_text_frame(&state)
 	finish_text_frame(&state)
-	testing.expect_value(t, len(state.texts), 0)
+	testing.expect(t, len(state.texts) == 0 && len(state.measured_texts.texts) == 0)
 }
