@@ -259,20 +259,48 @@ failed_worker_requests_keep_owned_identity_and_finish_once :: proc(t: ^testing.T
 		testing.expect(t, !extra)
 	}
 	// Rejection leaves the write idle and must release its owned strings.
-	testing.expect(
-		t,
-		!remove_track_from_playlist(&client, "playlist", "name", "spotify:track:item"),
-	)
-	testing.expect(t, !client.write_pending)
+	for remove in ([]bool{false, true}) {
+		testing.expect(
+			t,
+			!queue_playlist_write(&client, "playlist", "name", "spotify:track:item", remove),
+		)
+		testing.expect(t, !client.write_pending)
+	}
 	// Partially created workers still own their queues, even with no thread.
 	client.requests, _ = chan.create_buffered(chan.Chan(Request), 1, context.allocator)
 	_ = chan.send(client.requests, Request{kind = .Detail, id = strings.clone("queued")})
 	fake_worker: thread.Thread
 	client.worker, client.state = &fake_worker, .Ready
-	testing.expect(
-		t,
-		!remove_track_from_playlist(&client, "playlist", "name", "spotify:track:item"),
-	)
+	for remove in ([]bool{false, true}) {
+		testing.expect(
+			t,
+			!queue_playlist_write(&client, "playlist", "name", "spotify:track:item", remove),
+		)
+	}
+	queued, _ := chan.try_recv(client.requests)
+	free_request(queued)
+	for remove in ([]bool{false, true}) {
+		testing.expect(
+			t,
+			queue_playlist_write(&client, "playlist", "name", "spotify:track:item", remove),
+		)
+		testing.expect(
+			t,
+			!queue_playlist_write(&client, "other", "other", "spotify:track:other", remove),
+		)
+		request, received := chan.try_recv(client.requests)
+		testing.expect(t, received && client.write_pending)
+		testing.expect_value(
+			t,
+			request.kind,
+			remove ? Request_Kind.Remove_From_Playlist : Request_Kind.Add_To_Playlist,
+		)
+		testing.expect_value(t, request.playlist_id, "playlist")
+		testing.expect_value(t, request.item_uri, "spotify:track:item")
+		free_request(request)
+		apply(&client, Result{kind = request.kind, status = 403})
+		testing.expect(t, !client.write_pending && !client.write_ok)
+	}
 	client.worker = nil
 	_ = chan.send(client.results, Result{kind = .Detail, id = strings.clone("reply")})
 	stop_workers(&client)

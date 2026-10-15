@@ -31,44 +31,32 @@ library_membership_addresses_use_unified_endpoints :: proc(t: ^testing.T) {
 }
 
 @(test)
-add_items_body_builds_bounded_spotify_uris :: proc(t: ^testing.T) {
-	body, ok := add_items_body([]string{"spotify:track:one"})
-	testing.expect(t, ok)
-	testing.expect_value(t, body, `{"uris":["spotify:track:one"]}`)
-
-	many, many_ok := add_items_body([]string{"spotify:track:one", "spotify:track:two"})
-	testing.expect(t, many_ok)
-	testing.expect_value(t, many, `{"uris":["spotify:track:one","spotify:track:two"]}`)
-
-	_, empty := add_items_body(nil)
-	testing.expect(t, !empty)
-	_, quoted := add_items_body([]string{`spotify:track:a"b`})
-	testing.expect(t, !quoted)
-	_, slashed := add_items_body([]string{`spotify:track:a\b`})
-	testing.expect(t, !slashed)
-	_, blank := add_items_body([]string{""})
-	testing.expect(t, !blank)
-
+playlist_items_body_preserves_formats_order_and_limits :: proc(t: ^testing.T) {
+	uris := []string{"spotify:track:one", "spotify:track:two", "spotify:track:one"}
 	over := make([]string, ADD_ITEMS_MAX + 1, context.temp_allocator)
 	for &uri in over {uri = "spotify:track:x"}
-	_, too_many := add_items_body(over)
-	testing.expect(t, !too_many)
-}
-
-@(test)
-remove_items_body_wraps_uris_in_items :: proc(t: ^testing.T) {
-	body, ok := remove_items_body([]string{"spotify:track:one", "spotify:track:two"})
-	testing.expect(t, ok)
-	testing.expect_value(
-		t,
-		body,
-		`{"items":[{"uri":"spotify:track:one"},{"uri":"spotify:track:two"}]}`,
-	)
-
-	_, empty := remove_items_body(nil)
-	testing.expect(t, !empty)
-	_, quoted := remove_items_body([]string{`spotify:track:a"b`})
-	testing.expect(t, !quoted)
+	for remove in ([]bool{false, true}) {
+		body, ok := playlist_items_body(uris[:1], remove)
+		testing.expect(t, ok)
+		testing.expect_value(
+			t,
+			body,
+			remove ? `{"items":[{"uri":"spotify:track:one"}]}` : `{"uris":["spotify:track:one"]}`,
+		)
+		many, many_ok := playlist_items_body(uris, remove)
+		testing.expect(t, many_ok)
+		testing.expect_value(
+			t,
+			many,
+			remove ? `{"items":[{"uri":"spotify:track:one"},{"uri":"spotify:track:two"},{"uri":"spotify:track:one"}]}` : `{"uris":["spotify:track:one","spotify:track:two","spotify:track:one"]}`,
+		)
+		_, maximum := playlist_items_body(over[:ADD_ITEMS_MAX], remove)
+		testing.expect(t, maximum)
+		for invalid in ([][]string{nil, {""}, {`spotify:track:a"b`}, {`spotify:track:a\b`}, {"spotify:track:a\nb"}, {string(make([]u8, 129, context.temp_allocator))}, over}) {
+			_, accepted := playlist_items_body(invalid, remove)
+			testing.expect(t, !accepted)
+		}
+	}
 }
 
 @(test)

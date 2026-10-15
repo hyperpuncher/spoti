@@ -1956,7 +1956,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			for entry, index in menu.picker_items {
 				if !hit_index("picker_item", mouse_click, u32(index)) {continue}
 				if strings.has_prefix(entry.uri, "spotify:playlist:") {
-					_ = library.queue_playlist_add(
+					_ = library.queue_playlist_write(
 						&library_client,
 						entry.uri[len("spotify:playlist:"):],
 						entry.name,
@@ -2011,11 +2011,12 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					keep_open = true
 				case .Remove_From_Playlist:
 					if len(library_client.detail.id) > 0 {
-						_ = library.remove_track_from_playlist(
+						_ = library.queue_playlist_write(
 							&library_client,
 							library_client.detail.id,
 							library_client.detail.name,
 							menu.uri,
+							remove = true,
 						)
 					}
 				}
@@ -2288,7 +2289,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				if index := grid_card_at(display_page, visible.cards, mouse); index >= 0 {
 					entry := display_page.items[index]
 					if strings.has_prefix(entry.uri, "spotify:playlist:") {
-						_ = library.queue_playlist_add(
+						_ = library.queue_playlist_write(
 							&library_client,
 							entry.uri[len("spotify:playlist:"):],
 							entry.name,

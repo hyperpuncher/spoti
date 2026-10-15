@@ -728,103 +728,53 @@ set_saved :: proc(
 // Spotify caps one add at 100 items.
 ADD_ITEMS_MAX :: 100
 
-// Spotify URIs are colon-separated alphanumerics, so anything with a quote,
-// a backslash or a control byte is rejected instead of escaped.
-valid_item_uri :: proc(uri: string) -> bool {
-	if len(uri) == 0 || len(uri) > 128 {return false}
-	for ch in transmute([]u8)uri {
-		if ch < 0x20 || ch == '"' || ch == '\\' {return false}
-	}
-	return true
-}
-
-// Builds the JSON body for one add: `{"uris":["spotify:track:..."]}`.
-add_items_body :: proc(uris: []string) -> (body: string, ok: bool) {
+// The /items endpoint takes URI strings for adds and URI objects for removals.
+playlist_items_body :: proc(uris: []string, remove: bool = false) -> (body: string, ok: bool) {
 	if len(uris) == 0 || len(uris) > ADD_ITEMS_MAX {return "", false}
-	builder: strings.Builder
-	strings.builder_init(&builder, context.temp_allocator)
-	strings.write_string(&builder, `{"uris":[`)
-	for uri, index in uris {
-		if !valid_item_uri(uri) {return "", false}
-		if index > 0 {strings.write_byte(&builder, ',')}
-		strings.write_byte(&builder, '"')
-		strings.write_string(&builder, uri)
-		strings.write_byte(&builder, '"')
+	for uri in uris {
+		if len(uri) == 0 || len(uri) > 128 {return "", false}
+		for ch in transmute([]u8)uri {
+			if ch < 0x20 || ch == '"' || ch == '\\' {return "", false}
+		}
 	}
-	strings.write_string(&builder, `]}`)
-	return strings.to_string(builder), true
+	request: struct {
+		uris:  []string `json:",omitempty"`,
+		items: []struct {
+			uri: string,
+		} `json:",omitempty"`,
+	}
+	if remove {
+		request.items = make(type_of(request.items), len(uris), context.temp_allocator)
+		for uri, index in uris {request.items[index].uri = uri}
+	} else {request.uris = uris}
+	encoded, err := json.marshal(request, allocator = context.temp_allocator)
+	return string(encoded), err == nil
 }
 
-// Add track URIs to a playlist. Only a 2xx means Spotify stored them; a
-// followed playlist answers 403 because the caller neither owns it nor
-// collaborates on it. The JSON body is built here and never logged.
-add_to_playlist :: proc(
+// Only a successful 2xx response confirms a playlist change. Never log the body.
+edit_playlist_items :: proc(
 	access, playlist_id: string,
 	uris: []string,
 	reuse: rawptr = nil,
+	remove: bool = false,
 ) -> (
 	status: int,
 	ok: bool,
 ) {
 	if !safe_id(playlist_id) {return 0, false}
-	body_text, body_ok := add_items_body(uris)
+	body_text, body_ok := playlist_items_body(uris, remove)
 	if !body_ok {return 0, false}
 	address := fmt.aprintf("https://api.spotify.com/v1/playlists/%s/items", playlist_id)
 	defer delete(address)
 	body, code, fetched := http.json_request(
-		"POST",
+		remove ? "DELETE" : "POST",
 		address,
 		body_text,
 		{bearer = access, limit = 4096},
 		reuse,
 	)
 	defer delete(body)
-	if !fetched {return code, false}
-	return code, code >= 200 && code < 300
-}
-
-// Builds the JSON body for a removal: `{"items":[{"uri":"..."}]}`.
-remove_items_body :: proc(uris: []string) -> (body: string, ok: bool) {
-	if len(uris) == 0 || len(uris) > ADD_ITEMS_MAX {return "", false}
-	builder: strings.Builder
-	strings.builder_init(&builder, context.temp_allocator)
-	strings.write_string(&builder, `{"items":[`)
-	for uri, index in uris {
-		if !valid_item_uri(uri) {return "", false}
-		if index > 0 {strings.write_byte(&builder, ',')}
-		strings.write_string(&builder, `{"uri":"`)
-		strings.write_string(&builder, uri)
-		strings.write_string(&builder, `"}`)
-	}
-	strings.write_string(&builder, `]}`)
-	return strings.to_string(builder), true
-}
-
-// Remove track URIs from a playlist. The non-deprecated /items path takes an
-// `items` array; the old /tracks path takes `tracks` and is deprecated.
-remove_from_playlist :: proc(
-	access, playlist_id: string,
-	uris: []string,
-	reuse: rawptr = nil,
-) -> (
-	status: int,
-	ok: bool,
-) {
-	if !safe_id(playlist_id) {return 0, false}
-	body_text, body_ok := remove_items_body(uris)
-	if !body_ok {return 0, false}
-	address := fmt.aprintf("https://api.spotify.com/v1/playlists/%s/items", playlist_id)
-	defer delete(address)
-	body, code, fetched := http.json_request(
-		"DELETE",
-		address,
-		body_text,
-		{bearer = access, limit = 4096},
-		reuse,
-	)
-	defer delete(body)
-	if !fetched {return code, false}
-	return code, code >= 200 && code < 300
+	return code, fetched && code >= 200 && code < 300
 }
 
 // The signed-in account's own id. Needed to tell owned playlists from the

@@ -439,11 +439,12 @@ handle :: proc(
 		)
 	case .Remove_From_Playlist:
 		uris := [?]string{request.item_uri}
-		result.status, result.ok = remove_from_playlist(
+		result.status, result.ok = edit_playlist_items(
 			tokens.access,
 			request.playlist_id,
 			uris[:],
 			reuse,
+			remove = true,
 		)
 	}
 }
@@ -732,34 +733,19 @@ detail_loading_visible :: proc(client: ^Client) -> bool {
 	)
 }
 
-// Queues a track or album add to a playlist. The worker answers with an
-// Add_To_Playlist result that drives the toast. Only one write rides at a
-// time, so a second drop cannot stack behind a slow write.
-queue_playlist_add :: proc(client: ^Client, playlist_id, playlist_name, item_uri: string) -> bool {
+// Queue an add or removal. One pending write prevents a second write while
+// the worker waits for server confirmation. Albums are resolved before adds.
+queue_playlist_write :: proc(
+	client: ^Client,
+	playlist_id, playlist_name, item_uri: string,
+	remove: bool = false,
+) -> bool {
 	if len(playlist_id) == 0 || len(item_uri) == 0 || client.write_pending {return false}
 	request := Request {
-		kind          = .Add_To_Playlist,
+		kind          = remove ? .Remove_From_Playlist : .Add_To_Playlist,
 		playlist_id   = strings.clone(playlist_id),
 		playlist_name = strings.clone(playlist_name),
 		item_uri      = strings.clone(item_uri),
-	}
-	queue_request(client, &request) or_return
-	client.write_pending = true
-	return true
-}
-
-// Queues the removal of one track from a playlist. Shares the add's toast
-// fields so a failure or success reads the same way to the user.
-remove_track_from_playlist :: proc(
-	client: ^Client,
-	playlist_id, playlist_name, track_uri: string,
-) -> bool {
-	if len(playlist_id) == 0 || len(track_uri) == 0 || client.write_pending {return false}
-	request := Request {
-		kind          = .Remove_From_Playlist,
-		playlist_id   = strings.clone(playlist_id),
-		playlist_name = strings.clone(playlist_name),
-		item_uri      = strings.clone(track_uri),
 	}
 	queue_request(client, &request) or_return
 	client.write_pending = true

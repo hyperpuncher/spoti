@@ -9,7 +9,7 @@ add_playlist_entry :: proc(
 	access, playlist_id, uri: string,
 	reuse: rawptr = nil,
 	fetch: type_of(fetch_track_page) = fetch_track_page,
-	write: type_of(add_to_playlist) = add_to_playlist,
+	write: type_of(edit_playlist_items) = edit_playlist_items,
 ) -> (
 	status: int,
 	ok: bool,

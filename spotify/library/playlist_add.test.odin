@@ -42,11 +42,13 @@ playlist_add_write :: proc(
 	access, playlist_id: string,
 	uris: []string,
 	reuse: rawptr = nil,
+	remove: bool = false,
 ) -> (
 	status: int,
 	ok: bool,
 ) {
 	fixture := (^Playlist_Add_Fixture)(reuse)
+	if remove {return 400, false}
 	fixture.writes += 1
 	if fixture.fail_second_write && fixture.writes == 2 {return 429, false}
 	for uri in uris {append(&fixture.added, strings.clone(uri))}
