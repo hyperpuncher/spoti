@@ -32,6 +32,7 @@ fetch_playlist_rows :: proc(
 	allocator: runtime.Allocator,
 	reuse: rawptr = nil,
 	refresh: bool = false,
+	cache_only: bool = false,
 ) -> (
 	rows: [dynamic]Track_Row,
 	total, next_offset: int,
@@ -43,16 +44,17 @@ fetch_playlist_rows :: proc(
 	if _, valid := track.parse_id(id); !valid {return}
 	// AP rows cache exactly like Web API bodies: a fresh pair parses
 	// straight off disk, a failed fetch falls back to the stale pair.
-	if !refresh {
+	if cache_only || !refresh {
 		if cached_rows, cached_total, cached_next, cached_more, cached := read_playlist_cache(
 			id,
 			offset,
 			allocator,
-			PAGE_TTL,
+			cache_only ? API_STALE : PAGE_TTL,
 		); cached {
 			return cached_rows, cached_total, cached_next, cached_more, 200, true
 		}
 	}
+	if cache_only {return}
 	body, code, fetched := fetch_playlist_body(access, id, offset, reuse, refresh)
 	defer delete(body)
 	if !fetched || code != 200 {
@@ -129,22 +131,25 @@ fetch_session_playlist_detail :: proc(
 	access, id: string,
 	reuse: rawptr = nil,
 	refresh: bool = false,
+	cache_only: bool = false,
 ) -> (
-	detail: Detail,
+	result: Detail,
 	status: int,
 	ok: bool,
 ) {
+	detail: Detail
 	if virtual.arena_init_growing(&detail.arena) != nil {return}
 	defer if !ok {free_detail(&detail)}
 	allocator := virtual.arena_allocator(&detail.arena)
 	rows_ok: bool
 	detail.rows, detail.total, detail.next_offset, detail.has_more, status, rows_ok =
-		fetch_playlist_rows(access, id, 0, allocator, reuse, refresh)
+		fetch_playlist_rows(access, id, 0, allocator, reuse, refresh, cache_only)
 	if !rows_ok {return}
 	key := playlist_cache_key("ap-playlist-window", id, 0)
 	defer delete(key)
 	body, hit := cache_read("api", key, API_STALE)
 	if !hit {
+		if cache_only {status = 0; return}
 		fetched: bool
 		body, status, fetched = fetch_playlist_body(access, id, 0, reuse)
 		if !fetched || status != 200 {delete(body); return}

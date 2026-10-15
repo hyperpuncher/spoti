@@ -238,7 +238,12 @@ handle :: proc(
 		read_release_feed(client, streaming, &result, reuse)
 		return
 	}
-	if !ensure_tokens(client, tokens) {result.status = -1; return}
+	// Playlist reads use the streaming grant, not Web API approval.
+	native_playlist :=
+		request.source == .Playlist &&
+		(request.kind == .Detail || request.kind == .More) &&
+		authorize_session(client, streaming, interactive = false)
+	if !native_playlist && !ensure_tokens(client, tokens) {result.status = -1; return}
 	#partial switch request.kind {
 	case .Index:
 		if request.list == .Playlists && (request.offset == 0 || request.account != "") {
@@ -269,8 +274,7 @@ handle :: proc(
 			)
 		}
 	case .Detail:
-		if request.source == .Playlist &&
-		   authorize_session(client, streaming, interactive = false) {
+		if native_playlist {
 			result.detail, result.status, result.ok = fetch_session_playlist_detail(
 				streaming.access,
 				request.id,
@@ -310,8 +314,11 @@ handle :: proc(
 		if result.ok {
 			detail.liked = request.saved
 			if !request.saved && time.since(client.saved_at) >= 0 {
-				if liked, known := fetch_saved(tokens.access, request.source, request.id, reuse);
-				   known {
+				liked, known := false, false
+				if ensure_tokens(client, tokens) {
+					liked, known = fetch_saved(tokens.access, request.source, request.id, reuse)
+				}
+				if known {
 					detail.liked = liked
 				} else {
 					client.saved_at = time.time_add(time.now(), SAVED_CHECK_BACKOFF)
@@ -335,8 +342,7 @@ handle :: proc(
 					allocator,
 					reuse,
 				)
-		} else if request.source == .Playlist &&
-		   authorize_session(client, streaming, interactive = false) {
+		} else if native_playlist {
 			result.rows, result.total, result.next_offset, result.has_more, result.status, result.ok =
 				fetch_playlist_rows(
 					streaming.access,
@@ -584,7 +590,12 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	// Clone before releasing the current detail: discography cards can borrow
 	// their strings from that arena. Keep the card cover through hero loading.
 	next: Detail
-	warm, _, warm_ok := fetch_detail("", source, id, cache_only = true)
+	warm: Detail
+	warm_ok := false
+	if source == .Playlist {
+		warm, _, warm_ok = fetch_session_playlist_detail("", id, cache_only = true)
+	}
+	if !warm_ok {warm, _, warm_ok = fetch_detail("", source, id, cache_only = true)}
 	if warm_ok && warm.rows_error == 0 {
 		// The page is already on disk, so it opens with its rows in place.
 		// The queued request above still revalidates it in the background.

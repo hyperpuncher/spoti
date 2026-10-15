@@ -1555,7 +1555,10 @@ detail_page :: proc(
 		backgroundColor = theme.bg,
 	},
 	) {
-		if !detail.ready || client.detail_error != 0 {
+		// A failed refresh must not replace cached rows with an error page.
+		has_content :=
+			len(detail.rows) > 0 || len(detail.albums.items) > 0 || len(detail.singles.items) > 0
+		if !detail.ready || client.detail_error != 0 && !has_content {
 			if clay.UI()(
 			{
 				layout = {
