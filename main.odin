@@ -567,10 +567,12 @@ clear_audio_stream :: proc(stream: ^^sdl.AudioStream) {
 	if stream^ != nil {sdl.DestroyAudioStream(stream^); stream^ = nil}
 }
 
-// Replace an owned string without leaking or double-freeing.
+// Keep unchanged strings; copy before freeing so the input may alias the owner.
 replace_string :: proc(destination: ^string, value: string) {
+	if destination^ == value {return}
+	next := strings.clone(value)
 	delete(destination^)
-	destination^ = strings.clone(value)
+	destination^ = next
 }
 
 parse_card_uri :: proc(uri: string) -> (source: library.Source, id: string, ok: bool) {

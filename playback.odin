@@ -170,8 +170,7 @@ stamp_queue_album :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
 
 // The live queue mirrors a detail page; later pages extend it in place.
 stamp_play_queue :: proc(queue_uri: ^string, generation: ^uint, detail: library.Detail) {
-	delete(queue_uri^)
-	queue_uri^ = strings.clone(detail_card_uri(detail))
+	replace_string(queue_uri, detail_card_uri(detail))
 	generation^ = detail.generation
 }
 
@@ -205,12 +204,9 @@ select_play_item :: proc(
 	selected, cover, artist: ^string,
 ) -> bool {
 	if index < 0 || index >= len(items) {return false}
-	delete(selected^)
-	selected^ = strings.clone(items[index].uri)
-	delete(cover^)
-	cover^ = strings.clone(items[index].cover)
-	delete(artist^)
-	artist^ = strings.clone(items[index].artist)
+	replace_string(selected, items[index].uri)
+	replace_string(cover, items[index].cover)
+	replace_string(artist, items[index].artist)
 	return true
 }
 
