@@ -1,5 +1,6 @@
 package oauth
 
+import "core:crypto"
 import "core:fmt"
 import "core:net"
 import "core:strings"
@@ -12,6 +13,38 @@ Wait_Result :: enum {
 	Denied,
 	Authorized,
 	Cancelled,
+}
+
+// Browser approval owns the listener and one-use secrets. Grant persistence
+// and the decision to start an interactive flow belong to the caller.
+authorize :: proc(
+	grant: Grant,
+	kind: Prompt,
+	cancel: ^bool = nil,
+) -> (
+	tokens: Tokens,
+	browser: Wait_Result,
+	result: Token_Result,
+) {
+	if cancel != nil && sync.atomic_load(cancel) {return {}, .Cancelled, .Network_Error}
+	listener, ready := listen(int(grant.port))
+	if !ready {return {}, .Bind_Failed, .Network_Error}
+	defer net.close(listener)
+	flow := begin(grant)
+	defer {
+		publish_prompt(kind, "")
+		crypto.zero_explicit(raw_data(flow.verifier), len(flow.verifier))
+		delete(flow.verifier)
+		delete(flow.state)
+		delete(flow.url)
+	}
+	publish_prompt(kind, flow.url)
+	code: string
+	code, browser = wait_for_code(listener, flow.state, cancel)
+	if browser != .Authorized {return}
+	defer {crypto.zero_explicit(raw_data(code), len(code)); delete(code)}
+	tokens, result = exchange_code(code, flow.verifier, grant)
+	return
 }
 
 listen :: proc(port: int = 8898) -> (net.TCP_Socket, bool) {

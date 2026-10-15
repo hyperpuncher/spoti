@@ -6,7 +6,6 @@ import credential "../credential"
 import oauth "../oauth"
 import "core:crypto"
 import "core:fmt"
-import "core:net"
 import "core:os"
 import "core:strings"
 import "core:sync"
@@ -69,29 +68,17 @@ authorize :: proc(cancel: ^bool = nil) -> (tokens: oauth.Tokens, result: Auth_Re
 		}
 	}
 	if cancel != nil && sync.atomic_load(cancel) {return {}, .Cancelled}
-	listener, listening := oauth.listen(int(grant.port))
-	if !listening {
+	response: oauth.Wait_Result
+	status: oauth.Token_Result
+	tokens, response, status = oauth.authorize(grant, .Library, cancel)
+	if response == .Bind_Failed {
 		fmt.eprintln("cannot listen for library browser approval")
 		diagnostic.write("library authorize listen-failed")
 		return {}, .Unavailable
 	}
-	defer net.close(listener)
-	flow := oauth.begin(grant)
-	defer {
-		oauth.publish_prompt(.Library, "")
-		crypto.zero_explicit(raw_data(flow.verifier), len(flow.verifier))
-		delete(flow.verifier)
-		delete(flow.state)
-		delete(flow.url)
-	}
-	oauth.publish_prompt(.Library, flow.url)
-	code, response := oauth.wait_for_code(listener, flow.state, cancel)
 	diagnostic.writef("library browser=%v", response)
 	if response == .Cancelled {return {}, .Cancelled}
 	if response != .Authorized {return {}, .Unavailable}
-	defer {crypto.zero_explicit(raw_data(code), len(code)); delete(code)}
-	status: oauth.Token_Result
-	tokens, status = oauth.exchange_code(code, flow.verifier, grant)
 	if status != .Authorized {return {}, .Unavailable}
 	if len(tokens.refresh) > 0 && !credential.save(tokens.refresh, .Library) {
 		fmt.eprintln("system keyring unavailable; library approval will be needed next time")

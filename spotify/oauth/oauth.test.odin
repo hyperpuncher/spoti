@@ -91,6 +91,13 @@ waiting_for_browser_can_be_cancelled :: proc(t: ^testing.T) {
 	cancel := true
 	_, result := wait_for_code({}, "state", &cancel)
 	testing.expect(t, result == .Cancelled)
+	// A cancelled interactive flow must not bind a port or publish a URL.
+	for grant in ([]Grant{PLAYBACK_GRANT, web_grant("test-client")}) {
+		tokens, browser, status := authorize(grant, .Playback, &cancel)
+		testing.expect_value(t, browser, .Cancelled)
+		testing.expect_value(t, status, .Network_Error)
+		testing.expect_value(t, tokens, Tokens{})
+	}
 }
 
 @(test)

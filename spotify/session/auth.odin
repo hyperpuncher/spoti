@@ -5,7 +5,6 @@ import credential "../credential"
 import oauth "../oauth"
 import "core:crypto"
 import "core:fmt"
-import "core:net"
 import "core:strings"
 import "core:sync"
 import "core:time"
@@ -82,26 +81,17 @@ authorize :: proc(
 	// A stored grant that would not refresh must not open a browser here;
 	// callers that need the user present pass the default interactive=true.
 	if !interactive {return}
-	listener, ready := oauth.listen()
-	if !ready {fmt.eprintln("cannot listen on 127.0.0.1:8898 (is another player using it?)"); return}
-	defer net.close(listener)
-	flow := oauth.begin()
-	defer {
-		oauth.publish_prompt(.Playback, "")
-		crypto.zero_explicit(raw_data(flow.verifier), len(flow.verifier))
-		delete(flow.verifier)
-		delete(flow.state)
-		delete(flow.url)
-	}
-	oauth.publish_prompt(.Playback, flow.url)
-	code, result := oauth.wait_for_code(listener, flow.state, cancel)
-	if result != .Authorized {
-		if result != .Cancelled {fmt.eprintln("browser approval did not complete:", result)}
+	browser: oauth.Wait_Result
+	status: oauth.Token_Result
+	tokens, browser, status = oauth.authorize(oauth.PLAYBACK_GRANT, .Playback, cancel)
+	if browser == .Bind_Failed {
+		fmt.eprintln("cannot listen on 127.0.0.1:8898 (is another player using it?)")
 		return
 	}
-	defer {crypto.zero_explicit(raw_data(code), len(code)); delete(code)}
-	status: oauth.Token_Result
-	tokens, status = oauth.exchange_code(code, flow.verifier)
+	if browser != .Authorized {
+		if browser != .Cancelled {fmt.eprintln("browser approval did not complete:", browser)}
+		return
+	}
 	if status != .Authorized {fmt.eprintln("token exchange did not complete:", status); return}
 	if keyring_mode != .None && (tokens.refresh == "" || !credential.save(tokens.refresh)) {
 		fmt.eprintln("system keyring unavailable; browser approval will be needed next time")
