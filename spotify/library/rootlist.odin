@@ -101,7 +101,7 @@ parse_rootlist :: proc(body: []u8, account: string, offset: int) -> (page: Page,
 				display_name = string(owner),
 			}
 		ref.items.total = int(length)
-		append_playlist_entry(&page.items, ref, allocator)
+		append_entry(&page.items, ref, allocator)
 	}
 	page.ready = true
 	page.account = strings.clone(account, allocator)

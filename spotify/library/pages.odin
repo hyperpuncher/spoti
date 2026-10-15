@@ -238,88 +238,68 @@ release_year :: proc(date: string, allocator: runtime.Allocator) -> string {
 	return strings.clone(date[:4], allocator)
 }
 
-append_playlist_entry :: proc(
-	items: ^[dynamic]Entry,
-	row: Playlist_Ref,
-	allocator: runtime.Allocator,
-) {
-	append_card_entry(
-		items,
-		row.name,
-		row.uri,
-		cover_url(row.images),
-		row.owner.display_name,
-		"",
-		row.items.total,
-		allocator,
-		owner_id = row.owner.id,
-		collaborative = row.collaborative,
-	)
-}
-
-append_album_entry :: proc(
-	items: ^[dynamic]Entry,
-	album: Album_Ref,
-	allocator: runtime.Allocator,
-) {
-	append_saved_album(items, Saved_Album{album = album}, allocator)
-}
-
-append_saved_album :: proc(
-	items: ^[dynamic]Entry,
-	row: Saved_Album,
-	allocator: runtime.Allocator,
-) {
-	album := row.album
-	append_card_entry(
-		items,
-		album.name,
-		album.uri,
-		cover_url(album.images),
-		joined_artists(album.artists, context.temp_allocator),
-		album.release_date,
-		album.total_tracks,
-		allocator,
-	)
-}
-
-append_artist_entry :: proc(items: ^[dynamic]Entry, row: Artist, allocator: runtime.Allocator) {
-	if len(row.id) == 0 {return}
-	uri := row.uri
-	if len(uri) ==
-	   0 {uri = fmt.aprintf("spotify:artist:%s", row.id, allocator = context.temp_allocator)}
-	append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", "", 0, allocator)
-}
-
 track_available :: proc(track: Track_Ref) -> bool {
 	if playable, reported := track.is_playable.(bool); reported && !playable {return false}
 	return !session.track_unavailable(track.uri)
 }
 
-append_track_entry :: proc(
-	items: ^[dynamic]Entry,
-	track: Track_Ref,
-	allocator: runtime.Allocator,
-) {
-	if !track_available(track) || len(track.name) == 0 || len(track.uri) > 128 {return}
-	first_artist, artist_uri := "", ""
-	if len(track.artists) > 0 {
-		first_artist = strings.clone(track.artists[0].name, allocator)
-		artist_uri = strings.clone(track.artists[0].uri, allocator)
-	}
-	append(
-		items,
-		Entry {
-			name = strings.clone(track.name, allocator),
-			uri = strings.clone(track.uri, allocator),
-			image = strings.clone(cover_url(track.album.images), allocator),
-			subtitle = joined_artists(track.artists, allocator),
-			album = strings.clone(track.album.name, allocator),
-			album_uri = strings.clone(track.album.uri, allocator),
-			first_artist = first_artist,
-			artist_uri = artist_uri,
-		},
-	)
+// Saved-item wrappers and direct search/rootlist objects share one card builder.
+append_entry :: proc(items: ^[dynamic]Entry, row: $T, allocator: runtime.Allocator) {
+	when T == Saved_Album {
+		append_entry(items, row.album, allocator)
+	} else when T == Saved_Track {
+		append_entry(items, row.track, allocator)
+	} else when T == Playlist_Ref {
+		append_card_entry(
+			items,
+			row.name,
+			row.uri,
+			cover_url(row.images),
+			row.owner.display_name,
+			"",
+			row.items.total,
+			allocator,
+			owner_id = row.owner.id,
+			collaborative = row.collaborative,
+		)
+	} else when T == Album_Ref {
+		append_card_entry(
+			items,
+			row.name,
+			row.uri,
+			cover_url(row.images),
+			joined_artists(row.artists, context.temp_allocator),
+			row.release_date,
+			row.total_tracks,
+			allocator,
+		)
+	} else when T == Artist {
+		if row.id == "" {return}
+		uri := row.uri
+		if uri ==
+		   "" {uri = fmt.aprintf("spotify:artist:%s", row.id, allocator = context.temp_allocator)}
+		append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", "", 0, allocator)
+	} else when T == Track_Ref {
+		if !track_available(row) || row.name == "" || len(row.uri) > 128 {return}
+		first_artist, artist_uri := "", ""
+		if len(row.artists) > 0 {
+			first_artist = strings.clone(row.artists[0].name, allocator)
+			artist_uri = strings.clone(row.artists[0].uri, allocator)
+		}
+		append(
+			items,
+			Entry {
+				name = strings.clone(row.name, allocator),
+				uri = strings.clone(row.uri, allocator),
+				image = strings.clone(cover_url(row.album.images), allocator),
+				subtitle = joined_artists(row.artists, allocator),
+				album = strings.clone(row.album.name, allocator),
+				album_uri = strings.clone(row.album.uri, allocator),
+				first_artist = first_artist,
+				artist_uri = artist_uri,
+			},
+		)
+	} else {#assert(false, "unsupported library card type")}
 }
 
 fetch_index :: proc(
@@ -381,75 +361,48 @@ fetch_index :: proc(
 	return page, status, ok
 }
 
-build_offset_page :: proc(
-	page: ^Page,
-	window: Offset_Page($T),
-	append_one: proc(items: ^[dynamic]Entry, row: T, allocator: runtime.Allocator),
-) -> bool {
+build_page :: proc(page: ^Page, window: $T) -> bool {
 	if virtual.arena_init_growing(&page.arena) != nil {return false}
 	page.ready = true
 	allocator := virtual.arena_allocator(&page.arena)
 	page.total = window.total
 	page.has_more = window.next != ""
-	page.next_offset = window.offset + len(window.items)
+	page.next_offset = len(window.items)
+	when T == Artist_Window {
+		page.has_more = page.has_more && window.cursors.after != ""
+		if page.has_more {page.cursor = strings.clone(window.cursors.after, allocator)}
+	} else {page.next_offset += window.offset}
 	if !sane_page(page.total, len(window.items), page.next_offset) {
 		free_page(page)
 		return false
 	}
 	page.items = make([dynamic]Entry, 0, len(window.items), allocator)
-	for row in window.items {append_one(&page.items, row, allocator)}
+	for row in window.items {append_entry(&page.items, row, allocator)}
 	return true
 }
 
-parse_offset_page :: proc(
-	body: []u8,
-	page: ^Page,
-	$T: typeid,
-	append_one: proc(items: ^[dynamic]Entry, row: T, allocator: runtime.Allocator),
-) -> bool {
+parse_offset_page :: proc(body: []u8, page: ^Page, $T: typeid) -> bool {
 	decoded: Offset_Page(T)
 	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return false}
-	return build_offset_page(page, decoded, append_one)
+	return build_page(page, decoded)
 }
 
 parse_index :: proc(body: []u8, kind: Kind) -> (page: Page, ok: bool) {
 	switch kind {
 	case .Playlists:
-		ok = parse_offset_page(body, &page, Playlist_Ref, append_playlist_entry)
+		ok = parse_offset_page(body, &page, Playlist_Ref)
 	case .Albums:
-		ok = parse_offset_page(body, &page, Saved_Album, append_saved_album)
+		ok = parse_offset_page(body, &page, Saved_Album)
 	case .Tracks:
-		ok = parse_offset_page(body, &page, Saved_Track, append_saved_track)
+		ok = parse_offset_page(body, &page, Saved_Track)
 	case .Artists:
-		if virtual.arena_init_growing(&page.arena) != nil {return}
-		page.ready = true
-		ok = parse_artists(body, &page, virtual.arena_allocator(&page.arena))
+		decoded: Raw_Followed_Artists
+		if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return}
+		ok = build_page(&page, decoded.artists)
 	}
 	if !ok {free_page(&page); return}
 	for &entry in page.items {entry.saved = true}
 	return
-}
-
-append_saved_track :: proc(
-	items: ^[dynamic]Entry,
-	row: Saved_Track,
-	allocator: runtime.Allocator,
-) {
-	append_track_entry(items, row.track, allocator)
-}
-
-parse_artists :: proc(body: []u8, page: ^Page, allocator: runtime.Allocator) -> bool {
-	decoded: Raw_Followed_Artists
-	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return false}
-	window := decoded.artists
-	page.total = window.total
-	page.has_more = len(window.next) > 0 && len(window.cursors.after) > 0
-	if page.has_more {page.cursor = strings.clone(window.cursors.after, allocator)}
-	page.next_offset = len(window.items)
-	if !sane_page(page.total, len(window.items), page.next_offset) {return false}
-	page.items = make([dynamic]Entry, 0, len(window.items), allocator)
-	for row in window.items {append_artist_entry(&page.items, row, allocator)}
-	return true
 }
 
 // Stable cache key for a cover URL on the UI side.

@@ -50,10 +50,10 @@ fetch_search :: proc(
 parse_search :: proc(body: []u8) -> (pages: [Kind]Page, ok: bool) {
 	decoded: Raw_Search
 	if json.unmarshal(body, &decoded, allocator = context.temp_allocator) != nil {return}
-	if !build_offset_page(&pages[.Playlists], decoded.playlists, append_playlist_entry) ||
-	   !build_offset_page(&pages[.Albums], decoded.albums, append_album_entry) ||
-	   !build_offset_page(&pages[.Artists], decoded.artists, append_artist_entry) ||
-	   !build_offset_page(&pages[.Tracks], decoded.tracks, append_track_entry) {
+	if !build_page(&pages[.Playlists], decoded.playlists) ||
+	   !build_page(&pages[.Albums], decoded.albums) ||
+	   !build_page(&pages[.Artists], decoded.artists) ||
+	   !build_page(&pages[.Tracks], decoded.tracks) {
 		for &page in pages {free_page(&page)}
 		return {}, false
 	}
