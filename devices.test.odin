@@ -19,7 +19,7 @@ floating_picker_panels_keep_rows_bounded :: proc(t: ^testing.T) {
 		{name = "Redmi Note 12 Turbo", type = "Smartphone", active = true},
 		{name = "Living room", type = "Speaker"},
 	}
-	playlists := make([]library.Entry, 300)
+	playlists := make([dynamic]library.Entry, 300)
 	defer delete(playlists)
 	for &entry in playlists {entry.name = "Playlist"; entry.subtitle = "Account"}
 	for d in ([]f32{1, 1.2, 1.5}) {
@@ -59,15 +59,15 @@ floating_picker_panels_keep_rows_bounded :: proc(t: ^testing.T) {
 		first := clay.GetElementData(clay.ID("device_item", 0)).boundingBox
 		second := clay.GetElementData(clay.ID("device_item", 1)).boundingBox
 		testing.expect(t, second.y >= first.y + first.height, "device rows must not overlap")
-		picker := View {
-			menu_open      = true,
-			menu_count     = 1,
-			menu_selected  = -1,
-			menu_add_index = 0,
-			picker_open    = true,
-			picker_rows    = playlists,
+		picker := Context_Menu {
+			open         = true,
+			count        = 1,
+			selected     = -1,
+			picker_open  = true,
+			picker_items = playlists,
 		}
-		picker.menu_labels[0] = "Add to playlist"
+		picker.items[0] = .Add_To_Playlist
+		picker.labels[0] = "Add to playlist"
 		for fraction in ([]f32{0, 0.5, 1}) {
 			for _ in 0 ..< 3 {
 				scroll := clay.GetScrollContainerData(clay.ID("playlist_picker"))
@@ -81,7 +81,7 @@ floating_picker_panels_keep_rows_bounded :: proc(t: ^testing.T) {
 						)
 				}
 				clay.BeginLayout()
-				context_menu(picker, &textures, d)
+				context_menu(&picker, &textures, d)
 				commands := clay.EndLayout(0)
 				testing.expect(t, commands.length < 150)
 			}

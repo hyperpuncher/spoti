@@ -119,15 +119,7 @@ View :: struct {
 	search_mode:    bool,
 	releases:       bool,
 	search_kind:    library.Kind,
-	menu_open:      bool,
-	menu_x:         f32,
-	menu_y:         f32,
-	menu_count:     int,
-	menu_labels:    [MENU_ITEMS_MAX]string,
-	menu_selected:  int,
-	menu_add_index: int, // row index of Add to playlist, or -1
-	picker_open:    bool,
-	picker_rows:    []library.Entry,
+	menu:           ^Context_Menu, // borrowed while layout runs
 	device_open:    bool, // the Connect device panel is showing
 	device_active:  bool, // a Connect device is the API-active one
 	device_rows:    []library.Device, // borrowed; the last fetched list
@@ -975,7 +967,7 @@ layout :: proc(
 		player_bar(view, textures, fx, d)
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
-		context_menu(view, textures, d)
+		context_menu(view.menu, textures, d)
 		device_panel(view, textures, d)
 		drag_ghost(view, d)
 		toast_banner(view, d)

@@ -136,8 +136,8 @@ open_sort_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, current: Sort) {
 	}
 }
 
-context_menu :: proc(view: View, textures: ^Textures, d: f32) {
-	if !view.menu_open {return}
+context_menu :: proc(menu: ^Context_Menu, textures: ^Textures, d: f32) {
+	if menu == nil || !menu.open {return}
 	if clay.UI_WithId(clay.ID("context_menu"))(
 	{
 		layout = {
@@ -146,15 +146,15 @@ context_menu :: proc(view: View, textures: ^Textures, d: f32) {
 			padding = clay.PaddingAll(u16(6 * d)),
 			childGap = u16(2 * d),
 		},
-		floating = {offset = {view.menu_x, view.menu_y}, zIndex = 10, attachTo = .Root},
+		floating = {offset = {menu.point.x, menu.point.y}, zIndex = 10, attachTo = .Root},
 		backgroundColor = PANEL,
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
 	) {
 		// Only the sort picker marks a row, so only it reserves the gutter;
 		// every other menu fits its labels exactly.
-		reserve := view.menu_selected >= 0 && view.menu_selected < view.menu_count
-		for index in 0 ..< view.menu_count {
+		reserve := menu.selected >= 0 && menu.selected < menu.count
+		for index in 0 ..< menu.count {
 			hovered := clay.PointerOver(clay.ID("menu_item", u32(index)))
 			if clay.UI_WithId(clay.ID("menu_item", u32(index)))(
 			{
@@ -168,19 +168,19 @@ context_menu :: proc(view: View, textures: ^Textures, d: f32) {
 				cornerRadius = clay.CornerRadiusAll(5 * d),
 			},
 			) {
-				if index == view.menu_selected {
+				if index == menu.selected {
 					icon_element(textures, "check", .White, 14 * d)
 				} else if reserve {
 					if clay.UI()({layout = {sizing = {width = clay.SizingFixed(14 * d)}}}) {}
 				}
 				clay.Text(
-					view.menu_labels[index],
+					menu.labels[index],
 					clay.TextElementConfig{fontSize = 14, textColor = WHITE},
 				)
 			}
 		}
 	}
-	if view.picker_open {playlist_picker(view, d)}
+	if menu.picker_open {playlist_picker(menu, d)}
 }
 
 PICKER_WIDTH :: 260
@@ -201,14 +201,14 @@ rebuild_picker_items :: proc(menu: ^Context_Menu, client: ^library.Client) {
 // Nested submenu of the track menu: the playlists the account can add items
 // to. It opens beside the add-to-playlist row and scrolls when the list is
 // taller than the panel.
-playlist_picker :: proc(view: View, d: f32) {
-	add_index := view.menu_add_index
+playlist_picker :: proc(menu: ^Context_Menu, d: f32) {
+	add_index := menu_add_index(menu)
 	if add_index < 0 {return}
 	menu_box := clay.GetElementData(clay.ID("context_menu")).boundingBox
 	add_box := clay.GetElementData(clay.ID("menu_item", u32(add_index))).boundingBox
 	picker_x := menu_box.x + menu_box.width + 4 * d
 	picker_y := add_box.y
-	rows := f32(len(view.picker_rows))
+	rows := f32(len(menu.picker_items))
 	panel_height := rows == 0 ? 44 * d : min(rows * PICKER_ROW * d + 12 * d, PICKER_MAX_HEIGHT * d)
 	if clay.UI_WithId(clay.ID("playlist_picker_panel"))(
 	{
@@ -245,14 +245,14 @@ playlist_picker :: proc(view: View, d: f32) {
 			gap := f32(u16(2 * d))
 			visible := scroll_items(
 				"playlist_picker",
-				len(view.picker_rows),
+				len(menu.picker_items),
 				1,
 				(PICKER_ROW - 2) * d + gap,
 				panel_height,
 			)
 			list_spacer(visible.before - gap)
 			for index in visible.first ..< visible.last {
-				entry := view.picker_rows[index]
+				entry := menu.picker_items[index]
 				hovered := clay.PointerOver(clay.ID("picker_item", u32(index)))
 				if clay.UI_WithId(clay.ID("picker_item", u32(index)))(
 				{
