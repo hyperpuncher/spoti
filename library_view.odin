@@ -560,7 +560,7 @@ track_list_row :: proc(
 	if !columns {
 		title_box = min(hero_text_width(ui_state, row.name, 15, 3), title_max)
 	}
-	title_text := hero_fit_text(ui_state, row.name, title_box, 15, 3, 1, context.temp_allocator)
+	title_text := hero_fit_text(ui_state, row.name, title_box, 15, 3, context.temp_allocator)
 	// Boundary-fitted segments: whole artists that fit, then an
 	// ellipsis. A first artist that alone overflows truncates with
 	// one like before. Sources that omit URIs render plain text.
@@ -649,7 +649,6 @@ track_list_row :: proc(
 						max(0, width - 24 * d),
 						14,
 						0,
-						1,
 						context.temp_allocator,
 					)
 					metadata_link("album_link", u32(index), name, row.album_uri != "")
@@ -1090,13 +1089,8 @@ release_section :: proc(
 	return
 }
 
-// Hero title sizes, largest first. The title wraps onto two lines, steps
-// down until it fits them, and finally ellipsizes; the metadata line below
-// it is a single ellipsized line. Clay only wraps on whitespace and offers
-// no max-lines, so sizes and cuts have to be picked up front by replaying
-// its greedy word wrap with the same measurer the layout itself uses.
+// Shared single-line titles shrink before text is shortened.
 HERO_TITLE_SIZES := [?]u16{96, 80, 64, 54, 44, 36, 30}
-HERO_TITLE_LINES :: 2
 HERO_TITLE_FONT :: 2
 
 hero_text_width :: proc(state: ^ui.State, text: string, size, font: u16) -> f32 {
@@ -1113,70 +1107,52 @@ hero_text_width :: proc(state: ^ui.State, text: string, size, font: u16) -> f32 
 	return measure_text(slice, &config, state).width
 }
 
-// How many lines Clay's greedy wrap produces for the text in a column of
-// the given width: words break on spaces, every non-final word carries its
-// trailing space, and a lone overlong word takes its own overflowing line.
-hero_wrapped_lines :: proc(state: ^ui.State, text: string, size, font: u16, width: f32) -> int {
-	if len(text) == 0 {return 1}
-	space := hero_text_width(state, " ", size, font)
-	lines := 0
-	line := f32(0)
-	start := 0
-	for start < len(text) {
-		end := start
-		for end < len(text) && text[end] != ' ' {end += 1}
-		w := hero_text_width(state, text[start:end], size, font)
-		if end < len(text) {w += space}
-		if line == 0 && line + w > width {
-			lines += 1
-			start = end + 1
-			continue
-		}
-		if line + w > width {
-			lines += 1
-			line = 0
-			continue
-		}
-		line += w
-		start = end + 1
-	}
-	if line > 0 {lines += 1}
-	return lines
-}
-
 hero_max_title_size :: proc(viewport_height, d: f32) -> u16 {
 	return u16(clamp(54 + max(0, viewport_height / d - 900) * 0.08, 54, 96))
 }
 
-hero_title_size :: proc(state: ^ui.State, name: string, width: f32, max_size: u16 = 54) -> u16 {
-	// Layout tests run without fonts; they keep the permitted maximum.
-	if state == nil || len(name) == 0 {return max_size}
-	for size in HERO_TITLE_SIZES {
-		if size > max_size {continue}
-		if hero_wrapped_lines(state, name, size, HERO_TITLE_FONT, width) <= HERO_TITLE_LINES {
-			return size
+// Both cover and banner headers use the same font, fitting, and wrapping rules.
+hero_title :: proc(
+	state: ^ui.State,
+	name: string,
+	width: f32,
+	max_size: u16,
+) -> (
+	string,
+	clay.TextElementConfig,
+) {
+	size := max_size
+	if state != nil && name != "" {
+		size = HERO_TITLE_SIZES[len(HERO_TITLE_SIZES) - 1]
+		for candidate in HERO_TITLE_SIZES {
+			if candidate <= max_size &&
+			   hero_text_width(state, name, candidate, HERO_TITLE_FONT) <= width {
+				size = candidate
+				break
+			}
 		}
 	}
-	return HERO_TITLE_SIZES[len(HERO_TITLE_SIZES) - 1]
+	return hero_fit_text(
+		state,
+		name,
+		width,
+		size,
+		HERO_TITLE_FONT,
+		context.temp_allocator,
+	), {fontId = HERO_TITLE_FONT, fontSize = size, textColor = theme.text, wrapMode = .None}
 }
 
-// Shortens the text with an ellipsis so it fits the width: a single line
-// when lines is 1, that many wrapped lines otherwise. Returns the text
-// itself when it already fits, otherwise a copy from the allocator, which
-// the caller must not free.
+// Shortens one line at a grapheme boundary. Returns borrowed text when it fits,
+// otherwise a copy from the supplied allocator.
 hero_fit_text :: proc(
 	state: ^ui.State,
 	text: string,
 	width: f32,
 	size, font: u16,
-	lines: int,
 	allocator := context.allocator,
 ) -> string {
 	if state == nil || len(text) == 0 {return text}
-	// A single line needs one measure, not a per-word walk.
-	if lines <= 1 {
-		if hero_text_width(state, text, size, font) <= width {return text}
-	} else if hero_wrapped_lines(state, text, size, font, width) <= lines {return text}
+	if hero_text_width(state, text, size, font) <= width {return text}
 	scratch := make([]u8, len(text) + len("…"), allocator)
 	// Every measurement probe ends at a complete grapheme cluster.
 	boundaries := make([dynamic]int, 0, len(text) + 1, context.temp_allocator)
@@ -1190,9 +1166,7 @@ hero_fit_text :: proc(
 		copy(scratch, text[:end])
 		copy(scratch[end:], "…")
 		probe := string(scratch[:end + len("…")])
-		ok :=
-			lines <= 1 ? hero_text_width(state, probe, size, font) <= width : hero_wrapped_lines(state, probe, size, font, width) <= lines
-		if ok {
+		if hero_text_width(state, probe, size, font) <= width {
 			lo = mid
 		} else {
 			hi = mid - 1
@@ -1247,7 +1221,7 @@ artist_links_row :: proc(
 		if separator != "" {need += comma_w}
 		if used + need > box {
 			if ai == 0 {
-				fit := hero_fit_text(ui_state, link.name, box, 14, 0, 1, context.temp_allocator)
+				fit := hero_fit_text(ui_state, link.name, box, 14, 0, context.temp_allocator)
 				metadata_link(id, base + u32(ai), fit, linked)
 			} else {
 				clay.Text("…", {fontSize = 14, textColor = theme.muted, wrapMode = .None})
@@ -1264,7 +1238,7 @@ artist_links_row :: proc(
 
 fitted_text :: proc(state: ^ui.State, text: string, width: f32, style: clay.TextElementConfig) {
 	clay.Text(
-		hero_fit_text(state, text, width, style.fontSize, style.fontId, 1, context.temp_allocator),
+		hero_fit_text(state, text, width, style.fontSize, style.fontId, context.temp_allocator),
 		style,
 	)
 }
@@ -1338,15 +1312,11 @@ hero_banner :: proc(
 	)
 	height := min(available * h / w, height_limit)
 	title_width := max(0, available - 48 * d)
-	title_size := hero_max_title_size(viewport_height, d)
-	title := hero_fit_text(
+	title, title_style := hero_title(
 		ui_state,
 		detail.name,
 		title_width,
-		title_size,
-		HERO_TITLE_FONT,
-		1,
-		context.temp_allocator,
+		hero_max_title_size(viewport_height, d),
 	)
 	metadata := hero_metadata(detail)
 	if clay.UI_WithId(clay.ID("hero_banner"))(
@@ -1360,7 +1330,7 @@ hero_banner :: proc(
 			image = {imageData = rawptr(uintptr(cover_key(detail.banner)))},
 		},
 		)
-		fade_height := min(height, max(320 * d, f32(title_size) * 4 * d))
+		fade_height := min(height, max(320 * d, f32(title_style.fontSize) * 4 * d))
 		fade_image(
 			textures,
 			textures.hero_fade,
@@ -1387,15 +1357,7 @@ hero_banner :: proc(
 		},
 		) {
 			clay.Text(detail.label, {fontSize = 13, textColor = theme.text})
-			clay.Text(
-				title,
-				{
-					fontId = HERO_TITLE_FONT,
-					fontSize = title_size,
-					textColor = theme.text,
-					wrapMode = .None,
-				},
-			)
+			clay.Text(title, title_style)
 			fitted_text(
 				ui_state,
 				metadata,
@@ -1417,23 +1379,13 @@ detail_hero :: proc(
 	// No panel behind it; the cover floats on the page with a soft shadow.
 	if hero_banner(detail, textures, ui_state, available_width, viewport_height, d) {return}
 	hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
-	// A density unit of slack keeps knife-edge words from spilling a third
-	// line over floating-point summation order.
+	// Keep a density unit of slack at the text boundary.
 	title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d - d)
-	title_size := hero_title_size(
+	title, title_style := hero_title(
 		ui_state,
 		detail.name,
 		title_width,
 		hero_max_title_size(viewport_height, d),
-	)
-	title_text := hero_fit_text(
-		ui_state,
-		detail.name,
-		title_width,
-		title_size,
-		HERO_TITLE_FONT,
-		HERO_TITLE_LINES,
-		context.temp_allocator,
 	)
 	if clay.UI()(
 	{
@@ -1508,7 +1460,7 @@ detail_hero :: proc(
 		},
 		) {
 			clay.Text(detail.label, {fontSize = 13, textColor = theme.text})
-			clay.Text(title_text, {fontId = 2, fontSize = title_size, textColor = theme.text})
+			clay.Text(title, title_style)
 			metadata := hero_metadata(detail)
 			if len(detail.artist_links) > 0 {
 				tail := fmt.aprintf(" • %s", metadata, allocator = context.temp_allocator)
@@ -1538,7 +1490,6 @@ detail_hero :: proc(
 					title_width,
 					14,
 					0,
-					1,
 					context.temp_allocator,
 				)
 				clay.Text(metadata_text, {fontSize = 14, textColor = theme.muted})
