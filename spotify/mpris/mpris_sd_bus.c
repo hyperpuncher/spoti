@@ -85,10 +85,6 @@ GETTER(get_identity)
 	int r = sd_bus_message_append(reply, "s", "spoti");
 	GETTER_END
 
-GETTER(get_desktop_entry)
-	int r = sd_bus_message_append(reply, "s", "spoti");
-	GETTER_END
-
 GETTER(get_true)
 	int r = sd_bus_message_append(reply, "b", 1);
 	GETTER_END
@@ -239,7 +235,7 @@ static const sd_bus_vtable root_vtable[] = {
 	SD_BUS_PROPERTY("CanRaise", "b", get_false, 0, SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("HasTrackList", "b", get_false, 0, SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("Identity", "s", get_identity, 0, SD_BUS_VTABLE_PROPERTY_CONST),
-	SD_BUS_PROPERTY("DesktopEntry", "s", get_desktop_entry, 0, SD_BUS_VTABLE_PROPERTY_CONST),
+	SD_BUS_PROPERTY("DesktopEntry", "s", get_identity, 0, SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("SupportedUriSchemes", "as", get_empty_strv, 0, SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_PROPERTY("SupportedMimeTypes", "as", get_empty_strv, 0, SD_BUS_VTABLE_PROPERTY_CONST),
 	SD_BUS_METHOD("Raise", "", "", method_raise, SD_BUS_VTABLE_UNPRIVILEGED),

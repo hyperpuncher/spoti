@@ -30,7 +30,5 @@ Command :: enum {
 	Quit,
 }
 
-Handler :: proc(command: Command, position_ms: int)
-
 // Called from the service thread when a remote command needs the UI thread.
 Wake :: proc "c" (userdata: rawptr)

@@ -35,7 +35,9 @@ service :: proc() {
 	}
 }
 
-start :: proc(wake: Wake) -> bool {
+start :: proc(wake: Wake) -> (ok: bool) {
+	if worker != nil {return true}
+	defer if !ok {close()}
 	if spoti_mpris_start() < 0 {return false}
 	if wake != nil {spoti_mpris_set_wake(wake, nil)}
 	sync.atomic_store(&quit, false)
@@ -96,12 +98,12 @@ update :: proc(now: Now_Playing) {
 	status_changed := !have_last || status != last_status
 	if status_changed {
 		spoti_mpris_set_status(
-			flag(now.playing),
-			flag(now.shuffle),
-			flag(now.repeat),
-			flag(now.can_seek),
-			flag(now.can_next),
-			flag(now.can_previous),
+			i32(now.playing),
+			i32(now.shuffle),
+			i32(now.repeat),
+			i32(now.can_seek),
+			i32(now.can_next),
+			i32(now.can_previous),
 			f64(now.volume),
 		)
 		last_status = status
@@ -117,7 +119,6 @@ seeked :: proc(position_ms: int) {
 close :: proc() {
 	sync.atomic_store(&quit, true)
 	if worker != nil {
-		thread.join(worker)
 		thread.destroy(worker)
 		worker = nil
 	}
@@ -127,6 +128,3 @@ close :: proc() {
 	last_title, last_artist = "", ""
 	have_last = false
 }
-
-@(private = "file")
-flag :: proc(value: bool) -> i32 {return value ? 1 : 0}
