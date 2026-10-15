@@ -120,34 +120,20 @@ fetch_artist_overview :: proc(
 		defer delete(cached)
 		if parse_artist_overview(cached[:], detail) {return true}
 	}
-	request: struct {
-		operation_name: string `json:"operationName"`,
-		variables:      struct {
-			uri, locale: string,
-			prerelease:  bool `json:"includePrerelease"`,
-		},
-		extensions:     struct {
-			query: struct {
-				version: int,
-				hash:    string `json:"sha256Hash"`,
-			} `json:"persistedQuery"`,
-		},
+	variables: struct {
+		uri, locale: string,
+		prerelease:  bool `json:"includePrerelease"`,
 	}
-	request.operation_name = "queryArtistOverview"
-	request.variables.uri = fmt.aprintf(
-		"spotify:artist:%s",
-		detail.id,
-		allocator = context.temp_allocator,
+	variables.uri = fmt.aprintf("spotify:artist:%s", detail.id, allocator = context.temp_allocator)
+	encoded, encoded_ok := persisted_query_request(
+		"queryArtistOverview",
+		ARTIST_OVERVIEW_HASH,
+		variables,
 	)
-	request.extensions.query = {
-		version = 1,
-		hash    = ARTIST_OVERVIEW_HASH,
-	}
-	encoded, err := json.marshal(request, allocator = context.temp_allocator)
-	if err != nil {return false}
+	if !encoded_ok {return false}
 	body, status, fetched := http.json_request(
 		"POST",
-		RELEASE_FEED_ADDRESS,
+		PATHFINDER_QUERY_ADDRESS,
 		string(encoded),
 		{bearer = access, limit = ARTIST_METADATA_LIMIT, cancel = cancel},
 		reuse,

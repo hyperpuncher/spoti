@@ -12,7 +12,6 @@ import "core:time"
 
 RELEASE_PAGE_SIZE :: 50
 RELEASE_INVALID_RESPONSE :: -4
-RELEASE_FEED_ADDRESS :: "https://api-partner.spotify.com/pathfinder/v2/query"
 // Verified with the streaming grant. Spotify can replace this query hash.
 RELEASE_FEED_HASH :: "3b53dede3c6054e8b7c962dd280eb6761c5d1c82b06b039f4110d76a62b4966b"
 
@@ -201,32 +200,16 @@ parse_new_releases :: proc(
 }
 
 release_feed_request :: proc(offset: int) -> (body: []u8, ok: bool) {
-	request: struct {
-		operation_name: string `json:"operationName"`,
-		variables:      struct {
-			offset, limit: int,
-			only_unplayed: bool `json:"onlyUnPlayedItems"`,
-			content_types: [1]string `json:"includedContentTypes"`,
-		},
-		extensions:     struct {
-			query: struct {
-				version: int,
-				hash:    string `json:"sha256Hash"`,
-			} `json:"persistedQuery"`,
-		},
-	}
-	request.operation_name = "queryWhatsNewFeed"
-	request.variables = {
+	variables := struct {
+		offset, limit: int,
+		only_unplayed: bool `json:"onlyUnPlayedItems"`,
+		content_types: [1]string `json:"includedContentTypes"`,
+	} {
 		offset        = offset,
 		limit         = RELEASE_PAGE_SIZE,
 		content_types = {"ALBUM"},
 	}
-	request.extensions.query = {
-		version = 1,
-		hash    = RELEASE_FEED_HASH,
-	}
-	encoded, err := json.marshal(request, allocator = context.temp_allocator)
-	return encoded, err == nil
+	return persisted_query_request("queryWhatsNewFeed", RELEASE_FEED_HASH, variables)
 }
 
 // The cache is account-specific and stores only validated feed responses.
@@ -261,7 +244,7 @@ fetch_release_feed :: proc(
 	if !encoded {result.status = RELEASE_INVALID_RESPONSE; return}
 	body, status, fetched := http.json_request(
 		"POST",
-		RELEASE_FEED_ADDRESS,
+		PATHFINDER_QUERY_ADDRESS,
 		string(request),
 		{
 			bearer = access,

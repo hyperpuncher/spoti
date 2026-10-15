@@ -4,10 +4,31 @@ package library
 import oauth "../oauth"
 import session "../session"
 import "base:runtime"
+import "core:encoding/json"
 import "core:mem/virtual"
 import "core:sync"
 
 PLAYLIST_AUTH_REQUIRED :: -3
+PATHFINDER_QUERY_ADDRESS :: "https://api-partner.spotify.com/pathfinder/v2/query"
+
+persisted_query_request :: proc(operation, hash: string, variables: $T) -> ([]u8, bool) {
+	request := struct {
+		operation_name: string `json:"operationName"`,
+		variables:      T,
+		extensions:     struct {
+			query: struct {
+				version: int,
+				hash:    string `json:"sha256Hash"`,
+			} `json:"persistedQuery"`,
+		},
+	} {
+		operation_name = operation,
+		variables = variables,
+		extensions = {query = {version = 1, hash = hash}},
+	}
+	encoded, err := json.marshal(request, allocator = context.temp_allocator)
+	return encoded, err == nil
+}
 
 // interactive=false never starts browser approval. It reuses a live or
 // saved grant, or waits for a grant another worker is already obtaining.
