@@ -6,6 +6,7 @@ import "core:sync/chan"
 import "core:testing"
 import "core:thread"
 import library "spotify/library"
+import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
@@ -89,6 +90,18 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 	renderer := sdl.CreateSoftwareRenderer(surface)
 	if !testing.expect(t, renderer != nil) {return}
 	defer sdl.DestroyRenderer(renderer)
+	fade_state := ui.State {
+		renderer = renderer,
+	}
+	load_fades(&fade_state, &textures)
+	for key in ([]u64{textures.fade_top, textures.fade_bottom, textures.hero_fade, textures.fade_detail_top, textures.fade_detail_bottom}) {
+		texture := textures.by_key[key]
+		if !testing.expect(t, key != 0 && texture != nil) {continue}
+		r, g, b: u8
+		testing.expect(t, sdl.GetTextureColorMod(texture, &r, &g, &b))
+		color := key == textures.fade_top || key == textures.fade_bottom ? SIDEBAR : BG
+		testing.expect(t, r == u8(color.r) && g == u8(color.g) && b == u8(color.b))
+	}
 	banner_texture := sdl.CreateTextureFromSurface(renderer, surface)
 	if !testing.expect(t, banner_texture != nil) {return}
 	defer sdl.DestroyTexture(banner_texture)

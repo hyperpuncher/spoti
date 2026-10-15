@@ -37,36 +37,20 @@ Textures :: struct {
 // address like covers and freed with them. Tinted per surface at upload:
 // the sidebar pair follows SIDEBAR, the detail pair follows BG.
 load_fades :: proc(state: ^ui.State, textures: ^Textures) {
-	top := ui.make_fade_texture(state, false)
-	if top != nil {
-		_ = sdl.SetTextureColorMod(top, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
-		textures.by_key[u64(uintptr(top))] = top
-		textures.fade_top = u64(uintptr(top))
-	}
-	bottom := ui.make_fade_texture(state, true)
-	if bottom != nil {
-		_ = sdl.SetTextureColorMod(bottom, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
-		textures.by_key[u64(uintptr(bottom))] = bottom
-		textures.fade_bottom = u64(uintptr(bottom))
-	}
-	hero_fade := ui.make_fade_texture(state, true, smooth = true)
-	if hero_fade != nil {
-		_ = sdl.SetTextureColorMod(hero_fade, u8(BG.r), u8(BG.g), u8(BG.b))
-		textures.hero_fade = u64(uintptr(hero_fade))
-		textures.by_key[textures.hero_fade] = hero_fade
-	}
-	detail_top := ui.make_fade_texture(state, false)
-	if detail_top != nil {
-		_ = sdl.SetTextureColorMod(detail_top, u8(BG.r), u8(BG.g), u8(BG.b))
-		textures.by_key[u64(uintptr(detail_top))] = detail_top
-		textures.fade_detail_top = u64(uintptr(detail_top))
-	}
-	detail_bottom := ui.make_fade_texture(state, true)
-	if detail_bottom != nil {
-		_ = sdl.SetTextureColorMod(detail_bottom, u8(BG.r), u8(BG.g), u8(BG.b))
-		textures.by_key[u64(uintptr(detail_bottom))] = detail_bottom
-		textures.fade_detail_bottom = u64(uintptr(detail_bottom))
-	}
+	textures.fade_top = load_fade(state, textures, false)
+	textures.fade_bottom = load_fade(state, textures, true)
+	textures.hero_fade = load_fade(state, textures, true, smooth = true)
+	textures.fade_detail_top = load_fade(state, textures, false)
+	textures.fade_detail_bottom = load_fade(state, textures, true)
+	retint_fades(textures)
+}
+
+load_fade :: proc(state: ^ui.State, textures: ^Textures, flip: bool, smooth: bool = false) -> u64 {
+	texture := ui.make_fade_texture(state, flip, smooth)
+	if texture == nil {return 0}
+	key := u64(uintptr(texture))
+	textures.by_key[key] = texture
+	return key
 }
 
 // Recolors the baked fade strips after a theme switch; the ramp pixels
