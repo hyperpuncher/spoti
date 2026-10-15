@@ -59,17 +59,19 @@ app_connect_publish :: proc(app: ^App) {
 		repeat_context = connect_repeat_context,
 		repeat_track   = repeat,
 	}
+	queue_window: []Play_Item
 	if active && play_index >= 0 && play_index < len(play_queue) {
 		first := max(0, play_index - connect.MAX_TRACKS / 2)
 		last := min(len(play_queue), first + connect.MAX_TRACKS)
 		first = max(0, last - connect.MAX_TRACKS)
 		snapshot.index = play_index - first
-		snapshot.tracks = make([dynamic]string, 0, last - first, context.temp_allocator)
-		for item in play_queue[first:last] {append(&snapshot.tracks, item.uri)}
-		snapshot.queue_revision = connect_queue_revision(play_queue[first:last])
+		queue_window = play_queue[first:last]
+		snapshot.queue_revision = connect_queue_revision(queue_window)
 	}
 	if connect_state_equal(connect_snapshot, snapshot) &&
 	   now - connect_published_at < 5_000_000_000 {return}
+	snapshot.tracks = make([dynamic]string, len(queue_window), context.temp_allocator)
+	for item, index in queue_window {snapshot.tracks[index] = item.uri}
 	if !connect.publish(&connect_client, snapshot) {return}
 	connect.free_snapshot(&connect_snapshot)
 	connect_snapshot = snapshot
