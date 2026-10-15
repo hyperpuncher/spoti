@@ -495,9 +495,16 @@ start :: proc(client: ^Client) -> (ok: bool) {
 	client.state = .Authorizing
 	client.remaining_initial = 3
 	for kind in ([]Kind{Kind.Playlists, Kind.Albums, Kind.Artists}) {
-		// Paint the cache now so the first frame is never blank, then let
-		// the worker replace it with a fresh read behind the scenes.
-		if page, _, cached := fetch_index("", kind, cache_only = true); cached {
+		// Paint the matching cached source, then refresh it in the worker.
+		// A Web API playlist snapshot must not precede the native rootlist.
+		page: Page
+		cached := false
+		if kind == .Playlists {
+			page, cached = cached_rootlist()
+		} else {
+			page, _, cached = fetch_index("", kind, cache_only = true)
+		}
+		if cached {
 			destination := &client.pages[kind]
 			free_page(destination)
 			destination^ = page

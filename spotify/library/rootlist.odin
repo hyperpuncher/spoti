@@ -10,6 +10,30 @@ import "core:net"
 import "core:strings"
 
 ROOTLIST_PAGE_SIZE :: 36
+ROOTLIST_ACCOUNT_KEY :: "rootlist-account"
+
+// The account marker locates the same cached native page before authorization.
+// It contains no credential; the response itself keeps its existing cache key.
+cached_rootlist :: proc() -> (page: Page, ok: bool) {
+	account, known := cache_read("api", ROOTLIST_ACCOUNT_KEY, API_STALE)
+	defer delete(account)
+	if !known || !safe_id(string(account[:]), account = true) {return}
+	body, found := cache_read("api", rootlist_address(string(account[:]), 0), API_STALE)
+	defer delete(body)
+	if !found {return}
+	return parse_rootlist(body[:], string(account[:]), 0)
+}
+
+rootlist_address :: proc(account: string, offset: int) -> string {
+	encoded := net.percent_encode(account, context.temp_allocator)
+	return fmt.aprintf(
+		"https://spclient.wg.spotify.com/playlist/v2/user/%s/rootlist?decorate=revision,attributes,length,owner,capabilities,status_code&from=%d&length=%d",
+		encoded,
+		offset,
+		ROOTLIST_PAGE_SIZE,
+		allocator = context.temp_allocator,
+	)
+}
 
 fetch_rootlist :: proc(
 	access, account: string,
@@ -22,17 +46,9 @@ fetch_rootlist :: proc(
 	ok: bool,
 ) {
 	if !safe_id(account, account = true) || offset < 0 || offset > 1_000_000 {return}
-	encoded := net.percent_encode(account, context.temp_allocator)
-	address := fmt.aprintf(
-		"https://spclient.wg.spotify.com/playlist/v2/user/%s/rootlist?decorate=revision,attributes,length,owner,capabilities,status_code&from=%d&length=%d",
-		encoded,
-		offset,
-		ROOTLIST_PAGE_SIZE,
-		allocator = context.temp_allocator,
-	)
 	body, code, fetched := api_get(
 		access,
-		address,
+		rootlist_address(account, offset),
 		1024 * 1024,
 		reuse,
 		ttl = PAGE_TTL,
@@ -41,10 +57,12 @@ fetch_rootlist :: proc(
 	defer delete(body)
 	if !fetched || code != 200 {return {}, code, false}
 	page, ok = parse_rootlist(body[:], account, offset)
+	if ok && offset == 0 {cache_write("api", ROOTLIST_ACCOUNT_KEY, transmute([]u8)account)}
 	return page, ok ? 200 : PLAYLIST_INVALID_RESPONSE, ok
 }
 
-parse_rootlist :: proc(body: []u8, account: string, offset: int) -> (page: Page, ok: bool) {
+parse_rootlist :: proc(body: []u8, account: string, offset: int) -> (result: Page, ok: bool) {
+	page: Page
 	if offset < 0 || offset > 1_000_000 {return}
 	if virtual.arena_init_growing(&page.arena) != nil {return}
 	defer if !ok {free_page(&page)}
@@ -108,7 +126,7 @@ parse_rootlist :: proc(body: []u8, account: string, offset: int) -> (page: Page,
 	page.total, page.next_offset, page.has_more = int(total), offset + len(items), truncated != 0
 	for &entry in page.items {entry.saved = true}
 	ok = true
-	return
+	return page, true
 }
 
 // ListAttributes is shared by rootlist decorations and playlist headers.
