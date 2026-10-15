@@ -2,18 +2,22 @@
 // platforms install no-op stubs until their own media APIs are wired in.
 package mpris
 
+Status :: struct {
+	playing:      bool,
+	shuffle:      bool,
+	repeat:       bool,
+	can_seek:     bool,
+	can_next:     bool,
+	can_previous: bool,
+	volume:       f32,
+}
+
 Now_Playing :: struct {
 	title:        string,
 	artist:       string,
 	duration_ms:  int,
 	position_ms:  int,
-	playing:      bool,
-	shuffle:      bool,
-	repeat:       bool,
-	volume:       f32,
-	can_seek:     bool,
-	can_next:     bool,
-	can_previous: bool,
+	using status: Status,
 }
 
 // Remote control from the desktop shell or playerctl. Seek carries a relative

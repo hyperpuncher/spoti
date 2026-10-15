@@ -52,17 +52,6 @@ poll :: proc() -> (command: Command, position_ms: int, ok: bool) {
 	return Command(numeric_command), int(numeric_value / 1000), true
 }
 
-@(private = "file")
-Status :: struct {
-	playing:      bool,
-	shuffle:      bool,
-	repeat:       bool,
-	can_seek:     bool,
-	can_next:     bool,
-	can_previous: bool,
-	volume:       f32,
-}
-
 last_title, last_artist: string
 last_duration_ms: int
 last_status: Status
@@ -86,17 +75,7 @@ update :: proc(now: Now_Playing) {
 		last_artist = strings.clone(now.artist)
 		last_duration_ms = now.duration_ms
 	}
-	status := Status {
-		playing      = now.playing,
-		shuffle      = now.shuffle,
-		repeat       = now.repeat,
-		can_seek     = now.can_seek,
-		can_next     = now.can_next,
-		can_previous = now.can_previous,
-		volume       = now.volume,
-	}
-	status_changed := !have_last || status != last_status
-	if status_changed {
+	if !have_last || now.status != last_status {
 		spoti_mpris_set_status(
 			i32(now.playing),
 			i32(now.shuffle),
@@ -106,7 +85,7 @@ update :: proc(now: Now_Playing) {
 			i32(now.can_previous),
 			f64(now.volume),
 		)
-		last_status = status
+		last_status = now.status
 	}
 	spoti_mpris_set_position(i64(now.position_ms) * 1000)
 	have_last = true
