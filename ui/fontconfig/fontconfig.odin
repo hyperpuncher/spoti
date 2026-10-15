@@ -4,7 +4,11 @@ package fontconfig
 import "core:c"
 import "core:strings"
 
-foreign import lib "system:fontconfig"
+when ODIN_OS == .Windows {
+	foreign import lib "system:fontconfig.lib"
+} else {
+	foreign import lib "system:fontconfig"
+}
 
 WEIGHT_REGULAR :: 80
 WEIGHT_MEDIUM :: 100

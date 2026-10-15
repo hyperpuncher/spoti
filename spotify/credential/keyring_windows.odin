@@ -6,7 +6,7 @@ package credential
 import "core:strings"
 import win "core:sys/windows"
 
-foreign import advapi32 "system:advapi32"
+foreign import advapi32 "system:advapi32.lib"
 
 CREDENTIALW :: struct {
 	flags:                u32,

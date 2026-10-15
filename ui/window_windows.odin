@@ -6,8 +6,8 @@ import "core:fmt"
 import win "core:sys/windows"
 import sdl "vendor:sdl3"
 
-foreign import dwm "system:dwmapi"
-foreign import comctl "system:comctl32"
+foreign import dwm "system:dwmapi.lib"
+foreign import comctl "system:comctl32.lib"
 
 foreign dwm {
 	DwmDefWindowProc :: proc "system" (hwnd: win.HWND, message: win.UINT, wparam: win.WPARAM, lparam: win.LPARAM, result: ^win.LRESULT) -> win.BOOL ---

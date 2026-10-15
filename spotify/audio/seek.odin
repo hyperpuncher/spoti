@@ -11,7 +11,11 @@ import "core:sync"
 SPOTIFY_OGG_OFFSET :: 0xa7
 RANGE_SIZE :: 64 * 1024
 
-foreign import vorbisfile {"../../build/vorbisfile.a", "system:vorbisfile"}
+when ODIN_OS == .Windows {
+	foreign import vorbisfile {"../../build/vorbisfile.a", "system:vorbisfile.lib"}
+} else {
+	foreign import vorbisfile {"../../build/vorbisfile.a", "system:vorbisfile"}
+}
 Vorbis_File :: struct {}
 Vorbis_Callbacks :: struct {
 	read:  proc "c" (_: rawptr, _: c.size_t, _: c.size_t, _: rawptr) -> c.size_t,
