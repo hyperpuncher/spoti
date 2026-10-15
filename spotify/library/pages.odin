@@ -194,8 +194,10 @@ cover_url :: proc(images: []Image, size: Cover_Size = .Card) -> string {
 
 // Artist names joined into one display string, allocated on `allocator`.
 joined_artists :: proc(artists: []Artist, allocator: runtime.Allocator) -> string {
+	length := max(0, len(artists) - 1) * 2
+	for artist in artists {length += len(artist.name)}
 	builder: strings.Builder
-	strings.builder_init(&builder, allocator)
+	strings.builder_init(&builder, 0, length, allocator)
 	for artist, index in artists {
 		if index > 0 {strings.write_string(&builder, ", ")}
 		strings.write_string(&builder, artist.name)
