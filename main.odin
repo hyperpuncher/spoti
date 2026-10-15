@@ -908,6 +908,8 @@ main :: proc() {
 	}
 }
 
+PLAYBACK_FRAME_NS :: u64(1_000_000_000 / 30)
+
 // Event wait plus the drain switch. Fills the frame flags the later stages
 // read and reports whether anything arrived plus whether fades animate.
 app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
@@ -923,14 +925,20 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		(textures.fade_detail_bottom_alpha != 0 && textures.fade_detail_bottom_alpha != 1)
 	// Anything animating renders at the display rate, so the idle poll
 	// below can never throttle a scroll glide or a button spring.
-	if stage == .Playing ||
-	   autoscroll_moving ||
+	if autoscroll_moving ||
 	   grid_smooth.active ||
 	   detail_smooth.active ||
+	   picker_smooth.active ||
 	   device_smooth.active ||
+	   resizing ||
+	   dragging ||
+	   seek_dragging ||
+	   volume_dragging ||
+	   scrollbar_drag.container != "" ||
 	   fx_animating ||
 	   fades_animating ||
-	   first_frame {
+	   first_frame ||
+	   pending_redraw {
 		wait_ms = 0
 	} else {
 		// Idle work still polls for results so they appear promptly.
@@ -951,6 +959,16 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 			if pending {wait_ms = 40; break}
 		}
 		if preload_worker != nil && stage != .Playing {wait_ms = 40}
+	}
+	// Only steady playback uses 30 fps. Count from the last layout start,
+	// so rendering and presentation time are part of the frame budget.
+	if stage == .Playing && wait_ms != 0 {
+		elapsed := sdl.GetTicksNS() - last
+		remaining_ms := i32(0)
+		if elapsed < PLAYBACK_FRAME_NS {
+			remaining_ms = i32((PLAYBACK_FRAME_NS - elapsed + 999_999) / 1_000_000)
+		}
+		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
 	}
 	if (connect_client.worker != nil && WAKE_EVENT == 0) ||
 	   emoji_poll ||

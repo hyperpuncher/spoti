@@ -113,6 +113,10 @@ transfer completion is handled before the playback stage.
 
 ## rendering and caching
 
+steady playback redraws at up to 30 fps. input events wake the loop at once;
+scrolling, dragging, and UI animations use the display rate. paused views do
+not redraw continuously when no other work needs a frame.
+
 virtualize grids and track rows with full-height spacers. Clay can cull draw
 commands but still processes layout, and only supports 100 clip containers.
 keep offscreen rows out of layout and clip pointer hits to their visible area.
