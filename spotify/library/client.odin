@@ -601,8 +601,8 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 			next.subtitle = strings.clone(preview.subtitle, allocator)
 			next.year = strings.clone(preview.year, allocator)
 			next.image = strings.clone(preview.image, allocator)
-			next.image_preview = strings.clone(preview.image, allocator)
-			next.image_small = strings.clone(preview.image, allocator)
+			// The placeholder URLs share one arena-owned string.
+			next.image_preview, next.image_small = next.image, next.image
 			next.total = preview.total
 			switch source {
 			case .Playlist, .Liked:
@@ -831,22 +831,11 @@ sync_library_membership :: proc(client: ^Client, source: Source, id: string, lik
 			}
 			return
 		}
-		detail := client.detail
+		entry := clone_detail_entry(client.detail, uri, allocator)
+		entry.saved = true
 		// The default order is Spotify's, which lists newest first, so a
 		// just-liked card goes back to the front where the heart was clicked.
-		inject_at(
-			&page.items,
-			0,
-			Entry {
-				name = strings.clone(detail.name, allocator),
-				uri = strings.clone(uri, allocator),
-				image = strings.clone(detail.image, allocator),
-				subtitle = strings.clone(detail.subtitle, allocator),
-				year = strings.clone(detail.year, allocator),
-				saved = true,
-				total = detail.total,
-			},
-		)
+		inject_at(&page.items, 0, entry)
 		page.total += 1
 	} else {
 		for entry, index in page.items {

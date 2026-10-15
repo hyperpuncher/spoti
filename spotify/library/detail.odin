@@ -106,6 +106,23 @@ move_detail :: proc(destination, source: ^Detail) {
 	source^ = {}
 }
 
+// History and membership updates own the same collection header fields.
+// The URI can be a temporary view; clone_entry copies every string.
+clone_detail_entry :: proc(detail: Detail, uri: string, allocator: runtime.Allocator) -> Entry {
+	return clone_entry(
+		Entry {
+			name = detail.name,
+			uri = uri,
+			image = detail.image,
+			subtitle = detail.subtitle,
+			year = detail.year,
+			saved = detail.liked,
+			total = detail.total,
+		},
+		allocator,
+	)
+}
+
 clone_row :: proc(row: Track_Row, allocator: runtime.Allocator) -> Track_Row {
 	return {
 		uri = strings.clone(row.uri, allocator),

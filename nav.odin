@@ -40,16 +40,9 @@ nav_capture :: proc(
 	}
 	detail := client.detail
 	if detail.ready {
-		state.detail = library.clone_entry(
-			library.Entry {
-				name = detail.name,
-				uri = detail_card_uri(detail),
-				image = detail.image,
-				subtitle = detail.subtitle,
-				year = detail.year,
-				saved = detail.liked,
-				total = detail.total,
-			},
+		state.detail = library.clone_detail_entry(
+			detail,
+			detail_card_uri(detail),
 			context.allocator,
 		)
 	}
@@ -63,10 +56,6 @@ nav_free_state :: proc(state: Nav_State) {
 	delete(state.detail.image)
 	delete(state.detail.subtitle)
 	delete(state.detail.year)
-	delete(state.detail.album)
-	delete(state.detail.album_uri)
-	delete(state.detail.first_artist)
-	delete(state.detail.artist_uri)
 }
 
 nav_drop_forward :: proc(nav: ^Nav) {
