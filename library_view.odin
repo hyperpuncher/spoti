@@ -1264,7 +1264,8 @@ detail_rows_ready :: proc(client: ^library.Client) -> bool {
 
 // Counts share one grouped format; numeric rows use the monospace face.
 count_text :: proc(value: i64) -> string {
-	digits := fmt.aprintf("%d", max(0, value), allocator = context.temp_allocator)
+	buffer: [20]u8
+	digits := fmt.bprintf(buffer[:], "%d", max(0, value))
 	out := make([]u8, len(digits) + (len(digits) - 1) / 3, context.temp_allocator)
 	at := 0
 	for ch, i in transmute([]u8)digits {

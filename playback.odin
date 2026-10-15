@@ -359,6 +359,6 @@ duration_text :: proc(duration_ms: int, buffer: []u8) -> string {
 }
 
 duration_text_alloc :: proc(duration_ms: int) -> string {
-	seconds := max(0, duration_ms) / 1000
-	return fmt.aprintf("%d:%02d", seconds / 60, seconds % 60, allocator = context.temp_allocator)
+	buffer: [32]u8
+	return strings.clone(duration_text(duration_ms, buffer[:]), context.temp_allocator)
 }
