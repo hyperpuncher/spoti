@@ -35,15 +35,21 @@ parse_access_points :: proc(body: []u8) -> (addresses: []string, ok: bool) {
 	return reply.accesspoint, true
 }
 
-connect :: proc(cancel: ^bool = nil) -> (socket: net.TCP_Socket, result: Resolve_Result) {
+connect :: proc(
+	cancel: ^bool = nil,
+	fetch: type_of(http.get) = http.get,
+) -> (
+	socket: net.TCP_Socket,
+	result: Resolve_Result,
+) {
 	if cancel != nil && sync.atomic_load(cancel) {return {}, .Cancelled}
-	body, status, fetched := http.get(
+	body, status, fetched := fetch(
 		"https://apresolve.spotify.com/?type=accesspoint",
-		{limit = 16 * 1024},
+		{limit = 16 * 1024, cancel = cancel},
 	)
-	if !fetched {return {}, .Unavailable}
 	defer delete(body)
-	if status != 200 {return {}, .Unavailable}
+	if cancel != nil && sync.atomic_load(cancel) {return {}, .Cancelled}
+	if !fetched || status != 200 {return {}, .Unavailable}
 	addresses, valid := parse_access_points(body[:])
 	if !valid {return {}, .Invalid_Response}
 	for address in addresses {

@@ -1,5 +1,7 @@
 package ap
 
+import http "../http"
+import "core:sync"
 import "core:testing"
 
 @(test)
@@ -16,5 +18,16 @@ access_point_response_preserves_priority_and_rejects_invalid_destinations :: pro
 	}
 	cancelled := true
 	_, result := connect(&cancelled)
+	testing.expect_value(t, result, Resolve_Result.Cancelled)
+	cancelled = false
+	_, result = connect(
+	&cancelled,
+	proc(_: string, options: http.Options, _: rawptr) -> ([dynamic]u8, int, bool) {
+		if options.cancel != nil {sync.atomic_store(options.cancel, true)}
+		// The resolver must free even an interrupted response and never dial it.
+		return make([dynamic]u8, 4), 200, true
+	},
+	)
+	testing.expect(t, cancelled)
 	testing.expect_value(t, result, Resolve_Result.Cancelled)
 }
