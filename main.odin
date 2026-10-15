@@ -2464,15 +2464,10 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			accepted = !remote_control && duration_ms > 0
 			if accepted {mpris_seek_ms, mpris_seek_requested = event.position, true}
 		case .Next, .Previous:
-			if !remote_control && event.action == .Previous && displayed_ms >= 3000 {
-				mpris_seek_ms, mpris_seek_requested = 0, true
-			} else {
-				accepted =
-					!remote_control &&
-					play_index >= 0 &&
-					(event.action == .Next ? play_index + 1 < len(play_queue) : play_index > 0)
-				if accepted {mpris_delta = event.action == .Next ? 1 : -1}
-			}
+			accepted =
+				!remote_control &&
+				(event.action == .Next ? play_index >= 0 && play_index + 1 < len(play_queue) : play_index > 0 || displayed_ms >= PREVIOUS_RESTART_MS)
+			if accepted {mpris_delta = event.action == .Next ? 1 : -1}
 		case .Volume:
 			volume = event.volume
 			app_state.volume = volume
@@ -2496,6 +2491,19 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		}
 		connect.acknowledge(&connect_client, event, accepted)
 		connect.free_event(event)
+	}
+	track_delta = mpris_delta
+	if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
+	if clicked && hit("footer_next", mouse_click) {track_delta = 1}
+	if remote_control && track_delta != 0 {
+		_ = library.send_player_command(&library_client, track_delta > 0 ? .Next : .Previous)
+		track_delta = 0
+	}
+	// All local previous commands share the seek path and preserve pause state.
+	if track_delta < 0 && displayed_ms >= PREVIOUS_RESTART_MS {
+		track_delta += 1
+		mpris_seek_ms, mpris_seek_requested = 0, true
+		displayed_ms = 0 // a second press can now select the previous track
 	}
 	seek_requested = mpris_seek_requested
 	if mpris_seek_requested {
@@ -2548,13 +2556,6 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		state_note_recent(&app_state, detail_card_uri(library_client.detail))
 		order_dirty = true
 		state_dirty = true
-	}
-	track_delta = mpris_delta
-	if clicked && hit("footer_previous", mouse_click) {track_delta = -1}
-	if clicked && hit("footer_next", mouse_click) {track_delta = 1}
-	if remote_control && track_delta != 0 {
-		_ = library.send_player_command(&library_client, track_delta > 0 ? .Next : .Previous)
-		track_delta = 0
 	}
 	if clicked && hit("footer_title", mouse_click) {
 		if !link_album {
@@ -2687,7 +2688,8 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				volume = volume,
 				can_seek = seek_enabled,
 				can_next = play_index >= 0 && play_index + 1 < len(play_queue),
-				can_previous = play_index > 0,
+				can_previous = play_index > 0 ||
+				!remote_control && displayed_ms >= PREVIOUS_RESTART_MS,
 			},
 		)
 	}

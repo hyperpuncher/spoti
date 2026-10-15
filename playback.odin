@@ -12,6 +12,8 @@ import library "spotify/library"
 import player "spotify/player"
 import session "spotify/session"
 
+PREVIOUS_RESTART_MS :: 3000
+
 Stage :: enum {
 	Idle,
 	Signing_In,
