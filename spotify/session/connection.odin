@@ -139,7 +139,7 @@ poll_connection :: proc(c: ^AP_Connection, stop: ^bool) {
 		if socket_readable(c.socket) {
 			command, payload, ok := ap.read_packet(c.socket, &c.receiver, stop)
 			defer {crypto.zero_explicit(raw_data(payload), len(payload)); delete(payload)}
-			if !ok {c.broken = true} else {_ = handle_keep_alive(c, command, payload)}
+			if !ok {c.broken = true} else {_ = handle_keep_alive(c, command, payload[:])}
 		}
 	}
 	if c.broken {close_connection(c)}
@@ -194,7 +194,7 @@ connect_connection :: proc(c: ^AP_Connection, access: string, cancel: ^bool) -> 
 	command, response, received := ap.read_packet(socket, &c.receiver, cancel)
 	defer {crypto.zero_explicit(raw_data(response), len(response)); delete(response)}
 	if !received {fmt.eprintln("AP login response missing or invalid MAC"); return false}
-	username, failure, kind := ap.parse_login_reply(command, response)
+	username, failure, kind := ap.parse_login_reply(command, response[:])
 	if kind != .Welcome {fmt.eprintln("AP login refused or invalid:", failure); return false}
 	c.username = strings.clone(username)
 	c.connected, c.broken = true, false
@@ -205,12 +205,12 @@ connect_connection :: proc(c: ^AP_Connection, access: string, cancel: ^bool) -> 
 	return true
 }
 
-read_connection_reply :: proc(c: ^AP_Connection, cancel: ^bool) -> (u8, []u8, bool) {
+read_connection_reply :: proc(c: ^AP_Connection, cancel: ^bool) -> (u8, [dynamic]u8, bool) {
 	for _ in 0 ..< 64 {
 		if cancelled(cancel) || !service_keep_alive(c) {return 0, nil, false}
 		command, payload, ok := ap.read_packet(c.socket, &c.receiver, cancel)
 		if !ok {c.broken = true; return 0, nil, false}
-		if !handle_keep_alive(c, command, payload) {return command, payload, true}
+		if !handle_keep_alive(c, command, payload[:]) {return command, payload, true}
 		crypto.zero_explicit(raw_data(payload), len(payload))
 		delete(payload)
 	}

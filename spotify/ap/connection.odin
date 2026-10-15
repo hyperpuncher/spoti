@@ -95,31 +95,28 @@ handshake :: proc(socket: net.TCP_Socket, cancel: ^bool = nil) -> (Session_Keys,
 }
 
 // Authenticated packet reader. Never return a command or payload unless its
-// Shannon MAC verifies. Callers must delete the returned allocation.
+// Shannon MAC verifies. The caller owns the returned buffer.
 read_packet :: proc(
 	socket: net.TCP_Socket,
 	cipher: ^Packet_Cipher,
 	cancel: ^bool = nil,
 ) -> (
 	command: u8,
-	payload: []u8,
+	payload: [dynamic]u8,
 	ok: bool,
 ) {
 	header: [3]u8
 	if !read_full(socket, header[:], cancel) {return 0, nil, false}
 	cmd, length, valid := open_header(cipher, header)
 	if !valid {return 0, nil, false}
-	body := make([]u8, length + 4)
-	if !read_full(socket, body, cancel) {delete(body); return 0, nil, false}
-	if !open_payload(cipher, body[:length], body[length:]) {
+	body := make([dynamic]u8, length + 4)
+	defer if !ok {
 		crypto.zero_explicit(raw_data(body), len(body))
 		delete(body)
-		return 0, nil, false
 	}
-	// Copy the plaintext to a right-sized allocation (body also held the MAC).
-	plaintext := make([]u8, length)
-	copy(plaintext, body[:length])
-	crypto.zero_explicit(raw_data(body), len(body))
-	delete(body)
-	return cmd, plaintext, true
+	if !read_full(socket, body[:], cancel) {return 0, nil, false}
+	if !open_payload(cipher, body[:length], body[length:]) {return 0, nil, false}
+	// Keep the allocation capacity so delete still releases the complete buffer.
+	resize(&body, length)
+	return cmd, body, true
 }

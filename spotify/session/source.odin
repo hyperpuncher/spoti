@@ -256,7 +256,7 @@ request_audio_key :: proc(
 		defer {crypto.zero_explicit(raw_data(reply), len(reply)); delete(reply)}
 		if command != 0x0d && command != 0x0e {continue}
 		result: ap.Audio_Key_Result
-		key, result = ap.read_audio_key(command, reply, sequence)
+		key, result = ap.read_audio_key(command, reply[:], sequence)
 		if result != .Granted {fmt.eprintln("audio key refused or invalid"); return}
 		if cancelled(cancel) {return}
 		return key, true
