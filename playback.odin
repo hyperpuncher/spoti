@@ -33,20 +33,14 @@ Play_Item :: struct {
 	order:        int,
 }
 
-// Deep-copies row links (arena) onto the heap queue; empty stays nil so
-// plain text never pays for links.
-free_artist_links :: proc(links: []library.Artist_Link) {
-	for link in links {
-		delete(link.name)
-		delete(link.uri)
-	}
-	delete(links)
-}
-
 free_play_item :: proc(item: Play_Item) {
 	delete(item.uri)
 	delete(item.artist)
-	free_artist_links(item.artist_links)
+	for link in item.artist_links {
+		delete(link.name)
+		delete(link.uri)
+	}
+	delete(item.artist_links)
 	delete(item.album)
 	delete(item.album_uri)
 	delete(item.cover)
@@ -98,34 +92,30 @@ append_play_item :: proc(
 	)
 }
 
-build_play_queue :: proc(
-	items: ^[dynamic]Play_Item,
-	rows: []library.Track_Row,
-	fallback_cover: string = "",
-) {
+build_play_queue :: proc(items: ^[dynamic]Play_Item, rows: []$T, fallback_cover: string = "") {
 	free_play_queue(items)
 	items^ = make([dynamic]Play_Item, 0, len(rows))
-	for row, index in rows {append_play_item(items, row, index, fallback_cover)}
-}
-
-// Queue snapshots and live playback own separate copies of row metadata.
-clone_play_queue :: proc(items: []Play_Item) -> [dynamic]Play_Item {
-	cloned := make([dynamic]Play_Item, 0, len(items))
-	for item in items {
-		append_play_item(
-			&cloned,
-			library.Track_Row {
-				uri = item.uri,
-				artists = item.artist,
-				artist_links = item.artist_links,
-				album = item.album,
+	for item, index in rows {
+		row: library.Track_Row
+		when T == library.Entry {
+			first: [1]library.Artist_Link
+			row = {
+				uri       = item.uri,
+				artists   = item.subtitle,
+				album     = item.album,
 				album_uri = item.album_uri,
-			},
-			item.order,
-			item.cover,
-		)
+				image     = item.image,
+			}
+			if item.first_artist != "" || item.artist_uri != "" {
+				first[0] = {
+					name = item.first_artist,
+					uri  = item.artist_uri,
+				}
+				row.artist_links = first[:]
+			}
+		} else {row = item}
+		append_play_item(items, row, index, fallback_cover)
 	}
-	return cloned
 }
 
 app_restore_play_queue :: proc(app: ^App) {
@@ -134,7 +124,7 @@ app_restore_play_queue :: proc(app: ^App) {
 	if played.queue_index < 0 || played.queue_index >= len(played.queue) {return}
 	if played.queue[played.queue_index].uri != played.track {return}
 	free_play_queue(&app.play_queue)
-	app.play_queue = clone_play_queue(played.queue[:])
+	app.play_queue, played.queue = played.queue, nil
 	app.play_index = played.queue_index
 	replace_string(&app.queue_detail, played.collection)
 	app.queue_restore_pending = played.collection != ""
@@ -191,35 +181,6 @@ append_play_queue_tail :: proc(
 	fallback_cover: string = "",
 ) {
 	for row in rows {append_play_item(items, row, len(items), fallback_cover)}
-}
-
-// Search tracks arrive as cards, not detail rows. The subtitle carries the
-// artists and the image carries the cover, so a queue builds directly.
-build_play_queue_from_entries :: proc(items: ^[dynamic]Play_Item, entries: []library.Entry) {
-	free_play_queue(items)
-	items^ = make([dynamic]Play_Item, 0, len(entries))
-	for entry, index in entries {
-		links: []library.Artist_Link
-		if len(entry.first_artist) > 0 || len(entry.artist_uri) > 0 {
-			links = make([]library.Artist_Link, 1)
-			links[0] = library.Artist_Link {
-				name = strings.clone(entry.first_artist),
-				uri  = strings.clone(entry.artist_uri),
-			}
-		}
-		append(
-			items,
-			Play_Item {
-				uri = strings.clone(entry.uri),
-				artist = strings.clone(entry.subtitle),
-				artist_links = links,
-				album = strings.clone(entry.album),
-				album_uri = strings.clone(entry.album_uri),
-				cover = strings.clone(entry.image),
-				order = index,
-			},
-		)
-	}
 }
 
 // Stable ordinals distinguish repeated tracks and restore the original order.
@@ -381,7 +342,6 @@ cancel_worker :: proc(queue: chan.Chan(player.Packet), cancel: ^bool) {
 
 release_worker :: proc(worker: ^thread.Thread, queue: chan.Chan(player.Packet), cancel: ^bool) {
 	cancel_worker(queue, cancel)
-	thread.join(worker)
 	thread.destroy(worker)
 	for packet in chan.try_recv(queue) {
 		delete(packet.pcm)

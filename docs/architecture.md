@@ -95,11 +95,12 @@ AP requests share one serialized connection and cipher state. Connect and
 AP use the same persistent device identity. library workers read the AP country
 code as an atomic two-letter copy, not a view into connection memory.
 
-the last-played record stores an owned queue snapshot, its current index,
-shuffle order, and playback source. the last browsed collection is separate.
-reopening restores the queue without starting audio. rows that arrive later
-extend the restored queue when its source page is open; playback near the
-queue's end also requests more rows from that page.
+the last-played record stores the queue, its current index, shuffle order,
+and playback source. restore moves the loaded queue into playback without
+starting audio. saves borrow the live queue only while encoding; there is no
+second owned queue snapshot. the last browsed collection is separate.
+rows that arrive later extend the restored queue when its source page is open;
+playback near the queue's end also requests more rows from that page.
 
 Dealer requests become UI events. reply only after the UI accepts a command;
 reject unsupported commands. publish actual local playback state. send state

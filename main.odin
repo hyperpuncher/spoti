@@ -825,7 +825,6 @@ main :: proc() {
 		if worker != nil {release_worker(worker, queue, &cancel)}
 		if preload_worker != nil {
 			sync.atomic_store(&preload_work.cancel, true)
-			thread.join(preload_worker)
 			thread.destroy(preload_worker)
 		}
 		clear_preload(&preload_work)
@@ -1283,7 +1282,6 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 	using app
 	using frame
 	if preload_worker != nil && thread.is_done(preload_worker) {
-		thread.join(preload_worker)
 		thread.destroy(preload_worker)
 		preload_worker = nil
 	}
@@ -1359,6 +1357,7 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 			library_client.detail.image_small,
 		)
 		stamp_queue_album(&play_queue, &library_client.detail)
+		state_dirty = true
 		redraw = true
 	}
 	// Spread texture uploads across frames; draining a backlog at once
@@ -2125,7 +2124,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					entry := display_page.items[index]
 					if !hit_clipped("card", "library_grid", mouse_click, u32(index)) {continue}
 					if search_mode && display_kind == .Tracks {
-						build_play_queue_from_entries(&play_queue, display_page.items[:])
+						build_play_queue(&play_queue, display_page.items[:])
 						delete(queue_detail)
 						queue_detail = ""
 						play_index =
@@ -2748,10 +2747,7 @@ app_persist :: proc(app: ^App, frame: ^Frame) {
 	if restart_playback ||
 	   played_state.queue_index != play_index ||
 	   played_state.shuffle != shuffle ||
-	   played_state.collection != queue_detail ||
-	   len(played_state.queue) != len(play_queue) {
-		free_play_queue(&played_state.queue)
-		played_state.queue = clone_play_queue(play_queue[:])
+	   played_state.collection != queue_detail {
 		played_state.queue_index = play_index
 		played_state.shuffle = shuffle
 		replace_string(&played_state.collection, queue_detail)
@@ -2759,7 +2755,10 @@ app_persist :: proc(app: ^App, frame: ^Frame) {
 	}
 	if state_dirty {
 		state_dirty = false
-		save_state(&app_state)
+		// Borrow the live queue for this synchronous save; playback remains its owner.
+		view := app_state
+		view.last_played.queue = play_queue
+		save_state(&view)
 	}
 	if clicked {first_frame = true}
 }

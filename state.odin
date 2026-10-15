@@ -30,7 +30,7 @@ Last_Played :: struct {
 	album_uri:    string, // spotify:album:<id>
 	first_artist: string,
 	artist_uri:   string, // spotify:artist:<id>
-	queue:        [dynamic]Play_Item, // owned metadata, never audio keys or signed audio URLs
+	queue:        [dynamic]Play_Item, // loaded metadata; moved to playback on restore
 	queue_index:  int,
 	collection:   string, // playing source, independent of the browsed page
 	shuffle:      bool,

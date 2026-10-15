@@ -92,8 +92,15 @@ reopened_queue_continues_after_the_same_duplicate_track :: proc(t: ^testing.T) {
 	testing.expect_value(t, app.queue_detail, "spotify:playlist:playing")
 	testing.expect_value(t, app.app_state.last_collection, "spotify:album:browsed")
 	testing.expect(t, app.shuffle && app.queue_restore_pending)
-	// Live playback and the saved record must have independent ownership.
-	free_play_queue(&app.app_state.last_played.queue)
+	// Restore moves ownership; encoding borrows the live queue without retaining it.
+	testing.expect_value(t, len(app.app_state.last_played.queue), 0)
+	view := app.app_state
+	view.last_played.queue = app.play_queue
+	saved := format_state(&view)
+	defer delete(saved)
+	decoded := parse_state(saved)
+	defer free_state(&decoded)
+	testing.expect_value(t, len(decoded.last_played.queue), 4)
 	testing.expect_value(t, app.play_queue[2].album_uri, "spotify:album:original")
 	testing.expect_value(t, app.play_queue[2].artist_links[0].uri, "spotify:artist:original")
 	selected, cover, artist: string
