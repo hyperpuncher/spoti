@@ -123,6 +123,14 @@ emoji_cluster :: proc(value: string) -> bool {
 
 text_pieces :: proc(value: string, allocator := context.temp_allocator) -> [dynamic]Text_Piece {
 	pieces := make([dynamic]Text_Piece, allocator)
+	// ASCII cannot contain an emoji sequence. Keep its whole text run without
+	// running the Unicode grapheme iterator for every measurement and draw.
+	ascii_end := 0
+	for ascii_end < len(value) && value[ascii_end] < 0x80 {ascii_end += 1}
+	if ascii_end == len(value) {
+		if len(value) > 0 {append(&pieces, Text_Piece{value, false})}
+		return pieces
+	}
 	start := 0
 	it := utf8.decode_grapheme_iterator_make(value)
 	for cluster, grapheme in utf8.decode_grapheme_iterate(&it) {

@@ -10,17 +10,21 @@ import ttf "vendor:sdl3/ttf"
 
 @(test)
 emoji_pieces_preserve_sequences_and_text_presentation :: proc(t: ^testing.T) {
-	for value in ([]string{"🚘", "💨", "👍🏽", "🇯🇵", "👨‍👩‍👧", "1️⃣", "❤️", "©️"}) {
+	for value in ([]string{"🚘", "💨", "👍🏽", "🇯🇵", "👨‍👩‍👧", "1️⃣", "#️⃣", "*️⃣", "❤️", "©️"}) {
 		pieces := text_pieces(value, context.allocator)
 		defer delete(pieces)
 		if !testing.expect_value(t, len(pieces), 1) {continue}
 		testing.expect(t, pieces[0].emoji)
 		testing.expect_value(t, pieces[0].value, value)
 	}
-	for value in ([]string{"©", "❤", "⟡", "✧", "1", "🚘︎", "🖥", "🜁", "🂡", "العربية", "র‍্য"}) {
+	for value in ([]string{"©", "❤", "⟡", "✧", "1", "🚘︎", "🖥", "🜁", "🂡", "العربية", "র‍্য", "Track number 38", "2:39", "#*0123456789", ""}) {
 		pieces := text_pieces(value, context.allocator)
 		defer delete(pieces)
-		for piece in pieces {testing.expect(t, !piece.emoji)}
+		testing.expect_value(t, len(pieces), value == "" ? 0 : 1)
+		for piece in pieces {
+			testing.expect(t, !piece.emoji)
+			testing.expect_value(t, piece.value, value)
+		}
 	}
 	pieces := text_pieces("Rally House🚘💨", context.allocator)
 	defer delete(pieces)

@@ -83,13 +83,7 @@ text :: proc(
 		if cursor == x {pen -= glyph_left_bearing(span_font, piece.value)}
 		_ = ttf.DrawRendererText(content, f32(int(pen + 0.5)), f32(int(y + 0.5)))
 		width: c.int
-		if ttf.GetStringSize(
-			span_font,
-			raw_data(piece.value),
-			uint(len(piece.value)),
-			&width,
-			nil,
-		) {cursor += f32(width)}
+		if ttf.GetTextSize(content, &width, nil) {cursor += f32(width)}
 	}
 }
 

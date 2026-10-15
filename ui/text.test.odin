@@ -1,5 +1,6 @@
 package ui
 
+import c "core:c/libc"
 import "core:strings"
 import "core:testing"
 import sdl "vendor:sdl3"
@@ -47,6 +48,10 @@ text_pool_reuses_updates_and_releases_visible_frame_slots :: proc(t: ^testing.T)
 	testing.expect(t, cached_text(&state, large, "new title") == first)
 	testing.expect(t, ttf.GetTextFont(first) == large)
 	testing.expect_value(t, string(cstring(first.text)), "new title")
+	width, height: c.int
+	testing.expect(t, ttf.GetTextSize(first, &width, &height))
+	expected_width, expected_height := text_size(&state, "new title", 28)
+	testing.expect(t, f32(width) == expected_width && f32(height) == expected_height)
 	finish_text_frame(&state)
 	finish_text_frame(&state)
 	testing.expect_value(t, len(state.texts), 0)
