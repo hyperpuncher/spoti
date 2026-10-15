@@ -71,7 +71,7 @@ release_feed_page :: proc(
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 			padding = {right = u16(SCROLLBAR_OUTSET * d)},
 		},
-		backgroundColor = BG,
+		backgroundColor = theme.bg,
 	},
 	) {
 		if clay.UI()(
@@ -84,13 +84,10 @@ release_feed_page :: proc(
 			},
 		},
 		) {
-			clay.Text(
-				"What's New",
-				clay.TextElementConfig{fontId = 2, fontSize = 28, textColor = WHITE},
-			)
+			clay.Text("What's New", {fontId = 2, fontSize = 28, textColor = theme.text})
 			clay.Text(
 				"Music from artists you follow • Last seven days",
-				clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+				{fontSize = 14, textColor = theme.muted},
 			)
 			status := fmt.aprintf(
 				"%d releases",
@@ -112,7 +109,7 @@ release_feed_page :: proc(
 			} else if len(feed.items) == 0 {
 				status = "No music releases in the last seven days."
 			}
-			clay.Text(status, clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+			clay.Text(status, {fontSize = 13, textColor = theme.muted})
 		}
 		if clay.UI_WithId(clay.ID("detail_rows"))(
 		{
@@ -141,7 +138,7 @@ release_feed_page :: proc(
 						childGap = u16(24 * d),
 						childAlignment = {y = .Center},
 					},
-					border = {color = CARD, width = {bottom = 1}},
+					border = {color = theme.card, width = {bottom = 1}},
 				},
 				) {
 					cover_element(textures, entry.image, FEED_COVER_SIZE * d, 8 * d)
@@ -158,28 +155,22 @@ release_feed_page :: proc(
 							ui_state,
 							entry.name,
 							text_width,
-							{fontId = 2, fontSize = 20, textColor = WHITE, wrapMode = .None},
+							{fontId = 2, fontSize = 20, textColor = theme.text, wrapMode = .None},
 						)
 						fitted_text(
 							ui_state,
 							entry.subtitle,
 							text_width,
-							{fontSize = 14, textColor = MUTED, wrapMode = .None},
+							{fontSize = 14, textColor = theme.muted, wrapMode = .None},
 						)
 						if clay.UI()(
 						{layout = {childGap = u16(6 * d), childAlignment = {y = .Center}}},
 						) {
-							clay.Text(
-								release.kind,
-								clay.TextElementConfig{fontSize = 13, textColor = MUTED},
-							)
-							clay.Text(
-								"•",
-								clay.TextElementConfig{fontSize = 13, textColor = MUTED},
-							)
+							clay.Text(release.kind, {fontSize = 13, textColor = theme.muted})
+							clay.Text("•", {fontSize = 13, textColor = theme.muted})
 							clay.Text(
 								release_age_label(release.released_at, now),
-								clay.TextElementConfig{fontSize = 13, textColor = MUTED},
+								{fontSize = 13, textColor = theme.muted},
 							)
 						}
 						if clay.UI()(
@@ -193,8 +184,8 @@ release_feed_page :: proc(
 								d,
 								36,
 								15,
-								WHITE,
-								FOOTER_HOVER,
+								theme.text,
+								theme.footer_hover,
 							)
 							saved := release_feed_saved(client, release)
 							icon_button(

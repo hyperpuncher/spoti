@@ -27,7 +27,7 @@ Textures :: struct {
 	// eases its own pair instead of fighting over the shared one.
 	fade_detail_top_alpha:    f32,
 	fade_detail_bottom_alpha: f32,
-	// The detail page sits on BG, not the sidebar, so its strips are
+	// The detail page sits on theme.bg, not the sidebar, so its strips are
 	// baked with the page tint instead of reusing the sidebar pair.
 	fade_detail_top:          u64,
 	fade_detail_bottom:       u64,
@@ -35,7 +35,7 @@ Textures :: struct {
 
 // Scroll-edge fades baked once as dithered ramp strips, keyed by texture
 // address like covers and freed with them. Tinted per surface at upload:
-// the sidebar pair follows SIDEBAR, the detail pair follows BG.
+// the sidebar pair follows theme.sidebar, the detail pair follows theme.bg.
 load_fades :: proc(state: ^ui.State, textures: ^Textures) {
 	textures.fade_top = load_fade(state, textures, false)
 	textures.fade_bottom = load_fade(state, textures, true)
@@ -59,12 +59,17 @@ retint_fades :: proc(textures: ^Textures) {
 	for key in ([2]u64{textures.fade_top, textures.fade_bottom}) {
 		texture := textures.by_key[key]
 		if texture == nil {continue}
-		_ = sdl.SetTextureColorMod(texture, u8(SIDEBAR.r), u8(SIDEBAR.g), u8(SIDEBAR.b))
+		_ = sdl.SetTextureColorMod(
+			texture,
+			u8(theme.sidebar.r),
+			u8(theme.sidebar.g),
+			u8(theme.sidebar.b),
+		)
 	}
 	for key in ([]u64{textures.fade_detail_top, textures.fade_detail_bottom, textures.hero_fade}) {
 		texture := textures.by_key[key]
 		if texture == nil {continue}
-		_ = sdl.SetTextureColorMod(texture, u8(BG.r), u8(BG.g), u8(BG.b))
+		_ = sdl.SetTextureColorMod(texture, u8(theme.bg.r), u8(theme.bg.g), u8(theme.bg.b))
 	}
 }
 
@@ -162,7 +167,7 @@ render :: proc(
 					state,
 					{box.x, box.y, box.width, box.height},
 					12 * ui.scale(state),
-					{u8(BG.r), u8(BG.g), u8(BG.b), 255},
+					{u8(theme.bg.r), u8(theme.bg.g), u8(theme.bg.b), 255},
 				)
 			}
 		case .Text:
@@ -222,7 +227,7 @@ cover_element :: proc(textures: ^Textures, url: string, size, radius: f32) {
 		clay.UI()(
 		{
 			layout = {sizing = {width = clay.SizingFixed(size), height = clay.SizingFixed(size)}},
-			backgroundColor = CARD,
+			backgroundColor = theme.card,
 			cornerRadius = clay.CornerRadiusAll(radius),
 		},
 		)

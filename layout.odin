@@ -7,21 +7,8 @@ import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
-// Active palette. Variables, not constants, so the app can follow the
-// system theme without touching every use site; apply_theme assigns them
-// all at once on startup and on SDL_EVENT_SYSTEM_THEME_CHANGED.
-BG := DARK_THEME.bg
-SIDEBAR := DARK_THEME.sidebar
-PANEL := DARK_THEME.panel
-CARD := DARK_THEME.card
-HOVER := DARK_THEME.hover
-SELECTED := DARK_THEME.selected
-PLAYER := DARK_THEME.player
-WHITE := DARK_THEME.text
-FOOTER_HOVER := DARK_THEME.footer_hover
-HERO_HOVER := DARK_THEME.hero_hover
-MUTED := DARK_THEME.muted
-GREEN := DARK_THEME.green
+// Active palette, updated on startup and SDL_EVENT_SYSTEM_THEME_CHANGED.
+theme := DARK_THEME
 
 Theme :: struct {
 	bg:           clay.Color,
@@ -69,19 +56,7 @@ LIGHT_THEME :: Theme {
 }
 
 apply_theme :: proc(dark: bool) {
-	theme := dark ? DARK_THEME : LIGHT_THEME
-	BG = theme.bg
-	SIDEBAR = theme.sidebar
-	PANEL = theme.panel
-	CARD = theme.card
-	HOVER = theme.hover
-	SELECTED = theme.selected
-	PLAYER = theme.player
-	WHITE = theme.text
-	FOOTER_HOVER = theme.footer_hover
-	HERO_HOVER = theme.hero_hover
-	MUTED = theme.muted
-	GREEN = theme.green
+	theme = dark ? DARK_THEME : LIGHT_THEME
 }
 
 SIDEBAR_MIN :: 320
@@ -146,11 +121,11 @@ chip :: proc(label: string, id: u32, active: bool, d: f32) {
 			padding = clay.PaddingAll(u16(14 * d)),
 			childAlignment = {y = .Center},
 		},
-		backgroundColor = active ? WHITE : clay.PointerOver(clay.ID("chip", id)) ? HOVER : CARD,
+		backgroundColor = active ? theme.text : clay.PointerOver(clay.ID("chip", id)) ? theme.hover : theme.card,
 		cornerRadius = clay.CornerRadiusAll(16 * d),
 	},
 	) {
-		clay.Text(label, clay.TextElementConfig{fontSize = 14, textColor = active ? BG : WHITE})
+		clay.Text(label, {fontSize = 14, textColor = active ? theme.bg : theme.text})
 	}
 }
 
@@ -228,7 +203,7 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 			childAlignment = {x = .Center, y = .Center},
 			childGap = u16(4 * d),
 		},
-		backgroundColor = BG,
+		backgroundColor = theme.bg,
 	},
 	) {
 		icon_button(
@@ -258,7 +233,7 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 				padding = {left = u16(14 * d), right = u16(14 * d)},
 				childAlignment = {y = .Center},
 			},
-			backgroundColor = view.input_active ? CARD : PANEL,
+			backgroundColor = view.input_active ? theme.card : theme.panel,
 			cornerRadius = clay.CornerRadiusAll(20 * d),
 		},
 		) {
@@ -268,15 +243,15 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 			if clay.UI()(
 			{
 				layout = {sizing = {width = clay.SizingFit({max = 412 * d})}},
-				backgroundColor = view.select_all ? SELECTED : clay.Color{},
+				backgroundColor = view.select_all ? theme.selected : clay.Color{},
 				cornerRadius = clay.CornerRadiusAll(6 * d),
 			},
 			) {
 				clay.Text(
 					view.input,
-					clay.TextElementConfig {
+					{
 						fontSize = 14,
-						textColor = view.input_active ? WHITE : MUTED,
+						textColor = view.input_active ? theme.text : theme.muted,
 						wrapMode = .None,
 					},
 				)
@@ -359,7 +334,7 @@ round_play_button :: proc(
 				},
 				childAlignment = {x = .Center, y = .Center},
 			},
-			backgroundColor = !enabled ? CARD : over ? hover : background,
+			backgroundColor = !enabled ? theme.card : over ? hover : background,
 			cornerRadius = clay.CornerRadiusAll(size * d * scale / 2),
 		},
 		) {
@@ -377,7 +352,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 			childGap = u16(20 * d),
 			childAlignment = {y = .Center},
 		},
-		backgroundColor = PLAYER,
+		backgroundColor = theme.player,
 	},
 	) {
 		if clay.UI()(
@@ -398,7 +373,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 					sizing = {width = clay.SizingFixed(64 * d), height = clay.SizingFixed(64 * d)},
 					childAlignment = {x = .Center, y = .Center},
 				},
-				backgroundColor = CARD,
+				backgroundColor = theme.card,
 				cornerRadius = clay.CornerRadiusAll(7 * d),
 			},
 			) {
@@ -422,7 +397,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 				) {
 					clay.Text(
 						view.title,
-						clay.TextElementConfig{fontSize = 15, textColor = WHITE, wrapMode = .None},
+						{fontSize = 15, textColor = theme.text, wrapMode = .None},
 					)
 				}
 				artist_over := view.artist_linked && clay.PointerOver(clay.ID("footer_artist"))
@@ -431,9 +406,9 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 				) {
 					clay.Text(
 						view.status,
-						clay.TextElementConfig {
+						{
 							fontSize = 12,
-							textColor = artist_over ? WHITE : MUTED,
+							textColor = artist_over ? theme.text : theme.muted,
 							wrapMode = .None,
 						},
 					)
@@ -479,8 +454,8 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 					d,
 					44,
 					18,
-					WHITE,
-					FOOTER_HOVER,
+					theme.text,
+					theme.footer_hover,
 				)
 				icon_button(
 					"footer_next",
@@ -510,10 +485,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 				},
 			},
 			) {
-				clay.Text(
-					view.elapsed,
-					clay.TextElementConfig{fontId = 1, fontSize = 12, textColor = MUTED},
-				)
+				clay.Text(view.elapsed, {fontId = 1, fontSize = 12, textColor = theme.muted})
 				if clay.UI_WithId(clay.ID("seek_slider"))(
 				{
 					layout = {
@@ -530,7 +502,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 								height = clay.SizingFixed(4 * d),
 							},
 						},
-						backgroundColor = CARD,
+						backgroundColor = theme.card,
 						cornerRadius = clay.CornerRadiusAll(2 * d),
 					},
 					) {
@@ -543,17 +515,14 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 										height = clay.SizingFixed(4 * d),
 									},
 								},
-								backgroundColor = WHITE,
+								backgroundColor = theme.text,
 								cornerRadius = clay.CornerRadiusAll(2 * d),
 							},
 							)
 						}
 					}
 				}
-				clay.Text(
-					view.total,
-					clay.TextElementConfig{fontId = 1, fontSize = 12, textColor = MUTED},
-				)
+				clay.Text(view.total, {fontId = 1, fontSize = 12, textColor = theme.muted})
 			}
 		}
 		if clay.UI()(
@@ -591,7 +560,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 							height = clay.SizingFixed(4 * d),
 						},
 					},
-					backgroundColor = CARD,
+					backgroundColor = theme.card,
 					cornerRadius = clay.CornerRadiusAll(2 * d),
 				},
 				) {
@@ -603,7 +572,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 								height = clay.SizingFixed(4 * d),
 							},
 						},
-						backgroundColor = WHITE,
+						backgroundColor = theme.text,
 						cornerRadius = clay.CornerRadiusAll(2 * d),
 					},
 					)
@@ -654,14 +623,11 @@ drag_ghost :: proc(view: View, d: f32) {
 			attachTo = .Root,
 			pointerCaptureMode = .Passthrough,
 		},
-		backgroundColor = PANEL,
+		backgroundColor = theme.panel,
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
 	) {
-		clay.Text(
-			view.drag_label,
-			clay.TextElementConfig{fontSize = 14, textColor = WHITE, wrapMode = .None},
-		)
+		clay.Text(view.drag_label, {fontSize = 14, textColor = theme.text, wrapMode = .None})
 	}
 }
 
@@ -683,11 +649,11 @@ toast_banner :: proc(view: View, d: f32) {
 			attachment = {element = .CenterBottom, parent = .CenterBottom},
 			pointerCaptureMode = .Passthrough,
 		},
-		backgroundColor = WHITE,
+		backgroundColor = theme.text,
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
 	) {
-		clay.Text(view.toast, clay.TextElementConfig{fontSize = 14, textColor = BG})
+		clay.Text(view.toast, {fontSize = 14, textColor = theme.bg})
 	}
 }
 
@@ -749,8 +715,8 @@ sign_in_screen :: proc(
 					button_id, button_label = "library_retry", "Try again"
 				case .Idle, .Loading, .Ready, .Missing_Client_ID, .Failed:
 				}
-				clay.Text(title, clay.TextElementConfig{fontSize = 28, textColor = WHITE})
-				clay.Text(line, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+				clay.Text(title, {fontSize = 28, textColor = theme.text})
+				clay.Text(line, {fontSize = 14, textColor = theme.muted})
 				if len(button_id) > 0 {
 					sign_in_button(button_id, button_label, d)
 				}
@@ -760,10 +726,10 @@ sign_in_screen :: proc(
 }
 
 setup_screen :: proc(setup_input: string, setup_active: bool, setup_error: string, d: f32) {
-	clay.Text("Connect your Spotify app", clay.TextElementConfig{fontSize = 28, textColor = WHITE})
+	clay.Text("Connect your Spotify app", {fontSize = 28, textColor = theme.text})
 	clay.Text(
 		"spoti reads your account through your own Spotify app.",
-		clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+		{fontSize = 14, textColor = theme.muted},
 	)
 	// Steps read as a left-aligned block while the block itself stays centered.
 	if clay.UI()(
@@ -778,12 +744,12 @@ setup_screen :: proc(setup_input: string, setup_active: bool, setup_error: strin
 	) {
 		clay.Text(
 			"1. Open the Spotify dashboard and create an app.",
-			clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+			{fontSize = 14, textColor = theme.muted},
 		)
 		sign_in_button("setup_dashboard", "Open dashboard", d)
 		clay.Text(
 			"2. Add this redirect URI in the app settings, click it to copy:",
-			clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+			{fontSize = 14, textColor = theme.muted},
 		)
 		if clay.UI_WithId(clay.ID("setup_redirect"))(
 		{
@@ -792,18 +758,15 @@ setup_screen :: proc(setup_input: string, setup_active: bool, setup_error: strin
 				padding = {left = u16(16 * d), right = u16(16 * d)},
 				childAlignment = {y = .Center},
 			},
-			backgroundColor = clay.PointerOver(clay.ID("setup_redirect")) ? HOVER : CARD,
+			backgroundColor = clay.PointerOver(clay.ID("setup_redirect")) ? theme.hover : theme.card,
 			cornerRadius = clay.CornerRadiusAll(20 * d),
 		},
 		) {
-			clay.Text(
-				oauth.WEB_REDIRECT_URI,
-				clay.TextElementConfig{fontSize = 14, textColor = WHITE},
-			)
+			clay.Text(oauth.WEB_REDIRECT_URI, {fontSize = 14, textColor = theme.text})
 		}
 		clay.Text(
 			"3. Paste the 32-character client id below and save.",
-			clay.TextElementConfig{fontSize = 14, textColor = MUTED},
+			{fontSize = 14, textColor = theme.muted},
 		)
 		if clay.UI_WithId(clay.ID("setup_field"))(
 		{
@@ -812,7 +775,7 @@ setup_screen :: proc(setup_input: string, setup_active: bool, setup_error: strin
 				padding = {left = u16(16 * d), right = u16(16 * d)},
 				childAlignment = {y = .Center},
 			},
-			backgroundColor = CARD,
+			backgroundColor = theme.card,
 			cornerRadius = clay.CornerRadiusAll(20 * d),
 		},
 		) {
@@ -821,16 +784,13 @@ setup_screen :: proc(setup_input: string, setup_active: bool, setup_error: strin
 				if setup_active {
 					field = fmt.aprintf("%s|", setup_input, allocator = context.temp_allocator)
 				}
-				clay.Text(field, clay.TextElementConfig{fontSize = 14, textColor = WHITE})
+				clay.Text(field, {fontSize = 14, textColor = theme.text})
 			} else {
-				clay.Text(
-					"paste your client id",
-					clay.TextElementConfig{fontSize = 14, textColor = MUTED},
-				)
+				clay.Text("paste your client id", {fontSize = 14, textColor = theme.muted})
 			}
 		}
 		if len(setup_error) > 0 {
-			clay.Text(setup_error, clay.TextElementConfig{fontSize = 14, textColor = WHITE})
+			clay.Text(setup_error, {fontSize = 14, textColor = theme.text})
 		}
 	}
 	sign_in_button("setup_save", "Save and continue", d)
@@ -844,12 +804,12 @@ sign_in_button :: proc(id, label: string, d: f32) {
 			padding = {left = u16(20 * d), right = u16(20 * d)},
 			childAlignment = {x = .Center, y = .Center},
 		},
-		backgroundColor = clay.PointerOver(clay.ID(id)) ? HERO_HOVER : GREEN,
+		backgroundColor = clay.PointerOver(clay.ID(id)) ? theme.hero_hover : theme.green,
 		cornerRadius = clay.CornerRadiusAll(20 * d),
 	},
 	) {
 		// Spotify green keeps dark text in both themes, like the hero play icon.
-		clay.Text(label, clay.TextElementConfig{fontSize = 14, textColor = {18, 18, 18, 255}})
+		clay.Text(label, {fontSize = 14, textColor = {18, 18, 18, 255}})
 	}
 }
 
@@ -877,7 +837,7 @@ layout :: proc(
 				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 				childAlignment = {x = .Center, y = .Center},
 			},
-			backgroundColor = BG,
+			backgroundColor = theme.bg,
 		},
 		) {
 			sign_in_screen(
@@ -900,7 +860,7 @@ layout :: proc(
 				height = clay.SizingFixed(viewport_height),
 			},
 		},
-		backgroundColor = BG,
+		backgroundColor = theme.bg,
 	},
 	) {
 		top_bar(view, textures, fx, d)
@@ -943,7 +903,7 @@ layout :: proc(
 				layout = {
 					sizing = {width = clay.SizingFixed(6 * d), height = clay.SizingGrow({})},
 				},
-				backgroundColor = BG,
+				backgroundColor = theme.bg,
 			},
 			) {}
 			detail_page(

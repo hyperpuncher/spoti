@@ -43,9 +43,9 @@ icon_controls_hover_by_tint_without_backgrounds :: proc(t: ^testing.T) {
 	for dark in ([]bool{true, false}) {
 		apply_theme(dark)
 		r, g, b := icon_tint_color(.Hover, dark)
-		testing.expect_value(t, r, u8(FOOTER_HOVER.r))
-		testing.expect_value(t, g, u8(FOOTER_HOVER.g))
-		testing.expect_value(t, b, u8(FOOTER_HOVER.b))
+		testing.expect_value(t, r, u8(theme.footer_hover.r))
+		testing.expect_value(t, g, u8(theme.footer_hover.g))
+		testing.expect_value(t, b, u8(theme.footer_hover.b))
 		clay.SetPointerState({-100, -100}, false)
 		_, _ = layout(
 			{can_back = true},

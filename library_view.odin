@@ -99,20 +99,20 @@ track_skeleton :: proc(index: int, d: f32) {
 		) {
 			clay.Text(
 				fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
-				clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
+				{fontId = 1, fontSize = 15, textColor = theme.muted},
 			)
 		}
 		if clay.UI()(
 		{
 			layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(14 * d)}},
-			backgroundColor = CARD,
+			backgroundColor = theme.card,
 			cornerRadius = clay.CornerRadiusAll(7 * d),
 		},
 		) {}
 		if clay.UI()(
 		{
 			layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(14 * d)}},
-			backgroundColor = CARD,
+			backgroundColor = theme.card,
 			cornerRadius = clay.CornerRadiusAll(7 * d),
 		},
 		) {}
@@ -141,14 +141,14 @@ release_skeleton :: proc(card_width, row_height, d: f32) {
 					height = clay.SizingFixed(cover_size),
 				},
 			},
-			backgroundColor = CARD,
+			backgroundColor = theme.card,
 			cornerRadius = clay.CornerRadiusAll(8 * d),
 		},
 		) {}
 		if clay.UI()(
 		{
 			layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(13 * d)}},
-			backgroundColor = CARD,
+			backgroundColor = theme.card,
 			cornerRadius = clay.CornerRadiusAll(6 * d),
 		},
 		) {}
@@ -248,7 +248,7 @@ playing_bars :: proc(playing: bool, d: f32) {
 				layout = {
 					sizing = {width = clay.SizingFixed(4 * d), height = clay.SizingFixed(height)},
 				},
-				backgroundColor = GREEN,
+				backgroundColor = theme.green,
 				cornerRadius = clay.CornerRadiusAll(2 * d),
 			},
 			) {
@@ -306,7 +306,7 @@ library_card :: proc(
 			padding = clay.PaddingAll(u16(padding)),
 			childGap = u16(7 * d),
 		},
-		backgroundColor = hovered ? HOVER : drop_target ? DROP_TARGET : selected ? SELECTED : clay.Color{},
+		backgroundColor = hovered ? theme.hover : drop_target ? DROP_TARGET : selected ? theme.selected : clay.Color{},
 		cornerRadius = clay.CornerRadiusAll(10 * d),
 	},
 	) {
@@ -326,7 +326,7 @@ library_card :: proc(
 					pointerCaptureMode = .Passthrough,
 					clipTo = .AttachedParent,
 				},
-				backgroundColor = PLAYER,
+				backgroundColor = theme.player,
 				cornerRadius = clay.CornerRadiusAll(11 * d),
 			},
 			) {
@@ -348,14 +348,14 @@ library_card :: proc(
 				ui_state,
 				entry.name,
 				text_width,
-				{fontSize = 14, textColor = WHITE, wrapMode = .None},
+				{fontSize = 14, textColor = theme.text, wrapMode = .None},
 			)
 			if len(entry.subtitle) > 0 {
 				fitted_text(
 					ui_state,
 					entry.subtitle,
 					text_width,
-					{fontSize = 12, textColor = MUTED, wrapMode = .None},
+					{fontSize = 12, textColor = theme.muted, wrapMode = .None},
 				)
 			}
 		}
@@ -378,10 +378,7 @@ sort_button :: proc(
 	) {
 		icon_element(textures, "list-sort-descending", .Muted, 14 * d)
 		if label {
-			clay.Text(
-				sort_name(app_state.sort[active]),
-				clay.TextElementConfig{fontSize = 13, textColor = MUTED},
-			)
+			clay.Text(sort_name(app_state.sort[active]), {fontSize = 13, textColor = theme.muted})
 		}
 	}
 }
@@ -409,7 +406,7 @@ sidebar :: proc(
 			padding = {left = u16(18 * d), right = u16(18 * d), top = u16(18 * d)},
 			childGap = u16(18 * d),
 		},
-		backgroundColor = SIDEBAR,
+		backgroundColor = theme.sidebar,
 		cornerRadius = clay.CornerRadius{topRight = 12 * d},
 	},
 	) {
@@ -448,7 +445,7 @@ sidebar :: proc(
 				status = "No results."
 			}
 			if len(status) > 0 {
-				clay.Text(status, clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+				clay.Text(status, {fontSize = 13, textColor = theme.muted})
 			}
 		}
 		if clay.UI_WithId(clay.ID("library_grid"))(
@@ -523,7 +520,7 @@ loading_track_table :: proc(d: f32) {
 		},
 	},
 	) {
-		clay.Text("Loading tracks...", clay.TextElementConfig{fontSize = 15, textColor = MUTED})
+		clay.Text("Loading tracks...", {fontSize = 15, textColor = theme.muted})
 	}
 }
 
@@ -580,7 +577,7 @@ track_list_row :: proc(
 			childAlignment = {y = .Center},
 			childGap = u16(ROW_GAP * d),
 		},
-		backgroundColor = hovered ? HOVER : clay.Color{},
+		backgroundColor = hovered ? theme.hover : clay.Color{},
 		cornerRadius = clay.CornerRadiusAll(4 * d),
 	},
 	) {
@@ -600,7 +597,7 @@ track_list_row :: proc(
 			} else {
 				clay.Text(
 					fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
-					clay.TextElementConfig{fontId = 1, fontSize = 15, textColor = MUTED},
+					{fontId = 1, fontSize = 15, textColor = theme.muted},
 				)
 			}
 		}
@@ -620,10 +617,10 @@ track_list_row :: proc(
 		) {
 			clay.Text(
 				title_text,
-				clay.TextElementConfig {
+				{
 					fontId = 3,
 					fontSize = 15,
-					textColor = current ? GREEN : WHITE,
+					textColor = current ? theme.green : theme.text,
 					wrapMode = .None,
 				},
 			)
@@ -661,7 +658,7 @@ track_list_row :: proc(
 						ui_state,
 						added_at_text(row.added_at),
 						width,
-						{fontId = 1, fontSize = 14, textColor = MUTED, wrapMode = .None},
+						{fontId = 1, fontSize = 14, textColor = theme.muted, wrapMode = .None},
 					)
 				}
 			}
@@ -677,12 +674,7 @@ track_list_row :: proc(
 			) {
 				clay.Text(
 					count_text(row.play_count),
-					clay.TextElementConfig {
-						fontId = 1,
-						fontSize = 14,
-						textColor = MUTED,
-						wrapMode = .None,
-					},
+					{fontId = 1, fontSize = 14, textColor = theme.muted, wrapMode = .None},
 				)
 			}
 		}
@@ -704,7 +696,7 @@ track_list_row :: proc(
 		) {
 			clay.Text(
 				duration_text_alloc(row.duration_ms),
-				clay.TextElementConfig{fontId = 1, fontSize = 14, textColor = MUTED},
+				{fontId = 1, fontSize = 14, textColor = theme.muted},
 			)
 		}
 	}
@@ -812,7 +804,7 @@ track_table :: proc(
 				childAlignment = {y = .Center},
 				childGap = u16(ROW_GAP * d),
 			},
-			border = {color = CARD, width = {bottom = 1}},
+			border = {color = theme.card, width = {bottom = 1}},
 		},
 		) {
 			if clay.UI()(
@@ -823,16 +815,16 @@ track_table :: proc(
 				},
 			},
 			) {
-				clay.Text("#", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+				clay.Text("#", {fontSize = 13, textColor = theme.muted})
 			}
 			// Same percent column as the rows below, so the artist label
 			// sits exactly over the artist column: Grow pairs would split
 			// their joint share instead of the whole base.
 			if clay.UI()({layout = {sizing = {width = clay.SizingPercent(title_fraction)}}}) {
-				clay.Text("TITLE", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+				clay.Text("TITLE", {fontSize = 13, textColor = theme.muted})
 			}
 			if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {
-				clay.Text("ARTIST", clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+				clay.Text("ARTIST", {fontSize = 13, textColor = theme.muted})
 			}
 			for width, i in ([]f32{album_width, date_width}) {
 				if width <= 0 {continue}
@@ -842,7 +834,7 @@ track_table :: proc(
 				) {
 					clay.Text(
 						i == 0 ? "ALBUM" : "DATE ADDED",
-						clay.TextElementConfig{fontSize = 13, textColor = MUTED},
+						{fontSize = 13, textColor = theme.muted},
 					)
 				}
 			}
@@ -943,7 +935,7 @@ artist_page :: proc(
 			},
 			) {
 				if clay.UI_WithId(clay.ID("popular_title"))({}) {
-					clay.Text("Popular", clay.TextElementConfig{fontSize = 22, textColor = WHITE})
+					clay.Text("Popular", {fontSize = 22, textColor = theme.text})
 				}
 				row_text, title_max, column_box, track_gap, row_columns := track_row_boxes(
 					available_width,
@@ -1052,7 +1044,7 @@ release_section :: proc(
 	next_leading = leading
 	if len(group.items) == 0 && group.total == 0 && !group.has_more {return}
 	if clay.UI_WithId(clay.ID(title_id))({}) {
-		clay.Text(title, clay.TextElementConfig{fontSize = 22, textColor = WHITE})
+		clay.Text(title, {fontSize = 22, textColor = theme.text})
 	}
 	// Title heights come from the previous frame, like the old discography
 	// heading did; the window settles after one layout.
@@ -1223,18 +1215,14 @@ artist_link_id :: proc(slot: u32, ai: int) -> u32 {
 // Missing URIs remain plain text. The caller owns truncation.
 metadata_link :: proc(id: string, index: u32, name: string, linked: bool) {
 	if !linked {
-		clay.Text(name, clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None})
+		clay.Text(name, {fontSize = 14, textColor = theme.muted, wrapMode = .None})
 		return
 	}
 	over := clay.PointerOver(clay.ID(id, index))
 	if clay.UI_WithId(clay.ID(id, index))({layout = {sizing = {width = clay.SizingFit({})}}}) {
 		clay.Text(
 			name,
-			clay.TextElementConfig {
-				fontSize = 14,
-				textColor = over ? WHITE : MUTED,
-				wrapMode = .None,
-			},
+			{fontSize = 14, textColor = over ? theme.text : theme.muted, wrapMode = .None},
 		)
 	}
 }
@@ -1262,19 +1250,13 @@ artist_links_row :: proc(
 				fit := hero_fit_text(ui_state, link.name, box, 14, 0, 1, context.temp_allocator)
 				metadata_link(id, base + u32(ai), fit, linked)
 			} else {
-				clay.Text(
-					"…",
-					clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
-				)
+				clay.Text("…", {fontSize = 14, textColor = theme.muted, wrapMode = .None})
 			}
 			return
 		}
 		metadata_link(id, base + u32(ai), link.name, linked)
 		if separator != "" {
-			clay.Text(
-				separator,
-				clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
-			)
+			clay.Text(separator, {fontSize = 14, textColor = theme.muted, wrapMode = .None})
 		}
 		used += need
 	}
@@ -1404,13 +1386,13 @@ hero_banner :: proc(
 			},
 		},
 		) {
-			clay.Text(detail.label, clay.TextElementConfig{fontSize = 13, textColor = WHITE})
+			clay.Text(detail.label, {fontSize = 13, textColor = theme.text})
 			clay.Text(
 				title,
-				clay.TextElementConfig {
+				{
 					fontId = HERO_TITLE_FONT,
 					fontSize = title_size,
-					textColor = WHITE,
+					textColor = theme.text,
 					wrapMode = .None,
 				},
 			)
@@ -1418,7 +1400,7 @@ hero_banner :: proc(
 				ui_state,
 				metadata,
 				title_width,
-				{fontSize = 14, textColor = WHITE, wrapMode = .None},
+				{fontSize = 14, textColor = theme.text, wrapMode = .None},
 			)
 		}
 	}
@@ -1525,11 +1507,8 @@ detail_hero :: proc(
 			},
 		},
 		) {
-			clay.Text(detail.label, clay.TextElementConfig{fontSize = 13, textColor = WHITE})
-			clay.Text(
-				title_text,
-				clay.TextElementConfig{fontId = 2, fontSize = title_size, textColor = WHITE},
-			)
+			clay.Text(detail.label, {fontSize = 13, textColor = theme.text})
+			clay.Text(title_text, {fontId = 2, fontSize = title_size, textColor = theme.text})
 			metadata := hero_metadata(detail)
 			if len(detail.artist_links) > 0 {
 				tail := fmt.aprintf(" • %s", metadata, allocator = context.temp_allocator)
@@ -1550,10 +1529,7 @@ detail_hero :: proc(
 						"hero_artist_link",
 						0,
 					)
-					clay.Text(
-						tail,
-						clay.TextElementConfig{fontSize = 14, textColor = MUTED, wrapMode = .None},
-					)
+					clay.Text(tail, {fontSize = 14, textColor = theme.muted, wrapMode = .None})
 				}
 			} else {
 				metadata_text := hero_fit_text(
@@ -1565,7 +1541,7 @@ detail_hero :: proc(
 					1,
 					context.temp_allocator,
 				)
-				clay.Text(metadata_text, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+				clay.Text(metadata_text, {fontSize = 14, textColor = theme.muted})
 			}
 		}
 	}
@@ -1602,7 +1578,7 @@ detail_page :: proc(
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 			padding = {right = u16(SCROLLBAR_OUTSET * d)},
 		},
-		backgroundColor = BG,
+		backgroundColor = theme.bg,
 	},
 	) {
 		if !detail.ready {
@@ -1629,8 +1605,8 @@ detail_page :: proc(
 						allocator = context.temp_allocator,
 					)
 				}
-				clay.Text(title, clay.TextElementConfig{fontSize = 26, textColor = WHITE})
-				clay.Text(detail_line, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+				clay.Text(title, {fontSize = 26, textColor = theme.text})
+				clay.Text(detail_line, {fontSize = 14, textColor = theme.muted})
 			}
 			return
 		}
@@ -1657,8 +1633,8 @@ detail_page :: proc(
 					d,
 					56,
 					22,
-					GREEN,
-					HERO_HOVER,
+					theme.green,
+					theme.hero_hover,
 					play_enabled,
 				)
 				icon_button(
@@ -1740,7 +1716,7 @@ detail_page :: proc(
 			) {
 				clay.Text(
 					"Couldn't load playlist tracks",
-					clay.TextElementConfig{fontId = 2, fontSize = 18, textColor = WHITE},
+					{fontId = 2, fontSize = 18, textColor = theme.text},
 				)
 				message := "The request failed. Select the playlist again to retry."
 				if detail.rows_error == library.PLAYLIST_AUTH_REQUIRED {
@@ -1754,7 +1730,7 @@ detail_page :: proc(
 						allocator = context.temp_allocator,
 					)
 				}
-				clay.Text(message, clay.TextElementConfig{fontSize = 14, textColor = MUTED})
+				clay.Text(message, {fontSize = 14, textColor = theme.muted})
 			}
 		} else {
 			visible.tracks = track_table(

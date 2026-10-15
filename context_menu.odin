@@ -147,7 +147,7 @@ context_menu :: proc(menu: ^Context_Menu, textures: ^Textures, d: f32) {
 			childGap = u16(2 * d),
 		},
 		floating = {offset = {menu.point.x, menu.point.y}, zIndex = 10, attachTo = .Root},
-		backgroundColor = PANEL,
+		backgroundColor = theme.panel,
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
 	) {
@@ -164,7 +164,7 @@ context_menu :: proc(menu: ^Context_Menu, textures: ^Textures, d: f32) {
 					childGap = u16(8 * d),
 					childAlignment = {y = .Center},
 				},
-				backgroundColor = hovered ? HOVER : clay.Color{},
+				backgroundColor = hovered ? theme.hover : clay.Color{},
 				cornerRadius = clay.CornerRadiusAll(5 * d),
 			},
 			) {
@@ -173,10 +173,7 @@ context_menu :: proc(menu: ^Context_Menu, textures: ^Textures, d: f32) {
 				} else if reserve {
 					if clay.UI()({layout = {sizing = {width = clay.SizingFixed(14 * d)}}}) {}
 				}
-				clay.Text(
-					menu.labels[index],
-					clay.TextElementConfig{fontSize = 14, textColor = WHITE},
-				)
+				clay.Text(menu.labels[index], {fontSize = 14, textColor = theme.text})
 			}
 		}
 	}
@@ -221,15 +218,12 @@ playlist_picker :: proc(menu: ^Context_Menu, d: f32) {
 			padding = clay.PaddingAll(u16(6 * d)),
 		},
 		floating = {offset = {picker_x, picker_y}, zIndex = 11, attachTo = .Root},
-		backgroundColor = PANEL,
+		backgroundColor = theme.panel,
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
 	) {
 		if rows == 0 {
-			clay.Text(
-				"No playlists you can edit",
-				clay.TextElementConfig{fontSize = 13, textColor = MUTED},
-			)
+			clay.Text("No playlists you can edit", {fontSize = 13, textColor = theme.muted})
 			return
 		}
 		if clay.UI_WithId(clay.ID("playlist_picker"))(
@@ -265,7 +259,7 @@ playlist_picker :: proc(menu: ^Context_Menu, d: f32) {
 						childGap = u16(8 * d),
 						childAlignment = {y = .Center},
 					},
-					backgroundColor = hovered ? HOVER : clay.Color{},
+					backgroundColor = hovered ? theme.hover : clay.Color{},
 					cornerRadius = clay.CornerRadiusAll(5 * d),
 				},
 				) {
@@ -281,20 +275,12 @@ playlist_picker :: proc(menu: ^Context_Menu, d: f32) {
 					) {
 						clay.Text(
 							entry.name,
-							clay.TextElementConfig {
-								fontSize = 14,
-								textColor = WHITE,
-								wrapMode = .None,
-							},
+							{fontSize = 14, textColor = theme.text, wrapMode = .None},
 						)
 						if len(entry.subtitle) > 0 {
 							clay.Text(
 								entry.subtitle,
-								clay.TextElementConfig {
-									fontSize = 12,
-									textColor = MUTED,
-									wrapMode = .None,
-								},
+								{fontSize = 12, textColor = theme.muted, wrapMode = .None},
 							)
 						}
 					}
@@ -329,7 +315,7 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 			padding = clay.PaddingAll(u16(6 * d)),
 		},
 		floating = {offset = {panel_x, panel_y}, zIndex = 11, attachTo = .Root},
-		backgroundColor = PANEL,
+		backgroundColor = theme.panel,
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
 	) {
@@ -345,7 +331,7 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 				},
 			},
 			) {
-				clay.Text(label, clay.TextElementConfig{fontSize = 13, textColor = MUTED})
+				clay.Text(label, {fontSize = 13, textColor = theme.muted})
 			}
 			return
 		}
@@ -373,7 +359,7 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 						childGap = u16(10 * d),
 						childAlignment = {y = .Center},
 					},
-					backgroundColor = hovered ? HOVER : clay.Color{},
+					backgroundColor = hovered ? theme.hover : clay.Color{},
 					cornerRadius = clay.CornerRadiusAll(5 * d),
 				},
 				) {
@@ -393,20 +379,12 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 					) {
 						clay.Text(
 							device.name,
-							clay.TextElementConfig {
-								fontSize = 14,
-								textColor = WHITE,
-								wrapMode = .None,
-							},
+							{fontSize = 14, textColor = theme.text, wrapMode = .None},
 						)
 						subtitle := device.restricted ? "restricted" : device.type
 						clay.Text(
 							subtitle,
-							clay.TextElementConfig {
-								fontSize = 12,
-								textColor = MUTED,
-								wrapMode = .None,
-							},
+							{fontSize = 12, textColor = theme.muted, wrapMode = .None},
 						)
 					}
 				}

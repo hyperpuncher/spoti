@@ -99,7 +99,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		if !testing.expect(t, key != 0 && texture != nil) {continue}
 		r, g, b: u8
 		testing.expect(t, sdl.GetTextureColorMod(texture, &r, &g, &b))
-		color := key == textures.fade_top || key == textures.fade_bottom ? SIDEBAR : BG
+		color := key == textures.fade_top || key == textures.fade_bottom ? theme.sidebar : theme.bg
 		testing.expect(t, r == u8(color.r) && g == u8(color.g) && b == u8(color.b))
 	}
 	banner_texture := sdl.CreateTextureFromSurface(renderer, surface)
@@ -245,7 +245,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 							if command.id == clay.ID("card", 0).id &&
 							   command.commandType == .Rectangle {
 								found_selected =
-									command.renderData.rectangle.backgroundColor == SELECTED
+									command.renderData.rectangle.backgroundColor == theme.selected
 							}
 						}
 						testing.expect(
@@ -558,7 +558,7 @@ selected_card_matches_both_source_and_id :: proc(t: ^testing.T) {
 	testing.expect(t, card_selected(&entry, &detail))
 	detail.ready = false
 	testing.expect(t, !card_selected(&entry, &detail))
-	testing.expect(t, SELECTED.r > SIDEBAR.r && SELECTED.r < HOVER.r)
+	testing.expect(t, theme.selected.r > theme.sidebar.r && theme.selected.r < theme.hover.r)
 }
 
 @(test)
