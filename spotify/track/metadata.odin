@@ -87,6 +87,34 @@ diagnosis_file :: proc(bytes: []u8, diagnosis: ^Metadata_Diagnosis) {
 	}
 }
 
+// An unscoped empty country allowlist rules out every market. Do not apply
+// catalogue-specific restrictions here or discard a relinked alternative.
+unavailable_everywhere :: proc(message: []u8) -> bool {
+	blocked := false
+	pos := 0
+	for pos < len(message) {
+		field, wire, restriction, _, valid := ap.next_field(message, &pos)
+		if !valid || field == 13 {return false}
+		if field != 11 || wire != 2 {continue}
+		allowed, present, readable := ap.get_bytes(restriction, 2)
+		_, catalogue, catalogue_valid := ap.get_bytes(restriction, 1)
+		_, named, named_valid := ap.get_bytes(restriction, 5)
+		kind, _, kind_valid := ap.get_number(restriction, 4)
+		if readable &&
+		   present &&
+		   len(allowed) == 0 &&
+		   catalogue_valid &&
+		   !catalogue &&
+		   named_valid &&
+		   !named &&
+		   kind_valid &&
+		   kind == 0 {
+			blocked = true
+		}
+	}
+	return blocked
+}
+
 // metadata.proto Track from the private metadata service. Identity is
 // required; a file is optional because the dedicated AUDIO_FILES extension
 // carries it for tracks the Track message leaves without a file list. A

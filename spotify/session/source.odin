@@ -116,9 +116,10 @@ open :: proc(
 	track_url: string = TRACK_URL,
 	unavailable: ^bool = nil,
 ) -> (
-	source: Source,
+	result: Source,
 	ok: bool,
 ) {
+	source: Source
 	if unavailable != nil {unavailable^ = false}
 	defer if !ok {close_source(&source)}
 	id, valid := track.parse_id(track_url)
@@ -148,13 +149,9 @@ open :: proc(
 	if cancelled(cancel) {return}
 	// Fully cached audio needs no network at all: no tokens, no
 	// storage-resolve, no CDN. Anything missing resolves its URL below.
-	if audio.disk_cache_complete(source.file_id) {
-		ok = true
-		return
-	}
+	if audio.disk_cache_complete(source.file_id) {return source, true}
 	fetch_cdn_url(keyring_mode, cancel, source.file_id, &source) or_return
-	ok = true
-	return
+	return source, true
 }
 
 // One storage-resolve round trip for a known file id. Authorizes here so
@@ -193,9 +190,10 @@ resolve_source :: proc(
 	cancel: ^bool,
 	unavailable: ^bool = nil,
 ) -> (
-	source: Source,
+	result: Source,
 	ok: bool,
 ) {
+	source: Source
 	defer if !ok {close_source(&source)}
 	metadata, have_metadata := fetch_track_metadata(access, id, cancel, unavailable)
 	if !have_metadata {return}
@@ -206,7 +204,8 @@ resolve_source :: proc(
 	defer sync.unlock(&connection_mutex)
 	if !start_connection_worker() {return}
 	source.key, ok = fetch_audio_key(&connection, access, id, source.file_id, cancel)
-	return
+	if !ok {return}
+	return source, true
 }
 
 // The audio key request is the only transaction the shared transport serves
@@ -314,6 +313,10 @@ parse_track_response :: proc(
 	parsed, parsed_valid := track.parse_track(track_payload, id)
 	if !parsed_valid {
 		diagnose_track_metadata(track_payload)
+		return {}, false
+	}
+	if track.unavailable_everywhere(track_payload) {
+		if unavailable != nil {unavailable^ = true}
 		return {}, false
 	}
 	metadata = parsed

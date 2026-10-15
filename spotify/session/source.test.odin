@@ -19,6 +19,10 @@ resolve_cache_returns_stored_tracks_and_clears :: proc(t: ^testing.T) {
 	source.file_id[0] = 12
 	source.key[0] = 13
 	resolve_cache_store(id, &source)
+	cancel := true
+	failed, opened := open(.None, &cancel, track.base62_id(id, context.temp_allocator))
+	defer close_source(&failed)
+	testing.expect(t, !opened && failed.name == "", "failed opens must not return freed ownership")
 	entry, ok := resolve_cache_lookup(id)
 	testing.expect(t, ok, "stored track hits")
 	if !ok {return}
@@ -90,5 +94,10 @@ empty_audio_files_are_unavailable_but_missing_extensions_are_not :: proc(t: ^tes
 	defer delete(files)
 	append(&body, ..files[:])
 	_, ok = parse_track_response(body[:], id, &unavailable)
+	testing.expect(t, !ok && unavailable)
+	append(&message, 0x5a, 2, 0x12, 0) // restriction.countries_allowed = ""
+	restricted := availability_extension(ap.TRACK_V4, 200, message[:])
+	defer delete(restricted)
+	_, ok = parse_track_response(restricted[:], id, &unavailable)
 	testing.expect(t, !ok && unavailable)
 }

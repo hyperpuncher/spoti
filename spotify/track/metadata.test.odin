@@ -201,3 +201,15 @@ audio_files_extension_selects_the_best_file :: proc(t: ^testing.T) {
 	testing.expect(t, parse_audio_files(message[:], &track))
 	testing.expect(t, track.format == .Vorbis_320 && track.file_id[0] == 'C')
 }
+
+@(test)
+global_unavailability_preserves_unknown_and_relinked_tracks :: proc(t: ^testing.T) {
+	// Track.restriction { countries_allowed: "" }, as returned for removed tracks.
+	testing.expect(t, unavailable_everywhere([]u8{0x5a, 2, 0x12, 0}))
+	testing.expect(t, !unavailable_everywhere(nil))
+	testing.expect(t, !unavailable_everywhere([]u8{0x5a, 0}))
+	// A catalogue condition is not a global restriction.
+	testing.expect(t, !unavailable_everywhere([]u8{0x5a, 4, 0x12, 0, 0x08, 1}))
+	// Alternatives must retain the existing relinking path.
+	testing.expect(t, !unavailable_everywhere([]u8{0x5a, 2, 0x12, 0, 0x6a, 0}))
+}

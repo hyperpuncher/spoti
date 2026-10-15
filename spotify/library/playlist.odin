@@ -327,7 +327,12 @@ parse_playlist_metadata :: proc(
 			if !has_data || !data_valid {return}
 			metadata, has_payload, payload_valid := ap.get_bytes(any, 2)
 			if !has_payload || !payload_valid {return}
-			row, row_valid := playlist_track_row(metadata, uri, allocator)
+			unavailable := false
+			row, row_valid := playlist_track_row(metadata, uri, allocator, &unavailable)
+			if unavailable {
+				if id, valid := playlist_track_id(uri); valid {session.mark_track_unavailable(id)}
+				continue
+			}
 			if !row_valid {return}
 			answer.row = row
 		}
@@ -353,15 +358,21 @@ playlist_track_row :: proc(
 	body: []u8,
 	uri: string,
 	allocator: runtime.Allocator,
+	unavailable: ^bool = nil,
 ) -> (
 	row: Track_Row,
 	ok: bool,
 ) {
+	if unavailable != nil {unavailable^ = false}
 	id, id_valid := playlist_track_id(uri)
 	if !id_valid {return}
 	gid, found, gid_valid := ap.get_bytes(body, 1)
 	if !found || !gid_valid || len(gid) != 16 {return}
 	for b, i in gid {if b != id[i] {return}}
+	if track.unavailable_everywhere(body) {
+		if unavailable != nil {unavailable^ = true}
+		return
+	}
 	name, present, readable := ap.get_bytes(body, 2)
 	if !present || !readable {return}
 	duration, _, decoded := ap.get_number(body, 7)
