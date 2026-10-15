@@ -19,11 +19,8 @@ emoji, such as Noto Color Emoji on Linux. see
 | vorbisfile | system package | `brew install libvorbis` | vcpkg `libvorbis` |
 | libwebp | system package | `brew install webp` | vcpkg `libwebp` |
 | credential store | libsecret | system Keychain | system Credential Manager |
-| MPRIS | libsystemd, optional | not used | not used |
+| MPRIS | libsystemd | not used | not used |
 
-Connect needs libcurl 7.86 or later with `ws` and `wss` support.
-check the protocol list with `curl --version`. macOS builds use
-Homebrew curl because the system library does not provide this API.
 macOS also needs the Xcode command line tools.
 
 on Windows, install Odin and `just` with winget and the C libraries with
@@ -45,7 +42,7 @@ just check
 just test
 ```
 
-`just test` runs all 13 test suites. root layout tests run on one thread
+`just test` runs all 14 test suites. root layout tests run on one thread
 because Clay stores its current context in a process-global variable.
 Odin memory tracking remains enabled. tests do not contact Spotify or start
 browser approval. run live backend probes separately, with explicit permission.
@@ -78,7 +75,7 @@ Windows x64. Linux and macOS use official Odin release archives.
 the Linux job runs `just check` and `just test` on pushes to `main` and
 pull requests. release builds run only on manual dispatch; macOS and
 Windows wait for Linux. actions use major-version tags. no Spotify
-credentials are needed.
+credentials are needed. macOS checks credential queries without Keychain access.
 
 download the `.tar.zst` artifact from a successful manual run. Linux and
 Windows include the binary and assets. Windows also includes DLLs and a
@@ -98,7 +95,8 @@ and [dylibbundler usage](https://github.com/auriamg/macdylibbundler#using-dylibb
 ## curl and linker flags
 
 Connect's Dealer socket uses libcurl's WebSocket API, which needs curl
-7.86 or newer with `ws`/`wss` support. Linux links the system curl.
+7.86 or newer with `ws`/`wss` support. check the protocol list with
+`curl --version`. Linux links the system curl.
 macOS links Homebrew curl because the system library lacks that API; the
 `justfile` adds its library path by default. Windows has no system curl
 development files, so CI builds curl with the `websockets` feature via

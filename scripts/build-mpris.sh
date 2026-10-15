@@ -1,11 +1,9 @@
 #!/bin/sh
 set -eu
 
-# Thin MPRIS sd-bus bridge; the C vtable glue cannot live in Odin.
-if ! pkg-config --exists libsystemd; then
-	echo "build-mpris.sh: libsystemd not found; skipping MPRIS bridge" >&2
-	exit 0
-fi
+# The Linux backend links this bridge and libsystemd unconditionally.
+[ "$(uname -s)" = Linux ] || exit 0
+pkg-config --print-errors --exists libsystemd
 source=spotify/mpris/mpris_sd_bus.c
 archive=build/mpris_sd_bus.a
 mkdir -p build
