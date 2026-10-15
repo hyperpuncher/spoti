@@ -20,35 +20,28 @@ Cursor_Kind :: enum {
 }
 
 State :: struct {
-	window:             ^sdl.Window,
-	renderer:           ^sdl.Renderer,
-	font_path:          string,
-	font_index:         int,
-	numeric_font_path:  string,
-	numeric_font_index: int,
-	bold_font_path:     string,
-	bold_font_index:    int,
-	medium_font_path:   string,
-	medium_font_index:  int,
-	hinting:            ttf.Hinting,
-	font_config:        ^fontconfig.Config,
-	fallback_sources:   [dynamic]Font_Source,
-	fallback_matches:   map[u64]int,
-	fonts:              map[int]^ttf.Font,
-	text_engine:        ^ttf.TextEngine,
-	texts:              [dynamic]^ttf.Text,
-	text_count:         int,
-	emoji:              ^Emoji_Cache,
-	density:            f32,
-	masks:              map[u64]^sdl.Texture,
-	cursors:            [Cursor_Kind]^sdl.Cursor,
-	cursor:             Cursor_Kind,
-	vsync:              bool,
-	debug:              bool,
-	fps_started:        u64,
-	fps_frames:         u32,
-	fps:                u32,
-	text_measures:      u64,
+	window:           ^sdl.Window,
+	renderer:         ^sdl.Renderer,
+	font_sources:     [Font_Role]Font_Source,
+	hinting:          ttf.Hinting,
+	font_config:      ^fontconfig.Config,
+	fallback_sources: [dynamic]Font_Source,
+	fallback_matches: map[u64]int,
+	fonts:            map[int]^ttf.Font,
+	text_engine:      ^ttf.TextEngine,
+	texts:            [dynamic]^ttf.Text,
+	text_count:       int,
+	emoji:            ^Emoji_Cache,
+	density:          f32,
+	masks:            map[u64]^sdl.Texture,
+	cursors:          [Cursor_Kind]^sdl.Cursor,
+	cursor:           Cursor_Kind,
+	vsync:            bool,
+	debug:            bool,
+	fps_started:      u64,
+	fps_frames:       u32,
+	fps:              u32,
+	text_measures:    u64,
 }
 
 open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
@@ -95,14 +88,10 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 	if !state.vsync {fmt.eprintln("SDL3 vsync unavailable; limiting frames to about 60 fps")}
 	state.debug = SPOTI_DEBUG || len(os.get_env("SPOTI_DEBUG", context.temp_allocator)) > 0
 	state.fps_started = sdl.GetTicks()
-	state.font_path, state.font_index, ok = resolve_role(.Regular)
-	if !ok {close(&state); return}
-	state.numeric_font_path, state.numeric_font_index, ok = resolve_role(.Numeric)
-	if !ok {close(&state); return}
-	state.bold_font_path, state.bold_font_index, ok = resolve_role(.Bold)
-	if !ok {close(&state); return}
-	state.medium_font_path, state.medium_font_index, ok = resolve_role(.Medium)
-	if !ok {close(&state); return}
+	for &source, role in state.font_sources {
+		source.path, source.index, ok = resolve_role(role)
+		if !ok {close(&state); return}
+	}
 	state.hinting = system_hinting()
 	resolve_fallbacks(&state)
 	state.fonts = make(map[int]^ttf.Font)
@@ -128,10 +117,7 @@ close :: proc(state: ^State) {
 	if state.text_engine != nil {ttf.DestroyRendererTextEngine(state.text_engine)}
 	for _, font in state.fonts {ttf.CloseFont(font)}
 	delete(state.fonts)
-	delete(state.font_path)
-	delete(state.numeric_font_path)
-	delete(state.bold_font_path)
-	delete(state.medium_font_path)
+	for source in state.font_sources {delete(source.path)}
 	for source in state.fallback_sources {delete(source.path, state.fallback_sources.allocator)}
 	delete(state.fallback_sources)
 	delete(state.fallback_matches)

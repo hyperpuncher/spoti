@@ -16,9 +16,7 @@ text_pool_reuses_updates_and_releases_visible_frame_slots :: proc(t: ^testing.T)
 	if !testing.expect(t, ok) {return}
 	defer delete(path)
 	state := State {
-		font_path  = path,
-		font_index = face,
-		fonts      = make(map[int]^ttf.Font),
+		fonts = make(map[int]^ttf.Font),
 	}
 	defer {
 		for content in state.texts {ttf.DestroyText(content)}
@@ -27,6 +25,7 @@ text_pool_reuses_updates_and_releases_visible_frame_slots :: proc(t: ^testing.T)
 		for _, font in state.fonts {ttf.CloseFont(font)}
 		delete(state.fonts)
 	}
+	state.font_sources[.Regular] = {path, face}
 	state.text_engine = ttf.CreateSurfaceTextEngine()
 	if !testing.expect(t, state.text_engine != nil) {return}
 	font := font_for_size(&state, 14)

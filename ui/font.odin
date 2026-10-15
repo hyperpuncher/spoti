@@ -26,7 +26,7 @@ GEIST_FACE_REGULAR :: 0
 GEIST_FACE_MEDIUM :: (5 << 16)
 GEIST_FACE_EXTRA_BOLD :: (8 << 16)
 
-FONT_ROLE_COUNT :: u16(4)
+FONT_ROLE_COUNT :: u16(len([Font_Role]Font_Source{}))
 
 Font_Source :: struct {
 	path:  string,
@@ -133,22 +133,15 @@ font_for_size :: proc(state: ^State, size: f32, font_id: u16 = 0) -> ^ttf.Font {
 	size_key := max(1, int(size * 8 + 0.5))
 	key := size_key | int(font_id) << 24
 	if font, found := state.fonts[key]; found {return font}
-	path, face := state.font_path, state.font_index
-	switch font_id {
-	case 1:
-		path, face = state.numeric_font_path, state.numeric_font_index
-	case 2:
-		path, face = state.bold_font_path, state.bold_font_index
-	case 3:
-		path, face = state.medium_font_path, state.medium_font_index
-	}
-	if font_id >= FONT_ROLE_COUNT {
+	source: Font_Source
+	if font_id < FONT_ROLE_COUNT {
+		source = state.font_sources[Font_Role(font_id)]
+	} else {
 		index := int(font_id - FONT_ROLE_COUNT)
 		if index >= len(state.fallback_sources) {return nil}
-		source := state.fallback_sources[index]
-		path, face = source.path, source.index
+		source = state.fallback_sources[index]
 	}
-	font := open_font({path, face}, f32(size_key) / 8, state.hinting)
+	font := open_font(source, f32(size_key) / 8, state.hinting)
 	if font != nil {state.fonts[key] = font}
 	return font
 }

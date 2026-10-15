@@ -39,7 +39,9 @@ system_emoji_images_join_and_scale_without_changing_text_metrics :: proc(t: ^tes
 	}
 	defer close(&state)
 	ok: bool
-	state.font_path, state.font_index, ok = resolve_role(.Regular)
+	state.font_sources[.Regular].path, state.font_sources[.Regular].index, ok = resolve_role(
+		.Regular,
+	)
 	if !testing.expect(t, ok) {return}
 	config := fontconfig.InitLoadConfigAndFonts()
 	if !testing.expect(t, config != nil) {return}

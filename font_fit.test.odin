@@ -19,7 +19,9 @@ card_title_truncation_keeps_complete_unicode_characters :: proc(t: ^testing.T) {
 	}
 	defer ui.close(&state)
 	ok: bool
-	state.font_path, state.font_index, ok = ui.resolve_role(.Regular)
+	state.font_sources[.Regular].path, state.font_sources[.Regular].index, ok = ui.resolve_role(
+		.Regular,
+	)
 	if !testing.expect(t, ok) {return}
 	ui.resolve_fallbacks(&state)
 	for text in ([]string{"Rally House🚘💨", "千葉雄喜 チーム友達", "Квартирный Вопрос"}) {

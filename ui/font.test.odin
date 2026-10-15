@@ -14,15 +14,11 @@ text_fallbacks_cover_scripts_and_symbols_without_replacing_geist :: proc(t: ^tes
 		fonts = make(map[int]^ttf.Font),
 	}
 	defer close(&state)
-	ok: bool
-	state.font_path, state.font_index, ok = resolve_role(.Regular)
-	if !testing.expect(t, ok) {return}
-	state.numeric_font_path, state.numeric_font_index, ok = resolve_role(.Numeric)
-	if !testing.expect(t, ok) {return}
-	state.bold_font_path, state.bold_font_index, ok = resolve_role(.Bold)
-	if !testing.expect(t, ok) {return}
-	state.medium_font_path, state.medium_font_index, ok = resolve_role(.Medium)
-	if !testing.expect(t, ok) {return}
+	for &source, role in state.font_sources {
+		ok: bool
+		source.path, source.index, ok = resolve_role(role)
+		if !testing.expect(t, ok) {return}
+	}
 	resolve_fallbacks(&state)
 	if !testing.expect(t, state.font_config != nil) {return}
 	for size in ([]f32{14, 28, 84}) {
