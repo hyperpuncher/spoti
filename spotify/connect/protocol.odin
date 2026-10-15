@@ -123,9 +123,9 @@ encode_state :: proc(
 	ap.put_bytes(&player, 16, options[:])
 	put_string(&player, 23, session_id)
 	if snapshot.context_uri != "" {put_string(&player, 2, snapshot.context_uri)}
+	provided := make([dynamic]u8)
+	defer delete(provided)
 	if snapshot.uri != "" {
-		provided := make([dynamic]u8)
-		defer delete(provided)
 		put_string(&provided, 1, snapshot.uri)
 		put_string(&provided, 6, "context")
 		ap.put_bytes(&player, 7, provided[:])
@@ -138,11 +138,10 @@ encode_state :: proc(
 		ap.put_bytes(&player, 6, context_index[:])
 		for uri, track_index in snapshot.tracks {
 			if track_index == index {continue}
-			provided := make([dynamic]u8)
+			clear(&provided)
 			put_string(&provided, 1, uri)
 			put_string(&provided, 6, "context")
 			ap.put_bytes(&player, track_index < index ? 19 : 20, provided[:])
-			delete(provided)
 		}
 		revision := fmt.aprintf("%d", snapshot.queue_revision, allocator = context.temp_allocator)
 		put_string(&player, 24, revision)

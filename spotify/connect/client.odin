@@ -12,6 +12,7 @@ import "core:bytes"
 import gzip "core:compress/gzip"
 import "core:crypto"
 import "core:encoding/base64"
+import "core:encoding/endian"
 import "core:encoding/hex"
 import "core:encoding/json"
 import "core:fmt"
@@ -200,12 +201,7 @@ dealer_payload :: proc(encoded: string) -> (data: []u8, compressed, ok: bool) {
 	compressed = true
 	// Gzip stores its uncompressed size in the final little-endian word.
 	if len(decoded) < 18 {return nil, true, false}
-	last := len(decoded) - 4
-	size :=
-		u64(decoded[last]) |
-		u64(decoded[last + 1]) << 8 |
-		u64(decoded[last + 2]) << 16 |
-		u64(decoded[last + 3]) << 24
+	size := endian.unchecked_get_u32le(decoded[len(decoded) - 4:])
 	if size > http.WS_LIMIT {return nil, true, false}
 	buffer: bytes.Buffer
 	if gzip.load(
