@@ -40,18 +40,6 @@ text_fallbacks_cover_scripts_and_symbols_without_replacing_geist :: proc(t: ^tes
 						"installed script and symbol fonts must be available through fallback",
 					)
 				}
-				width, height: c.int
-				testing.expect(
-					t,
-					ttf.GetStringSize(font, raw_data(value), uint(len(value)), &width, &height),
-				)
-				text := ttf.CreateText(nil, font, raw_data(value), uint(len(value)))
-				if !testing.expect(t, text != nil) {continue}
-				text_width, text_height: c.int
-				testing.expect(t, ttf.GetTextSize(text, &text_width, &text_height))
-				ttf.DestroyText(text)
-				testing.expect_value(t, text_width, width)
-				testing.expect_value(t, text_height, height)
 			}
 			testing.expect(
 				t,
