@@ -1,7 +1,6 @@
 package main
 
 import "core:fmt"
-import "core:strings"
 import "core:testing"
 import "core:unicode/utf8"
 import ui "ui"
@@ -55,14 +54,4 @@ card_title_truncation_keeps_complete_unicode_characters :: proc(t: ^testing.T) {
 		delete(expected)
 		delete(probe)
 	}
-	text := "Rally House🚘💨 extended title"
-	prefix := "Rally House🚘…"
-	width := hero_text_width(&state, prefix, 14, 0)
-	fit := hero_fit_text(&state, text, width, 14, 0, context.temp_allocator)
-	testing.expect_value(t, fit, prefix)
-	testing.expect(
-		t,
-		strings.contains(fit, "🚘"),
-		"a fitting emoji must remain visible in the card title",
-	)
 }

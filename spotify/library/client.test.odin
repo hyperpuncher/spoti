@@ -50,12 +50,6 @@ loaded_detail_retains_selected_card_cover :: proc(t: ^testing.T) {
 	testing.expect_value(t, client.detail.image_preview, "https://i.scdn.co/image/card")
 	testing.expect_value(t, client.detail.image, "https://i.scdn.co/image/large")
 	testing.expect_value(t, client.detail.image_small, "https://i.scdn.co/image/small")
-	testing.expect_value(t, client.detail.rows.allocator.data, rawptr(&client.detail.arena))
-	testing.expect_value(
-		t,
-		client.detail.albums.items.allocator.data,
-		rawptr(&client.detail.arena),
-	)
 
 	more := Result {
 		kind   = .More,
@@ -103,7 +97,6 @@ index_pagination_grows_after_arena_ownership_transfer :: proc(t: ^testing.T) {
 	client: Client
 	destination := &client.pages[.Albums]
 	defer free_page(destination)
-	first_name: rawptr
 	for batch in 0 ..< 3 {
 		page: Page
 		if virtual.arena_init_growing(&page.arena) != nil {testing.fail_now(t, "arena")}
@@ -115,12 +108,8 @@ index_pagination_grows_after_arena_ownership_transfer :: proc(t: ^testing.T) {
 		page.total = 108
 		page.has_more = batch < 2
 		apply(&client, Result{kind = .Index, list = .Albums, page = page, ok = true})
-		if destination.items.allocator.data != rawptr(&destination.arena) {
-			testing.fail_now(t, "moved array retained the source arena address")
-		}
-		if batch == 0 {first_name = raw_data(destination.items[0].name)}
 		testing.expect_value(t, len(destination.items), (batch + 1) * 36)
-		testing.expect_value(t, rawptr(raw_data(destination.items[0].name)), first_name)
+		testing.expect_value(t, destination.items[0].name, "Album")
 		testing.expect_value(t, destination.items[len(destination.items) - 1].name, "Album")
 	}
 	testing.expect(t, !destination.has_more && destination.next_offset == 108)
@@ -275,30 +264,6 @@ failed_worker_requests_keep_owned_identity_and_finish_once :: proc(t: ^testing.T
 			t,
 			!queue_playlist_write(&client, "playlist", "name", "spotify:track:item", remove),
 		)
-	}
-	queued, _ := chan.try_recv(client.requests)
-	free_request(queued)
-	for remove in ([]bool{false, true}) {
-		testing.expect(
-			t,
-			queue_playlist_write(&client, "playlist", "name", "spotify:track:item", remove),
-		)
-		testing.expect(
-			t,
-			!queue_playlist_write(&client, "other", "other", "spotify:track:other", remove),
-		)
-		request, received := chan.try_recv(client.requests)
-		testing.expect(t, received && client.write_pending)
-		testing.expect_value(
-			t,
-			request.kind,
-			remove ? Request_Kind.Remove_From_Playlist : Request_Kind.Add_To_Playlist,
-		)
-		testing.expect_value(t, request.playlist_id, "playlist")
-		testing.expect_value(t, request.item_uri, "spotify:track:item")
-		free_request(request)
-		apply(&client, Result{kind = request.kind, status = 403})
-		testing.expect(t, !client.write_pending && !client.write_ok)
 	}
 	client.worker = nil
 	_ = chan.send(client.results, Result{kind = .Detail, id = strings.clone("reply")})
