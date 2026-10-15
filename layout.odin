@@ -657,19 +657,12 @@ toast_banner :: proc(view: View, d: f32) {
 	}
 }
 
-// The app is unusable until the account is approved, so sign-in takes over
-// the whole window instead of sharing it with an empty library.
-sign_in_pending :: proc(state: library.State) -> bool {
-	return state == .Authorizing || state == .Sign_In_Failed || state == .Missing_Client_ID
-}
-
 // First-run setup stores the personal Spotify app key in the system
 // keyring, so no environment variable is needed afterwards.
 SPOTIFY_DASHBOARD :: "https://developer.spotify.com/dashboard"
 
 sign_in_screen :: proc(
 	state: library.State,
-	browser_ready: bool,
 	setup_input: string,
 	setup_active: bool,
 	setup_error: string,
@@ -696,19 +689,15 @@ sign_in_screen :: proc(
 			},
 		},
 		) {
-			title := "Signing in..."
-			line := "Checking your saved Spotify approval."
+			title := "Connect to Spotify"
+			line := "Approve access in your browser to load your library."
 			button_id, button_label := "", ""
 			if state == .Missing_Client_ID {
 				setup_screen(setup_input, setup_active, setup_error, d)
 			} else {
 				switch state {
 				case .Authorizing:
-					if browser_ready {
-						title = "Connect to Spotify"
-						line = "Approve access in your browser to load your library."
-						button_id, button_label = "library_sign_in", "Sign in with Spotify"
-					}
+					button_id, button_label = "library_sign_in", "Sign in with Spotify"
 				case .Sign_In_Failed:
 					title = "Could not sign in"
 					line = "Browser approval did not complete."
@@ -829,7 +818,9 @@ layout :: proc(
 	visible: Frame_Visible
 	clay.SetLayoutDimensions({viewport_width, viewport_height})
 	clay.BeginLayout()
-	if sign_in_pending(client.state) {
+	if client.state == .Missing_Client_ID ||
+	   client.state == .Sign_In_Failed ||
+	   client.state == .Authorizing && view.sign_in {
 		if clay.UI()(
 		{
 			layout = {
@@ -840,14 +831,7 @@ layout :: proc(
 			backgroundColor = theme.bg,
 		},
 		) {
-			sign_in_screen(
-				client.state,
-				view.sign_in,
-				view.input,
-				view.input_active,
-				view.setup_error,
-				d,
-			)
+			sign_in_screen(client.state, view.input, view.input_active, view.setup_error, d)
 			toast_banner(view, d)
 		}
 	} else if clay.UI()(
