@@ -1157,15 +1157,23 @@ hero_fit_text :: proc(
 	if state == nil || len(text) == 0 {return text}
 	if hero_text_width(state, text, size, font) <= width {return text}
 	scratch := make([]u8, len(text) + len("…"), allocator)
-	// Every measurement probe ends at a complete grapheme cluster.
-	boundaries := make([dynamic]int, 0, len(text) + 1, context.temp_allocator)
-	it := utf8.decode_grapheme_iterator_make(text)
-	for _, grapheme in utf8.decode_grapheme_iterate(&it) {append(&boundaries, grapheme.byte_index)}
-	append(&boundaries, len(text))
-	lo, hi := 0, len(boundaries) - 1
+	// ASCII bytes are grapheme boundaries, except for the CRLF pair.
+	ascii := true
+	for ch in transmute([]u8)text {
+		if ch >= 0x80 || ch == '\r' {ascii = false; break}
+	}
+	boundaries: [dynamic]int
+	lo, hi := 0, len(text)
+	if !ascii {
+		boundaries = make([dynamic]int, 0, len(text) + 1, context.temp_allocator)
+		it := utf8.decode_grapheme_iterator_make(text)
+		for _, grapheme in utf8.decode_grapheme_iterate(&it) {append(&boundaries, grapheme.byte_index)}
+		append(&boundaries, len(text))
+		hi = len(boundaries) - 1
+	}
 	for lo < hi {
 		mid := (lo + hi + 1) / 2
-		end := boundaries[mid]
+		end := ascii ? mid : boundaries[mid]
 		copy(scratch, text[:end])
 		copy(scratch[end:], "…")
 		probe := string(scratch[:end + len("…")])
@@ -1175,7 +1183,7 @@ hero_fit_text :: proc(
 			hi = mid - 1
 		}
 	}
-	end := boundaries[lo]
+	end := ascii ? lo : boundaries[lo]
 	copy(scratch, text[:end])
 	copy(scratch[end:], "…")
 	return string(scratch[:end + len("…")])
@@ -1213,7 +1221,8 @@ artist_links_row :: proc(
 	id: string,
 	base: u32,
 ) {
-	comma_w := hero_text_width(ui_state, ", ", 14, 0)
+	comma_w: f32
+	if len(links) > 1 {comma_w = hero_text_width(ui_state, ", ", 14, 0)}
 	used := f32(0)
 	for ai in 0 ..< min(len(links), 64) {
 		link := links[ai]
