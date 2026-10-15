@@ -4,6 +4,7 @@ package main
 
 import c "core:c"
 import "core:fmt"
+import "core:hash"
 import "core:os"
 import artwork "spotify/artwork"
 import library "spotify/library"
@@ -80,11 +81,9 @@ icon_tint_color :: proc(tint: Icon_Tint, dark: bool) -> (r, g, b: u8) {
 	return 245, 245, 245
 }
 
-ICON_TINTS :: [?]Icon_Tint{.White, .Muted, .Green, .Dark, .Disabled, .Hover}
-
 retint_icons :: proc(textures: ^Textures, dark: bool) {
 	for name in ICON_NAMES {
-		for tint in ICON_TINTS {
+		for tint in Icon_Tint {
 			texture := textures.by_key[icon_key(name, tint)]
 			if texture == nil {continue}
 			r, g, b := icon_tint_color(tint, dark)
@@ -94,8 +93,9 @@ retint_icons :: proc(textures: ^Textures, dark: bool) {
 }
 
 icon_key :: proc(name: string, tint: Icon_Tint) -> u64 {
-	buffer: [64]u8
-	return library.url_key(fmt.bprintf(buffer[:], "icon:%s:%d", name, int(tint)))
+	// Keys are process-local; separate the name and tint without formatting.
+	suffix := [2]u8{0, u8(tint)}
+	return hash.fnv64a(suffix[:], library.url_key(name))
 }
 
 load_app_icon :: proc(state: ^ui.State) {
@@ -135,7 +135,7 @@ load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 		image, decoded := artwork.decode(bytes)
 		delete(bytes)
 		if !decoded {continue}
-		for tint in ICON_TINTS {
+		for tint in Icon_Tint {
 			texture := ui.create_texture(state, image.pixels, image.width, image.height)
 			if texture != nil {
 				r, g, b := icon_tint_color(tint, dark)
