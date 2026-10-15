@@ -21,15 +21,8 @@ Metadata :: struct {
 // Quality ranking, best first. Zero marks a format this client cannot decode,
 // so it is never selected.
 format_rank :: proc(format: u64) -> int {
-	switch format {
-	case 2:
-		return 3 // OGG_VORBIS_320
-	case 1:
-		return 2 // OGG_VORBIS_160
-	case 0:
-		return 1 // OGG_VORBIS_96
-	}
-	return 0
+	if format > u64(Audio_Format.Vorbis_320) {return 0}
+	return int(format) + 1
 }
 
 // Keep the best ranked file of an AudioFile message seen so far.
@@ -104,9 +97,9 @@ parse_track :: proc(message: []u8, expected_id: [16]u8) -> (track: Metadata, ok:
 	gid: []u8
 	seen_name, seen_duration := false, false
 	best := 0
-	alternatives: [dynamic][]u8
-	defer delete(alternatives)
+	alternative_tail: []u8
 	for pos < len(message) {
+		start := pos
 		field, wire, bytes, number, valid := ap.next_field(message, &pos)
 		if !valid {return {}, false}
 		switch field {
@@ -127,13 +120,18 @@ parse_track :: proc(message: []u8, expected_id: [16]u8) -> (track: Metadata, ok:
 			select_file(bytes, &track, &best)
 		case 13:
 			if wire != 2 {return {}, false}
-			append(&alternatives, bytes)
+			if alternative_tail == nil {alternative_tail = message[start:]}
 		}
 	}
 	if len(gid) != len(expected_id) || !seen_name || !seen_duration {return {}, false}
 	for i in 0 ..< 16 {if gid[i] != expected_id[i] {return {}, false}}
 	if best == 0 {
-		for alternative in alternatives {
+		// The outer fields are already validated. Revisit only the tail
+		// with alternatives instead of allocating a list of message views.
+		pos = 0
+		for pos < len(alternative_tail) {
+			outer_field, _, alternative, _, _ := ap.next_field(alternative_tail, &pos)
+			if outer_field != 13 {continue}
 			cursor := 0
 			for cursor < len(alternative) {
 				field, wire, bytes, _, valid := ap.next_field(alternative, &cursor)

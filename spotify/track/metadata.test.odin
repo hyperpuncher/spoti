@@ -175,11 +175,19 @@ audio_format_falls_back_to_a_relinked_recording_alternative :: proc(t: ^testing.
 	// The primary has only an undecodable file; the alternative has Vorbis 320.
 	message := build_track(id, []u8{8})
 	defer delete(message)
+	unsupported := build_track(id, []u8{8})
+	defer delete(unsupported)
+	append_alternative(&message, unsupported[:])
+	append(&message, 0x1a, 0) // an unrelated Album between alternatives
 	alternative := build_track(id, []u8{2})
 	defer delete(alternative)
 	append_alternative(&message, alternative[:])
 	track, selected := parse_track(message[:], id)
 	testing.expect(t, selected && track.format == .Vorbis_320 && track.name == "test track")
+	// A primary file wins even when it follows the alternatives on the wire.
+	append_audio_file(&message, 'P', 1)
+	track, selected = parse_track(message[:], id)
+	testing.expect(t, selected && track.format == .Vorbis_160 && track.file_id[0] == 'P')
 }
 
 @(test)
