@@ -110,8 +110,7 @@ cache_prune :: proc(prefix: string, max_age: time.Duration) {
 	removed := 0
 	for entry in entries {
 		if entry.type == .Directory || time.since(entry.modification_time) <= max_age {continue}
-		path := fmt.aprintf("%s/%s", dir, entry.name, allocator = virtual.arena_allocator(&arena))
-		if os.remove(path) == nil {removed += 1}
+		if os.remove(entry.fullpath) == nil {removed += 1}
 	}
 	if removed > 0 {diagnostic.writef("library cache pruned prefix=%s files=%d", prefix, removed)}
 }
