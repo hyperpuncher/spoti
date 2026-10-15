@@ -149,6 +149,44 @@ discography_selection_clones_metadata_before_releasing_detail :: proc(t: ^testin
 	testing.expect_value(t, client.detail.name, "Release")
 	testing.expect_value(t, client.detail_request_id, "album")
 	testing.expect_value(t, client.detail.image_preview, "https://i.scdn.co/image/card")
+	// Jumping to singles must not drain albums that are outside the viewport.
+	client.detail.source = .Artist
+	client.detail_loading = false
+	client.detail.has_more, client.detail.albums.has_more = true, true
+	client.detail.singles = {
+		has_more    = true,
+		next_offset = 10,
+	}
+	testing.expect(t, more_rows(&client, .Single))
+	next, queued := chan.try_recv(requests)
+	defer if queued {free_request(next)}
+	testing.expect(t, queued && next.group == .Single && next.offset == 10)
+	apply(
+		&client,
+		{
+			kind = .More,
+			source = .Artist,
+			id = strings.clone("album"),
+			group = .Single,
+			status = 429,
+		},
+	)
+	testing.expect(
+		t,
+		!client.detail_loading &&
+		client.detail.singles.error == 429 &&
+		client.detail.singles.has_more,
+	)
+	apply(
+		&client,
+		{kind = .More, source = .Artist, id = strings.clone("album"), group = .Single, ok = true},
+	)
+	testing.expect(
+		t,
+		client.detail.singles.error == 0 &&
+		!client.detail.singles.has_more &&
+		client.detail.albums.has_more,
+	)
 }
 
 @(test)

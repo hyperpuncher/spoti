@@ -869,7 +869,11 @@ source_kind :: proc(source: Source) -> (kind: Kind, ok: bool) {
 // artist and back replays zero requests while the buffer stays fresh.
 detail_buffer_stash :: proc(client: ^Client) {
 	outgoing := &client.detail
-	if !outgoing.ready || outgoing.rows_error != 0 {return}
+	if !outgoing.ready ||
+	   client.detail_error != 0 ||
+	   outgoing.rows_error != 0 ||
+	   outgoing.albums.error != 0 ||
+	   outgoing.singles.error != 0 {return}
 	if len(outgoing.rows) == 0 &&
 	   len(outgoing.albums.items) == 0 &&
 	   len(outgoing.singles.items) == 0 {return}
@@ -880,7 +884,7 @@ detail_buffer_stash :: proc(client: ^Client) {
 detail_buffer_take :: proc(client: ^Client, source: Source, id: string, preview: Entry) -> bool {
 	prev := &client.prev_detail
 	if !prev.ready || prev.source != source || prev.id != id {return false}
-	if prev.rows_error != 0 {return false}
+	if prev.rows_error != 0 || prev.albums.error != 0 || prev.singles.error != 0 {return false}
 	if len(prev.rows) == 0 &&
 	   len(prev.albums.items) == 0 &&
 	   len(prev.singles.items) == 0 {return false}
@@ -947,19 +951,16 @@ detail_page_fresh :: proc(
 	return false
 }
 
-more_rows :: proc(client: ^Client) -> bool {
+more_rows :: proc(client: ^Client, group: Album_Group = .Album) -> bool {
 	if client.detail_loading || !client.detail.has_more {return false}
 	if len(client.detail.id) == 0 {return false}
-	// Artist sections page independently; albums drain before singles.
-	group := Album_Group.Album
+	// Page the requested artist section, not hidden albums before singles.
 	offset := client.detail.next_offset
 	if client.detail.source == .Artist {
-		if client.detail.albums.has_more {
-			offset = client.detail.albums.next_offset
-		} else if client.detail.singles.has_more {
-			group = .Single
-			offset = client.detail.singles.next_offset
-		} else {return false}
+		section := &client.detail.albums
+		if group == .Single {section = &client.detail.singles}
+		if !section.has_more {return false}
+		offset = section.next_offset
 	}
 	fresh := detail_page_fresh(client.detail.source, client.detail.id, offset, group)
 	if !fresh && time.since(client.page_at) < 0 {return false}
@@ -1044,6 +1045,12 @@ poll :: proc(client: ^Client) -> bool {
 apply :: proc(client: ^Client, result: Result) {
 	local := result
 	defer free_result(local)
+	defer {
+		// A cached fallback can hide a 429 from the result status. The shared
+		// HTTP deadline still applies to the next uncached page.
+		resume := http.web_api_resume_at()
+		if time.diff(client.page_at, resume) > 0 {client.page_at = resume}
+	}
 	switch local.kind {
 	case .Index:
 		if !local.ok {
@@ -1137,8 +1144,8 @@ apply :: proc(client: ^Client, result: Result) {
 		client.detail_loading = false
 		if !local.ok {
 			client.last_http_status = local.status
-			client.detail_error = local.status
-			client.state = local.status == 401 || local.status == 403 ? .Failed : client.state
+			client.detail_error = local.status != 0 ? local.status : -1
+			client.state = local.status == 401 ? .Failed : client.state
 			diagnostic.result("detail", false, local.status, 0, 0, false)
 			return
 		}
@@ -1201,6 +1208,14 @@ apply :: proc(client: ^Client, result: Result) {
 					client.detail.more_failures += 1
 					if client.detail.more_failures >= 3 {client.detail.has_more = false}
 				}
+				if local.source == .Artist {
+					group := &client.detail.albums
+					if local.group == .Single {group = &client.detail.singles}
+					group.error = local.status != 0 ? local.status : -1
+					if client.detail.more_failures >= 3 {group.has_more = false}
+					client.detail.has_more =
+						client.detail.albums.has_more || client.detail.singles.has_more
+				}
 			}
 			if local.ok && client.detail.ready {
 				client.detail.more_failures = 0
@@ -1213,6 +1228,7 @@ apply :: proc(client: ^Client, result: Result) {
 					for release in local.releases {
 						append(&group.items, clone_entry(release, allocator))
 					}
+					group.error = 0
 					group.total = local.total
 					group.next_offset = local.next_offset
 					group.has_more = local.has_more

@@ -581,6 +581,25 @@ visible_items_preserve_partial_rows_and_overscan :: proc(t: ^testing.T) {
 }
 
 @(test)
+artist_paging_follows_visible_cards :: proc(t: ^testing.T) {
+	client: library.Client
+	client.detail.ready, client.detail.has_more = true, true
+	client.detail.source = .Artist
+	client.detail.albums.has_more, client.detail.singles.has_more = true, true
+	client.detail.albums.items = make([dynamic]library.Entry, 10)
+	client.detail.singles.items = make([dynamic]library.Entry, 10)
+	defer {delete(client.detail.albums.items); delete(client.detail.singles.items)}
+	testing.expect(t, !detail_needs_more(&client, {}))
+	testing.expect(t, !detail_needs_more(&client, {releases = {last = 8}}))
+	testing.expect(t, detail_needs_more(&client, {releases = {last = 10}}))
+	visible := Frame_Visible {
+		singles = {last = 10},
+	}
+	testing.expect(t, !detail_needs_more(&client, visible))
+	testing.expect(t, detail_needs_more(&client, visible, .Single))
+}
+
+@(test)
 scrollbar_thumb_hides_when_content_fits_and_clamps_at_both_ends :: proc(t: ^testing.T) {
 	_, _, fits := scrollbar_metrics(0, 400, 800, 24, 2)
 	testing.expect(t, !fits)

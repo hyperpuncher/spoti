@@ -95,6 +95,13 @@ transfer_progress :: proc "c" (
 
 curl_once: sync.Once
 curl_ready: bool
+web_api_resume_ns: i64
+
+// The Web API quota is shared by reads and writes, not by covers or AP calls.
+// Keep the deadline atomic because the worker writes it and the UI reads it.
+web_api_resume_at :: proc() -> time.Time {
+	return time.from_nanoseconds(sync.atomic_load(&web_api_resume_ns))
+}
 
 init_curl :: proc() {
 	curl_ready = global_init(c.long(3)) == 0
@@ -236,6 +243,15 @@ request :: proc(
 	   limit > 32 * 1024 * 1024 {
 		return nil, 0, false
 	}
+	web_api := strings.has_prefix(address, "https://api.spotify.com/")
+	if web_api {
+		if delay := -time.since(web_api_resume_at()); delay > 0 {
+			seconds := int((delay + time.Second - 1) / time.Second)
+			if options.retry_after != nil {options.retry_after^ = seconds}
+			diagnostic.writef("web api request deferred retry-after=%ds", seconds)
+			return nil, 429, true
+		}
+	}
 	sync.once_do(&curl_once, init_curl)
 	if !curl_ready {return nil, 0, false}
 	client := reuse
@@ -270,11 +286,13 @@ request :: proc(
 		   easy_setopt(client, CURL_XFERINFODATA, options.cancel) != 0 {return nil, 0, false}
 	}
 	// curl keeps this pointer until perform completes, not just until setopt.
+	retry_after := 0
 	capture := Header_Capture {
 		range       = options.range_info,
 		retry_after = options.retry_after,
 	}
-	if options.range_info != nil || options.retry_after != nil {
+	if web_api {capture.retry_after = &retry_after}
+	if options.range_info != nil || options.retry_after != nil || web_api {
 		if options.range_info != nil {options.range_info^ = {}}
 		if options.retry_after != nil {options.retry_after^ = 0}
 		if easy_setopt(client, CURL_HEADERFUNCTION, read_headers) != 0 ||
@@ -346,7 +364,18 @@ request :: proc(
 	}
 	code: c.long
 	if easy_getinfo(client, CURL_RESPONSE_CODE, &code) != 0 {return nil, 0, false}
-	diagnostic.http(address, int(code), len(received.bytes), elapsed_ms(started))
+	if web_api {
+		if options.retry_after != nil {options.retry_after^ = retry_after}
+		if code == 429 {
+			// Use a minute when the server omits its delay. Bound the conversion
+			// to nanoseconds so an invalid header cannot overflow the deadline.
+			seconds := retry_after > 0 ? min(retry_after, int(max(i32))) : 60
+			resume := time.time_add(time.now(), time.Duration(seconds) * time.Second)
+			sync.atomic_store(&web_api_resume_ns, time.time_to_unix_nano(resume))
+			diagnostic.writef("web api paused seconds=%d", seconds)
+		}
+	}
+	diagnostic.http(address, int(code), len(received.bytes), elapsed_ms(started), retry_after)
 	return received.bytes, int(code), true
 }
 

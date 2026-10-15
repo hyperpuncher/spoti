@@ -71,17 +71,20 @@ cover_decode_result :: proc(ok: bool) {
 // carry a sanitized endpoint shape, a status code, a byte count and a
 // duration. Privacy: no tokens, URLs, IDs, bodies, or query besides
 // numeric paging offsets.
-http :: proc(address: string, status, bytes: int, ms: f64) {
+http :: proc(address: string, status, bytes: int, ms: f64, retry_after: int = 0) {
 	failed := status < 200 || status >= 300
 	if !failed && !sync.atomic_load(&verbose) {return}
 	endpoint, paging := sanitize_endpoint(address, context.temp_allocator)
+	retry :=
+		retry_after > 0 ? fmt.aprintf(" retry-after=%ds", retry_after, allocator = context.temp_allocator) : ""
 	line := fmt.aprintf(
-		"http %s%s status=%d bytes=%d ms=%.0f",
+		"http %s%s status=%d bytes=%d ms=%.0f%s",
 		endpoint,
 		paging,
 		status,
 		bytes,
 		ms,
+		retry,
 		allocator = context.temp_allocator,
 	)
 	write(line)

@@ -73,6 +73,8 @@ detail_already_open :: proc(client: ^library.Client, uri: string) -> bool {
 		!client.release_feed.open &&
 		client.detail.ready &&
 		client.detail_error == 0 &&
+		client.detail.albums.error == 0 &&
+		client.detail.singles.error == 0 &&
 		detail_card_uri(client.detail) == uri \
 	)
 }

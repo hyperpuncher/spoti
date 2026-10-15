@@ -9,6 +9,7 @@ import "core:strings"
 import "core:sync"
 import "core:sync/chan"
 import "core:thread"
+import "core:time"
 import "core:unicode/utf8"
 import diagnostic "diagnostic"
 import connect "spotify/connect"
@@ -202,7 +203,7 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Text)
 		return
 	}
-	for id in ([]string{"toolbar_back", "toolbar_library", "toolbar_releases", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "hero_copy_link", "hero_pin", "autoscroll", "setup_redirect", "setup_dashboard", "setup_save"}) {
+	for id in ([]string{"toolbar_back", "toolbar_library", "toolbar_releases", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "hero_copy_link", "hero_pin", "autoscroll", "setup_redirect", "setup_dashboard", "setup_save", "detail_retry"}) {
 		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
 		if id == "hero_copy_link" && library.detail_loading_visible(client) {continue}
 		if id == "hero_pin" &&
@@ -476,22 +477,24 @@ load_more_near_bottom :: proc(client: ^library.Client, filter: library.Kind, d: 
 // and stops a long playlist from flooding the single worker up front.
 DETAIL_LOOKAHEAD :: 20
 
-detail_needs_more :: proc(client: ^library.Client, visible: Frame_Visible) -> bool {
+detail_needs_more :: proc(
+	client: ^library.Client,
+	visible: Frame_Visible,
+	group: library.Album_Group = .Album,
+) -> bool {
 	if client.release_feed.open ||
 	   !client.detail.ready ||
 	   !client.detail.has_more ||
 	   client.detail_loading {return false}
 	detail := &client.detail
 	if detail.source == .Artist {
-		if detail.albums.has_more {
-			return visible.releases.last >= len(detail.albums.items) - DETAIL_LOOKAHEAD
-		}
-		if detail.singles.has_more {
-			return visible.singles.last >= len(detail.singles.items) - DETAIL_LOOKAHEAD
-		}
-		return false
+		section, shown := &detail.albums, visible.releases
+		if group == .Single {section, shown = &detail.singles, visible.singles}
+		// Card ranges already include an extra row. A track-sized lookahead
+		// fetched hidden sections and several extra ten-release pages.
+		return section.has_more && shown.last > shown.first && shown.last >= len(section.items)
 	}
-	return visible.tracks.last >= len(detail.rows) - DETAIL_LOOKAHEAD
+	return group == .Album && visible.tracks.last >= len(detail.rows) - DETAIL_LOOKAHEAD
 }
 
 // Spend the frame's request budget only when the artwork worker accepts it.
@@ -973,6 +976,14 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		}
 		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
 	}
+	page_wait := library_client.state == .Ready && time.since(library_client.page_at) < 0
+	if page_wait {
+		delay := -time.since(library_client.page_at)
+		remaining_ms := i32(
+			clamp(int((delay + time.Millisecond - 1) / time.Millisecond), 1, int(max(i32))),
+		)
+		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
+	}
 	has_event := sdl.WaitEventTimeout(&event, wait_ms)
 	if has_event {
 		for {
@@ -1198,7 +1209,9 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 			if !sdl.PollEvent(&event) {break}
 		}
 	}
-	return has_event || emoji_poll, fades_animating
+	// A page backoff must expire without requiring mouse movement to wake it.
+	return has_event || emoji_poll || page_wait && time.since(library_client.page_at) >= 0,
+		fades_animating
 }
 
 // History moves plus the banked scroll offset that follows them.
@@ -2083,6 +2096,21 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			_ = open_prompt_url(.Library)
 		} else if hit("library_retry", mouse_click) {
 			if library.restart(&library_client) {redraw = true}
+		} else if hit("detail_retry", mouse_click) {
+			detail := &library_client.detail
+			if library.open_detail(
+				&library_client,
+				detail.source,
+				detail.id,
+				{
+					name = detail.name,
+					image = detail.image,
+					subtitle = detail.subtitle,
+					year = detail.year,
+					saved = detail.liked,
+					total = detail.total,
+				},
+			) {redraw = true}
 		} else {
 			handled := false
 			if hit("toolbar_back", mouse_click) {
@@ -2201,7 +2229,8 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 							library_client.detail.singles.items[:],
 							visible.singles,
 						)
-				} else {
+				}
+				if !handled {
 					for index in visible.tracks.first ..< visible.tracks.last {
 						if !hit_clipped(
 							"track_row",
@@ -2791,8 +2820,11 @@ app_covers :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		queue_detail == detail_card_uri(library_client.detail) &&
 		library_client.detail.source != .Artist &&
 		play_index + DETAIL_LOOKAHEAD >= len(play_queue)
-	if detail_needs_more(&library_client, visible) || queue_needs_more {
-		if library.more_rows(&library_client) {redraw = true}
+	for group in library.Album_Group {
+		if detail_needs_more(&library_client, visible, group) ||
+		   group == .Album && queue_needs_more {
+			if library.more_rows(&library_client, group) {redraw = true; break}
+		}
 	}
 	ensure_covers(&library_client, &textures, display_page, player_cover, visible)
 }

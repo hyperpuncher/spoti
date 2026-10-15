@@ -76,6 +76,7 @@ Release_Group :: struct {
 	total:       int,
 	next_offset: int,
 	has_more:    bool,
+	error:       int, // last failed request; zero means no error
 }
 
 // The /albums group being paged, mirrored in request and result so the
@@ -248,26 +249,21 @@ fetch_detail :: proc(
 		// Singles ride along when they can; a failed second group must not
 		// fail the page. It keeps its cursor at zero with more set, so the
 		// scroll chain retries it instead of dropping the section.
-		singles, singles_total, singles_next, singles_more, _, singles_ok := fetch_artist_albums(
-			access,
-			id,
-			0,
-			.Single,
-			allocator,
-			cache_only = cache_only,
-		)
+		singles, singles_total, singles_next, singles_more, singles_status, singles_ok :=
+			fetch_artist_albums(access, id, 0, .Single, allocator, cache_only = cache_only)
 		if singles_ok {
 			detail.singles = Release_Group {
-				items       = singles,
-				total       = singles_total,
-				next_offset = singles_next,
-				has_more    = singles_more,
-			}
+					items       = singles,
+					total       = singles_total,
+					next_offset = singles_next,
+					has_more    = singles_more,
+				}
 		} else {
 			detail.singles = Release_Group {
-				items = make([dynamic]Entry, 0, 0, allocator),
-			}
+					items = make([dynamic]Entry, 0, 0, allocator),
+				}
 			detail.singles.has_more = true
+			detail.singles.error = cache_only ? 0 : singles_status != 0 ? singles_status : -1
 		}
 		detail.total = albums_total + singles_total
 		detail.has_more = albums_more || detail.singles.has_more

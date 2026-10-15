@@ -1041,9 +1041,12 @@ release_section :: proc(
 	next_leading: f32,
 ) {
 	next_leading = leading
-	if len(group.items) == 0 && group.total == 0 && !group.has_more {return}
-	if clay.UI_WithId(clay.ID(title_id))({}) {
+	if len(group.items) == 0 && group.total == 0 && !group.has_more && group.error == 0 {return}
+	if clay.UI_WithId(clay.ID(title_id))({layout = {layoutDirection = .TopToBottom}}) {
 		clay.Text(title, {fontSize = 22, textColor = theme.text})
+		if group.error != 0 {
+			clay.Text(page_error_text(group.error), {fontSize = 14, textColor = theme.muted})
+		}
 	}
 	// Title heights come from the previous frame, like the old discography
 	// heading did; the window settles after one layout.
@@ -1498,6 +1501,18 @@ detail_hero :: proc(
 	}
 }
 
+page_error_text :: proc(status: int) -> string {
+	if status == 429 {return "Spotify is limiting requests. Please try again later."}
+	if status > 0 {
+		return fmt.aprintf(
+			"Spotify returned HTTP %d. Please try again.",
+			status,
+			allocator = context.temp_allocator,
+		)
+	}
+	return "Could not reach Spotify. Please try again."
+}
+
 detail_page :: proc(
 	view: View,
 	client: ^library.Client,
@@ -1532,7 +1547,7 @@ detail_page :: proc(
 		backgroundColor = theme.bg,
 	},
 	) {
-		if !detail.ready {
+		if !detail.ready || client.detail_error != 0 {
 			if clay.UI()(
 			{
 				layout = {
@@ -1550,14 +1565,15 @@ detail_page :: proc(
 					detail_line = "Fetching this page from Spotify."
 				} else if client.detail_error != 0 {
 					title = "Could not open this page"
-					detail_line = fmt.aprintf(
-						"Spotify answered HTTP %d for it.",
-						client.detail_error,
-						allocator = context.temp_allocator,
-					)
+					detail_line = page_error_text(client.detail_error)
 				}
 				clay.Text(title, {fontSize = 26, textColor = theme.text})
 				clay.Text(detail_line, {fontSize = 14, textColor = theme.muted})
+				if client.detail_error != 0 &&
+				   client.state == .Ready &&
+				   time.since(client.page_at) >= 0 {
+					sign_in_button("detail_retry", "Try again", d)
+				}
 			}
 			return
 		}
