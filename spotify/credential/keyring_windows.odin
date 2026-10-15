@@ -33,38 +33,8 @@ foreign advapi32 {
 	CredFree :: proc(buffer: rawptr) ---
 }
 
-Slot :: enum {
-	Playback,
-	Library,
-	Library_Client,
-}
-
-slot_target :: proc(slot: Slot) -> string {
-	switch slot {
-	case .Library:
-		return "spoti/library"
-	case .Library_Client:
-		return "spoti/library_client"
-	case .Playback:
-		return "spoti/playback"
-	}
-	return "spoti/playback"
-}
-
-slot_comment :: proc(slot: Slot) -> string {
-	switch slot {
-	case .Library:
-		return "spoti Spotify library"
-	case .Library_Client:
-		return "spoti Spotify app ID"
-	case .Playback:
-		return "spoti Spotify playback"
-	}
-	return "spoti Spotify playback"
-}
-
 load :: proc(slot: Slot = .Playback) -> (token: string, found: bool) {
-	target := win.utf8_to_wstring(slot_target(slot))
+	target := win.utf8_to_wstring(string(SLOTS[slot].target))
 	found_cred: ^CREDENTIALW
 	if CredReadW(target, CRED_TYPE_GENERIC, 0, &found_cred) == false {return "", false}
 	defer CredFree(found_cred)
@@ -78,8 +48,8 @@ save :: proc(token: string, slot: Slot = .Playback) -> bool {
 	if len(token) == 0 || strings.contains(token, "\x00") {return false}
 	cred := CREDENTIALW {
 		type                 = CRED_TYPE_GENERIC,
-		target_name          = win.utf8_to_wstring(slot_target(slot)),
-		comment              = win.utf8_to_wstring(slot_comment(slot)),
+		target_name          = win.utf8_to_wstring(string(SLOTS[slot].target)),
+		comment              = win.utf8_to_wstring(string(SLOTS[slot].label)),
 		credential_blob_size = u32(len(token)),
 		credential_blob      = raw_data(token),
 		persist              = CRED_PERSIST_LOCAL_MACHINE,
@@ -89,6 +59,6 @@ save :: proc(token: string, slot: Slot = .Playback) -> bool {
 }
 
 clear :: proc(slot: Slot = .Playback) -> bool {
-	target := win.utf8_to_wstring(slot_target(slot))
+	target := win.utf8_to_wstring(string(SLOTS[slot].target))
 	return CredDeleteW(target, CRED_TYPE_GENERIC, 0) != false
 }

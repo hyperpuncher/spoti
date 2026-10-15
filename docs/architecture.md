@@ -141,6 +141,8 @@ logs contain endpoint shapes, status codes, timings, counts, and state flags.
 never log credentials, tokens, account or device IDs, signed audio URLs,
 connection keys, command bodies, or response bodies.
 
-use OS-specific files for platform boundaries. credentials use the native
-credential store. MPRIS is Linux-only. type checking another target is not a
-substitute for building and running on that platform.
+use OS-specific files for platform boundaries. credentials use Secret Service,
+Keychain Services, or Credential Manager directly. refresh tokens never enter
+subprocess arguments. backend changes keep the existing service and slot names.
+MPRIS is Linux-only. type checking another target is not a substitute for
+building and running on that platform.

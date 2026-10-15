@@ -69,6 +69,8 @@ jobs:
           tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
           "$RUNNER_TEMP/odin/vendor/stb/src/build_stb.sh"
           echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+      - name: test native credential queries
+        run: odin test spotify/credential
       - run: just release
       - name: bundle
         run: sh packaging/macos/bundle.sh "build/spoti-macos-arm64-${GITHUB_SHA:0:12}.tar.zst"

@@ -14,6 +14,7 @@ spoti requires Spotify Premium for local playback.
   play a track locally to approve streaming on a new installation.
 
 refresh grants are stored in the operating system's credential store.
+on macOS, allow spoti to access its Keychain entries if the system asks.
 background native reads reuse saved streaming approval and never start a
 browser approval window. Connect and library startup wait for an existing
 grant operation rather than treat a busy grant as unavailable.

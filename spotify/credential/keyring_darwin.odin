@@ -1,100 +1,121 @@
-// Keep Spotify refresh credentials in the macOS Keychain through the
-// security CLI. Same semantics as the Secret Service backend: only a
-// refresh token is stored, never an account password.
+// Native Keychain access. Refresh tokens never enter process arguments.
 package credential
 
-import "core:os"
 import "core:strings"
+import cf "core:sys/darwin/CoreFoundation"
+import security "core:sys/darwin/Security"
 
-SERVICE :: "org.spoti.playback"
+foreign import keychain "system:Security.framework"
+foreign import foundation "system:CoreFoundation.framework"
 
-Slot :: enum {
-	Playback,
-	Library,
-	Library_Client,
+CF_Key_Callbacks :: struct {
+	version:                                int,
+	retain, release, describe, equal, hash: rawptr,
+}
+CF_Value_Callbacks :: struct {
+	version:                          int,
+	retain, release, describe, equal: rawptr,
 }
 
-slot_account :: proc(slot: Slot) -> string {
-	switch slot {
-	case .Library:
-		return "library"
-	case .Library_Client:
-		return "library_client"
-	case .Playback:
-		return "playback"
-	}
-	return "playback"
+@(default_calling_convention = "c")
+foreign foundation {
+	kCFTypeDictionaryKeyCallBacks: CF_Key_Callbacks
+	kCFTypeDictionaryValueCallBacks: CF_Value_Callbacks
+	kCFBooleanTrue, kCFAllocatorNull: cf.TypeRef
+	CFDictionaryCreateMutable :: proc(allocator: cf.TypeRef, capacity: int, keys: ^CF_Key_Callbacks, values: ^CF_Value_Callbacks) -> cf.TypeRef ---
+	CFDictionarySetValue :: proc(dictionary, key, value: cf.TypeRef) ---
+	CFStringCreateWithCString :: proc(allocator: cf.TypeRef, value: cstring, encoding: u32) -> cf.TypeRef ---
+	CFDataCreateWithBytesNoCopy :: proc(allocator: cf.TypeRef, bytes: [^]u8, length: int, deallocator: cf.TypeRef) -> cf.TypeRef ---
+	CFDataGetLength :: proc(data: cf.TypeRef) -> int ---
+	CFDataGetBytePtr :: proc(data: cf.TypeRef) -> [^]u8 ---
 }
 
-slot_label :: proc(slot: Slot) -> string {
-	switch slot {
-	case .Library:
-		return "spoti Spotify library"
-	case .Library_Client:
-		return "spoti Spotify app ID"
-	case .Playback:
-		return "spoti Spotify playback"
-	}
-	return "spoti Spotify playback"
+@(default_calling_convention = "c")
+foreign keychain {
+	kSecClass, kSecClassGenericPassword, kSecAttrService, kSecAttrAccount: cf.TypeRef
+	kSecAttrLabel, kSecReturnData, kSecValueData: cf.TypeRef
+	SecItemCopyMatching :: proc(query: cf.TypeRef, result: ^cf.TypeRef) -> security.OSStatus ---
+	SecItemUpdate :: proc(query, attributes: cf.TypeRef) -> security.OSStatus ---
+	SecItemAdd :: proc(attributes: cf.TypeRef, result: ^cf.TypeRef) -> security.OSStatus ---
+	SecItemDelete :: proc(query: cf.TypeRef) -> security.OSStatus ---
+}
+
+keychain_query :: proc(slot: Slot) -> cf.TypeRef {
+	service := CFStringCreateWithCString(nil, SERVICE, u32(cf.StringBuiltInEncodings.UTF8))
+	if service == nil {return nil}
+	defer cf.Release(service)
+	account := CFStringCreateWithCString(
+		nil,
+		SLOTS[slot].account,
+		u32(cf.StringBuiltInEncodings.UTF8),
+	)
+	if account == nil {return nil}
+	defer cf.Release(account)
+	query := CFDictionaryCreateMutable(
+		nil,
+		0,
+		&kCFTypeDictionaryKeyCallBacks,
+		&kCFTypeDictionaryValueCallBacks,
+	)
+	if query == nil {return nil}
+	CFDictionarySetValue(query, kSecClass, kSecClassGenericPassword)
+	CFDictionarySetValue(query, kSecAttrService, service)
+	CFDictionarySetValue(query, kSecAttrAccount, account)
+	return query
 }
 
 load :: proc(slot: Slot = .Playback) -> (token: string, found: bool) {
-	state, output, _, err := os.process_exec(
-		{
-			command = {
-				"security",
-				"find-generic-password",
-				"-a",
-				slot_account(slot),
-				"-s",
-				SERVICE,
-				"-w",
-			},
-		},
-		context.temp_allocator,
-	)
-	if err != nil || !state.exited || state.exit_code != 0 {return "", false}
-	value := strings.trim_space(string(output))
-	if len(value) == 0 {return "", false}
-	return strings.clone(value), true
+	query := keychain_query(slot)
+	if query == nil {return}
+	defer cf.Release(query)
+	CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue)
+	data: cf.TypeRef
+	if SecItemCopyMatching(query, &data) != security.OSStatus(security.errSec.Success) ||
+	   data == nil {return}
+	defer cf.Release(data)
+	length := CFDataGetLength(data)
+	if length <= 0 {return}
+	bytes := CFDataGetBytePtr(data)
+	if bytes == nil {return}
+	return strings.clone(string(bytes[:length])), true
 }
 
 save :: proc(token: string, slot: Slot = .Playback) -> bool {
 	if len(token) == 0 || strings.contains(token, "\x00") {return false}
-	state, _, _, err := os.process_exec(
-		{
-			command = {
-				"security",
-				"add-generic-password",
-				"-a",
-				slot_account(slot),
-				"-s",
-				SERVICE,
-				"-l",
-				slot_label(slot),
-				"-w",
-				token,
-				"-U",
-			},
-		},
-		context.temp_allocator,
+	query := keychain_query(slot)
+	if query == nil {return false}
+	defer cf.Release(query)
+	// The synchronous call borrows the caller's bytes instead of making an
+	// extra secret copy. Core Foundation must not free that borrowed memory.
+	data := CFDataCreateWithBytesNoCopy(nil, raw_data(token), len(token), kCFAllocatorNull)
+	if data == nil {return false}
+	defer cf.Release(data)
+	label := CFStringCreateWithCString(nil, SLOTS[slot].label, u32(cf.StringBuiltInEncodings.UTF8))
+	if label == nil {return false}
+	defer cf.Release(label)
+	attributes := CFDictionaryCreateMutable(
+		nil,
+		0,
+		&kCFTypeDictionaryKeyCallBacks,
+		&kCFTypeDictionaryValueCallBacks,
 	)
-	return err == nil && state.exited && state.exit_code == 0
+	if attributes == nil {return false}
+	defer cf.Release(attributes)
+	CFDictionarySetValue(attributes, kSecValueData, data)
+	CFDictionarySetValue(attributes, kSecAttrLabel, label)
+	status := SecItemUpdate(query, attributes)
+	if status !=
+	   security.OSStatus(
+		   security.errSec.ItemNotFound,
+	   ) {return status == security.OSStatus(security.errSec.Success)}
+	CFDictionarySetValue(query, kSecValueData, data)
+	CFDictionarySetValue(query, kSecAttrLabel, label)
+	return SecItemAdd(query, nil) == security.OSStatus(security.errSec.Success)
 }
 
 clear :: proc(slot: Slot = .Playback) -> bool {
-	state, _, _, err := os.process_exec(
-		{
-			command = {
-				"security",
-				"delete-generic-password",
-				"-a",
-				slot_account(slot),
-				"-s",
-				SERVICE,
-			},
-		},
-		context.temp_allocator,
-	)
-	return err == nil && state.exited && state.exit_code == 0
+	query := keychain_query(slot)
+	if query == nil {return false}
+	defer cf.Release(query)
+	return SecItemDelete(query) == security.OSStatus(security.errSec.Success)
 }

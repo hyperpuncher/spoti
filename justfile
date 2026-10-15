@@ -46,6 +46,7 @@ test: _prepare
 	odin test spotify/ap {{curl_flags}}
 	odin test spotify/shannon {{curl_flags}}
 	odin test spotify/oauth {{curl_flags}}
+	odin test spotify/credential {{curl_flags}}
 	odin test spotify/session {{curl_flags}}
 	odin test spotify/connect {{curl_flags}}
 	odin test spotify/library {{curl_flags}}
