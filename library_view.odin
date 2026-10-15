@@ -1176,7 +1176,6 @@ hero_fit_text :: proc(
 		}
 	}
 	end := boundaries[lo]
-	if end == 0 {return "…"}
 	copy(scratch, text[:end])
 	copy(scratch[end:], "…")
 	return string(scratch[:end + len("…")])
