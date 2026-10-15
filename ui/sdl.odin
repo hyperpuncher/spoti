@@ -169,10 +169,15 @@ scale :: proc(state: ^State) -> f32 {
 // SDL3 has no rounded-rect call; Clay's own SDL3 renderer does the same.
 ROUND_SEGMENTS :: 24
 
-draw_rounded :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl.Color) {
+// Corner radii run clockwise from the top left.
+draw_rounded :: proc(state: ^State, rect: sdl.FRect, radius: [4]f32, color: sdl.Color) {
 	if rect.w <= 0 || rect.h <= 0 {return}
-	corners := clamp(radius, 0, min(rect.w, rect.h) / 2)
-	if corners <= 0.5 {fill(state, rect, color); return}
+	corners: [4]f32
+	for r, i in radius {corners[i] = clamp(r, 0, min(rect.w, rect.h) / 2)}
+	if max(max(corners[0], corners[1]), max(corners[2], corners[3])) <= 0.5 {
+		fill(state, rect, color)
+		return
+	}
 	fill_color := sdl.FColor {
 		f32(color.r) / 255,
 		f32(color.g) / 255,
@@ -186,17 +191,25 @@ draw_rounded :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl.Col
 		color    = fill_color,
 	}
 	arcs := [4][3]f32 {
-		{rect.x + corners, rect.y + corners, 180},
-		{rect.x + rect.w - corners, rect.y + corners, 270},
-		{rect.x + rect.w - corners, rect.y + rect.h - corners, 0},
-		{rect.x + corners, rect.y + rect.h - corners, 90},
+		{rect.x + corners[0], rect.y + corners[0], 180},
+		{rect.x + rect.w - corners[1], rect.y + corners[1], 270},
+		{rect.x + rect.w - corners[2], rect.y + rect.h - corners[2], 0},
+		{rect.x + corners[3], rect.y + rect.h - corners[3], 90},
 	}
 	perimeter := 0
-	for arc in arcs {
+	for arc, i in arcs {
+		if corners[i] == 0 {
+			perimeter += 1
+			vertices[perimeter] = {
+				position = {arc[0], arc[1]},
+				color    = fill_color,
+			}
+			continue
+		}
 		for step in 0 ..< ROUND_SEGMENTS {
 			angle := (arc[2] + f32(step) * 90 / ROUND_SEGMENTS) * math.PI / 180
-			x := arc[0] + corners * f32(math.cos(f64(angle)))
-			y := arc[1] + corners * f32(math.sin(f64(angle)))
+			x := arc[0] + corners[i] * f32(math.cos(f64(angle)))
+			y := arc[1] + corners[i] * f32(math.sin(f64(angle)))
 			perimeter += 1
 			vertices[perimeter] = {
 				position = {x, y},
@@ -344,7 +357,7 @@ make_fade_texture :: proc(state: ^State, flip: bool, smooth: bool = false) -> ^s
 	return create_texture(state, pixels[:], FADE_TEX_W, FADE_TEX_H)
 }
 
-// Rounded variants used by the Clay renderer, which carries a radius per box.
+// Rounded variants used by the Clay renderer, which carries a radius per corner.
 // A solid rounded box is drawn from a supersampled alpha mask, so its curved
 // edges are antialiased; SDL3's renderer has no multisampling of its own.
 mask_key :: proc(width, height, radius: int) -> u64 {
@@ -415,14 +428,19 @@ mask_top_corners :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl
 	}
 }
 
-fill_rounded :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl.Color) {
+fill_rounded :: proc(state: ^State, rect: sdl.FRect, radius: [4]f32, color: sdl.Color) {
 	if rect.w <= 0 || rect.h <= 0 {return}
-	corners := int(clamp(radius, 0, min(rect.w, rect.h) / 2) + 0.5)
+	corners := int(clamp(radius[0], 0, min(rect.w, rect.h) / 2) + 0.5)
 	width := int(rect.w + 0.5)
 	height := int(rect.h + 0.5)
 	// Supersampled masks are reserved for controls. Large panels and cards keep
 	// the cheaper geometry path, where their shallow radius is less noticeable.
-	if corners <= 0 || height > 128 || width > height * 8 {
+	if radius[0] != radius[1] ||
+	   radius[1] != radius[2] ||
+	   radius[2] != radius[3] ||
+	   corners <= 0 ||
+	   height > 128 ||
+	   width > height * 8 {
 		draw_rounded(state, rect, radius, color)
 		return
 	}

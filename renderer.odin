@@ -147,10 +147,7 @@ render :: proc(
 			ui.fill_rounded(
 				state,
 				{box.x, box.y, box.width, box.height},
-				max(
-					max(radius.topLeft, radius.topRight),
-					max(radius.bottomLeft, radius.bottomRight),
-				),
+				{radius.topLeft, radius.topRight, radius.bottomRight, radius.bottomLeft},
 				{u8(color.r), u8(color.g), u8(color.b), u8(color.a)},
 			)
 		case .Image:

@@ -407,7 +407,7 @@ sidebar :: proc(
 			childGap = u16(18 * d),
 		},
 		backgroundColor = theme.sidebar,
-		cornerRadius = clay.CornerRadius{topRight = 12 * d},
+		cornerRadius = clay.CornerRadius{topRight = 12 * d, bottomRight = 12 * d},
 	},
 	) {
 		if clay.UI()(
