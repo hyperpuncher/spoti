@@ -14,19 +14,36 @@ Text_Pool :: struct {
 	text_count:  int,
 }
 
-cached_text :: proc(state: ^Text_Pool, font: ^ttf.Font, value: string) -> ^ttf.Text {
+cached_text :: proc(
+	state: ^State,
+	pool: ^Text_Pool,
+	value: string,
+	size: f32,
+	font_id: u16 = 0,
+) -> ^ttf.Text {
+	font := font_for_size(state, size, font_id)
+	if font == nil {return nil}
 	content: ^ttf.Text
-	if state.text_count == len(state.texts) {
-		content = ttf.CreateText(state.text_engine, font, raw_data(value), len(value))
+	if pool.text_count < len(pool.texts) {
+		content = pool.texts[pool.text_count]
+		if ttf.GetTextFont(content) == font && string(cstring(content.text)) == value {
+			pool.text_count += 1
+			return content
+		}
+	}
+	// An unchanged slot already has its fallbacks. SDL_ttf updates existing
+	// text objects when another string adds a fallback to the shared font.
+	_ = font_for_text(state, value, size, font_id)
+	if content == nil {
+		content = ttf.CreateText(pool.text_engine, font, raw_data(value), len(value))
 		if content == nil {return nil}
-		append(&state.texts, content)
+		append(&pool.texts, content)
 	} else {
-		content = state.texts[state.text_count]
 		if ttf.GetTextFont(content) != font && !ttf.SetTextFont(content, font) {return nil}
 		if string(cstring(content.text)) != value &&
 		   !ttf.SetTextString(content, raw_data(value), len(value)) {return nil}
 	}
-	state.text_count += 1
+	pool.text_count += 1
 	return content
 }
 
@@ -45,11 +62,11 @@ text_size :: proc(
 	height = f32(ttf.GetFontHeight(font))
 	for piece in text_pieces(value) {
 		if piece.emoji {width += emoji_side(font); continue}
-		span_font := font_for_text(state, piece.value, size, font_id)
-		if span_font == nil {continue}
 		w, h: c.int
 		measured := false
 		if strings.contains_any(piece.value, "\r\n") {
+			span_font := font_for_text(state, piece.value, size, font_id)
+			if span_font == nil {continue}
 			// Text objects lay out hard line breaks; string sizing does not.
 			measured = ttf.GetStringSize(
 				span_font,
@@ -59,7 +76,7 @@ text_size :: proc(
 				&h,
 			)
 		} else {
-			content := cached_text(&state.measured_texts, span_font, piece.value)
+			content := cached_text(state, &state.measured_texts, piece.value, size, font_id)
 			measured = content != nil && ttf.GetTextSize(content, &w, &h)
 		}
 		if measured {
@@ -95,13 +112,11 @@ text :: proc(
 			cursor += rect.w
 			continue
 		}
-		span_font := font_for_text(state, piece.value, font_size, font_id)
-		if span_font == nil {continue}
-		content := cached_text(&state.drawn_texts, span_font, piece.value)
+		content := cached_text(state, &state.drawn_texts, piece.value, font_size, font_id)
 		if content == nil {continue}
 		_ = ttf.SetTextColor(content, color.r, color.g, color.b, color.a)
 		pen := cursor
-		if cursor == x {pen -= glyph_left_bearing(span_font, piece.value)}
+		if cursor == x {pen -= glyph_left_bearing(font, piece.value)}
 		_ = ttf.DrawRendererText(content, f32(int(pen + 0.5)), f32(int(y + 0.5)))
 		width: c.int
 		if ttf.GetTextSize(content, &width, nil) {cursor += f32(width)}

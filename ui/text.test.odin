@@ -31,23 +31,21 @@ text_pool_reuses_updates_and_releases_visible_frame_slots :: proc(t: ^testing.T)
 	state.font_sources[.Regular] = {path, face}
 	state.text_engine = ttf.CreateSurfaceTextEngine()
 	if !testing.expect(t, state.text_engine != nil) {return}
-	font := font_for_size(&state, 14)
-	if !testing.expect(t, font != nil) {return}
 	borrowed := strings.clone("héllo library")
-	first := cached_text(&state.drawn_texts, font, borrowed)
+	first := cached_text(&state, &state.drawn_texts, borrowed, 14)
 	delete(borrowed)
 	if !testing.expect(t, first != nil) {return}
 	testing.expect_value(t, string(cstring(first.text)), "héllo library")
-	second := cached_text(&state.drawn_texts, font, "0:30")
+	second := cached_text(&state, &state.drawn_texts, "0:30", 14)
 	testing.expect(t, second != nil && first != second)
 	finish_text_frame(&state)
 	testing.expect_value(t, len(state.texts), 2)
-	testing.expect(t, cached_text(&state.drawn_texts, font, "héllo library") == first)
+	testing.expect(t, cached_text(&state, &state.drawn_texts, "héllo library", 14) == first)
 	finish_text_frame(&state)
 	testing.expect(t, len(state.texts) == 1, "unused slots must not accumulate while browsing")
 	large := font_for_size(&state, 28)
 	if !testing.expect(t, large != nil) {return}
-	testing.expect(t, cached_text(&state.drawn_texts, large, "new title") == first)
+	testing.expect(t, cached_text(&state, &state.drawn_texts, "new title", 28) == first)
 	testing.expect(t, ttf.GetTextFont(first) == large)
 	testing.expect_value(t, string(cstring(first.text)), "new title")
 	width, height: c.int
