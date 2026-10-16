@@ -14,6 +14,11 @@ cp assets/fonts/*.ttf assets/fonts/OFL.txt "$app/Resources/fonts/"
 cp assets/app/icon.png "$app/Resources/app/"
 cp assets/app/icon.icns "$app/Resources/AppIcon.icns"
 cp packaging/macos/Info.plist "$app/"
+mkdir -p "$app/Resources/licenses"
+cp LICENSE "$app/Resources/licenses/LICENSE"
+cp spotify/shannon/LICENSE "$app/Resources/licenses/shannon.txt"
+cp vendor/clay/LICENSE.md "$app/Resources/licenses/clay.txt"
+cp docs/licenses/unicode.txt "$app/Resources/licenses/unicode.txt"
 
 # Use the native bundler to resolve absolute, @rpath, and @loader_path
 # dependencies from the original libraries before moving them.

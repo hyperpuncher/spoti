@@ -15,5 +15,6 @@ $files = @('build/spoti.exe', 'build/fontconfig') + `
   (Get-ChildItem assets/icons/*.png | ForEach-Object { 'assets/icons/' + $_.Name }) + `
   @('assets/icons/LICENSE') + `
   (Get-ChildItem assets/fonts/*.ttf | ForEach-Object { 'assets/fonts/' + $_.Name }) + `
-  @('assets/fonts/OFL.txt', 'assets/app/icon.png')
+  @('assets/fonts/OFL.txt', 'assets/app/icon.png', 'LICENSE', `
+    'spotify/shannon/LICENSE', 'vendor/clay/LICENSE.md', 'docs/licenses/unicode.txt')
 tar --zstd -cf $Out $files

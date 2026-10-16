@@ -11,4 +11,9 @@ tar --zstd -cf "$out" \
 	assets/fonts/*.ttf \
 	assets/fonts/OFL.txt \
 	assets/app/icon.png \
-	packaging/linux/app.spoti.desktop
+	packaging/linux/app.spoti.desktop \
+	packaging/linux/install.sh \
+	LICENSE \
+	spotify/shannon/LICENSE \
+	vendor/clay/LICENSE.md \
+	docs/licenses/unicode.txt
