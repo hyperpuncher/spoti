@@ -1,11 +1,11 @@
 name: desktop builds
 
 on:
+  workflow_call:
   workflow_dispatch:
   pull_request:
   push:
     branches: [main]
-    tags: ['v*']
 
 permissions:
   contents: read
@@ -120,46 +120,3 @@ jobs:
           path: build/spoti-windows-x64-*.tar.zst
           archive: false
           if-no-files-found: error
-
-  publish:
-    needs: [linux, macos, windows]
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: spoti-*.tar.zst
-          path: build/release
-          merge-multiple: true
-      - name: prepare release assets and AUR recipes
-        env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          VERSION=${VERSION#v}
-          for platform in linux-x64 macos-arm64 windows-x64; do
-            mv build/release/spoti-$platform-*.tar.zst build/release/spoti-$platform.tar.zst
-          done
-          mkdir -p build/release/aur
-          docker run --rm -v "$PWD:/work" -w /work -e VERSION="$VERSION" archlinux:base-devel bash -c '
-            useradd --create-home builder
-            chown -R builder:builder build/release/aur
-            runuser --user builder -- bash scripts/prepare-aur.sh "$VERSION" build/release/spoti-linux-x64.tar.zst build/release/aur
-          '
-          tar -czf "build/release/spoti-aur-$VERSION.tar.gz" -C build/release/aur spoti-bin spoti-git
-      - name: generate release notes
-        run: bash scripts/release-notes.sh > build/release/notes.md
-      - name: publish release
-        uses: softprops/action-gh-release@v3
-        with:
-          body_path: build/release/notes.md
-          fail_on_unmatched_files: true
-          files: |
-            build/release/spoti-*.tar.zst
-            build/release/spoti-aur-*.tar.gz
