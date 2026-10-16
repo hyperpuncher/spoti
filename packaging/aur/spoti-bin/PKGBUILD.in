@@ -3,11 +3,11 @@ pkgname=spoti-bin
 pkgver=@VERSION@
 pkgrel=1
 pkgdesc='lightweight native Spotify client'
-arch=('x86_64')
+arch=('x86_64' 'aarch64')
 url='https://github.com/hyperpuncher/spoti'
 license=('MIT AND Zlib AND ISC AND OFL-1.1 AND Unicode-3.0')
-depends=('curl>=7.86' 'fontconfig' 'glib2' 'glibc' 'hicolor-icon-theme'
-	'libsecret' 'libvorbis' 'libwebp' 'sdl3>=3.4' 'sdl3_ttf>=3.2.2'
+depends=('curl' 'fontconfig' 'glib2' 'glibc' 'hicolor-icon-theme'
+	'libsecret' 'libvorbis' 'libwebp' 'sdl3' 'sdl3_ttf'
 	'systemd-libs' 'xdg-utils')
 optdepends=('noto-fonts: additional script and symbol coverage'
 	'noto-fonts-cjk: CJK characters'
@@ -16,8 +16,10 @@ optdepends=('noto-fonts: additional script and symbol coverage'
 provides=("spoti=$pkgver")
 conflicts=('spoti')
 options=('!strip')
-source=("$pkgname-$pkgver-$CARCH.tar.zst::$url/releases/download/v$pkgver/spoti-linux-x64.tar.zst")
-sha256sums=('@SHA256@')
+source_x86_64=("$pkgname-$pkgver-linux-x64.tar.zst::$url/releases/download/v$pkgver/spoti-linux-x64.tar.zst")
+source_aarch64=("$pkgname-$pkgver-linux-arm64.tar.zst::$url/releases/download/v$pkgver/spoti-linux-arm64.tar.zst")
+sha256sums_x86_64=('@SHA256_X86_64@')
+sha256sums_aarch64=('@SHA256_AARCH64@')
 
 package() {
 	cd "$srcdir"

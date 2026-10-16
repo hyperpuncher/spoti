@@ -5,7 +5,11 @@ import "core:c"
 when ODIN_OS == .Windows {
 	foreign import Clay "windows/clay.lib"
 } else when ODIN_OS == .Linux {
-	foreign import Clay "linux/clay.a"
+	when ODIN_ARCH == .arm64 {
+		foreign import Clay "linux-arm64/clay.a"
+	} else {
+		foreign import Clay "linux/clay.a"
+	}
 } else when ODIN_OS == .Darwin {
 	when ODIN_ARCH == .arm64 {
 		foreign import Clay "macos-arm64/clay.a"

@@ -37,14 +37,14 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           VERSION=${VERSION#v}
-          for platform in linux-x64 macos-arm64 windows-x64; do
+          for platform in linux-x64 linux-arm64 macos-arm64 windows-x64; do
             mv build/release/spoti-$platform-*.tar.zst build/release/spoti-$platform.tar.zst
           done
           mkdir -p build/release/aur
           docker run --rm -v "$PWD:/work" -w /work -e VERSION="$VERSION" archlinux:base-devel bash -c '
             useradd --create-home builder
             chown -R builder:builder build/release/aur
-            runuser --user builder -- bash scripts/prepare-aur.sh "$VERSION" build/release/spoti-linux-x64.tar.zst build/release/aur
+            runuser --user builder -- bash scripts/prepare-aur.sh "$VERSION" build/release build/release/aur
           '
       - name: generate release notes
         run: bash scripts/release-notes.sh > build/release/notes.md

@@ -32,6 +32,14 @@ lightweight native desktop client for [spotify](https://www.spotify.com)
 - [sdl3](https://www.libsdl.org/)
 - [clay](https://github.com/nicbarker/clay)
 
+## install
+
+### arch
+
+```sh
+paru -S spoti-bin
+```
+
 ## development
 
 > requires odin, just, and the [native dependencies](docs/development.md)

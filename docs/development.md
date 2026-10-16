@@ -68,14 +68,29 @@ odin check . -target:darwin_arm64
 this does not verify macOS linking or runtime behavior. Windows target
 checks require a Windows SDK. verify native builds on their target OS.
 
+## bundled Clay library
+
+the Linux arm64 archive uses Clay revision
+[`e6cc36941ab2af5d81107617039d6f527a1c660b`](https://github.com/nicbarker/clay/tree/e6cc36941ab2af5d81107617039d6f527a1c660b),
+which supplies our existing Odin bindings and platform archives.
+rebuild it on Linux with clang and llvm-ar:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nicbarker/clay/e6cc36941ab2af5d81107617039d6f527a1c660b/clay.h -o /tmp/spoti-clay.h
+clang -x c -c -DCLAY_IMPLEMENTATION -ffreestanding -static -target aarch64-unknown-linux-gnu -fPIC -O3 /tmp/spoti-clay.h -o /tmp/spoti-clay-linux-arm64.o
+mkdir -p vendor/clay/linux-arm64
+llvm-ar rcsD vendor/clay/linux-arm64/clay.a /tmp/spoti-clay-linux-arm64.o
+```
+
 ## CI
 
-GitHub Actions runs three native builds: Ubuntu 26.04 x64, macOS arm64, and
-Windows x64. Linux and macOS use official Odin release archives.
-the Linux job runs `just check` and `just test` on pushes to `main` and
-pull requests. release builds run only on manual dispatch; macOS and
-Windows wait for Linux. actions use major-version tags. no Spotify
-credentials are needed. macOS checks credential queries without Keychain access.
+GitHub Actions runs four native builds: Ubuntu 26.04 x64 and arm64,
+macOS arm64, and Windows x64. Linux and macOS use official Odin release
+archives. both Linux jobs run `just check` and `just test` on pushes to
+`main` and pull requests. release builds run on manual dispatch and version
+tags; macOS and Windows wait for both Linux jobs. actions use major-version
+tags. no Spotify credentials are needed. macOS checks credential queries
+without Keychain access.
 
 download the `.tar.zst` artifact from a successful manual run. Linux and
 Windows include the binary and assets. Windows also includes DLLs and a

@@ -17,7 +17,17 @@ concurrency:
 
 jobs:
   linux:
-    runs-on: ubuntu-26.04
+    name: linux (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            odin_arch: amd64
+            runner: ubuntu-26.04
+          - arch: arm64
+            odin_arch: arm64
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -30,7 +40,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang just pkg-config libsdl3-dev libsdl3-ttf-dev libfontconfig-dev libcurl4-openssl-dev libvorbis-dev libwebp-dev libsecret-1-dev libsystemd-dev fonts-noto-core fonts-noto-cjk fonts-noto-extra fonts-noto-color-emoji
           mkdir -p "$RUNNER_TEMP/odin"
-          gh release download --repo odin-lang/Odin --pattern 'odin-linux-amd64-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
+          gh release download --repo odin-lang/Odin --pattern 'odin-linux-${{ matrix.odin_arch }}-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
           tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
           "$RUNNER_TEMP/odin/vendor/stb/src/build_stb.sh"
           echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
@@ -43,11 +53,11 @@ jobs:
         run: just release
       - name: archive
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
-        run: sh packaging/linux/bundle.sh "build/spoti-linux-x64-${GITHUB_SHA:0:12}.tar.zst"
+        run: sh packaging/linux/bundle.sh "build/spoti-linux-${{ matrix.arch }}-${GITHUB_SHA:0:12}.tar.zst"
       - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         with:
-          path: build/spoti-linux-x64-*.tar.zst
+          path: build/spoti-linux-${{ matrix.arch }}-*.tar.zst
           archive: false
           if-no-files-found: error
 
