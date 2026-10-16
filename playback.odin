@@ -145,13 +145,7 @@ app_queue_detail :: proc(app: ^App, index: int) -> bool {
 	queue_detail_rows(&app.play_queue, &app.library_client.detail)
 	stamp_play_queue(&app.queue_detail, &app.queue_gen, app.library_client.detail)
 	app.play_index = app.shuffle ? reorder_play_queue(app.play_queue[:], index, true) : index
-	return select_play_item(
-		app.play_queue[:],
-		app.play_index,
-		&app.selected,
-		&app.player_cover,
-		&app.artist,
-	)
+	return select_play_item(app.play_queue[:], app.play_index, &app.selected, &app.player_cover)
 }
 
 // The footer's single artist link: the first artist with a page. Search
@@ -198,15 +192,10 @@ reorder_play_queue :: proc(items: []Play_Item, index: int, shuffle: bool) -> int
 	return index
 }
 
-select_play_item :: proc(
-	items: []Play_Item,
-	index: int,
-	selected, cover, artist: ^string,
-) -> bool {
+select_play_item :: proc(items: []Play_Item, index: int, selected, cover: ^string) -> bool {
 	if index < 0 || index >= len(items) {return false}
 	replace_string(selected, items[index].uri)
 	replace_string(cover, items[index].cover)
-	replace_string(artist, items[index].artist)
 	return true
 }
 
@@ -214,9 +203,9 @@ advance_play_item :: proc(
 	items: []Play_Item,
 	index: ^int,
 	delta: int,
-	selected, cover, artist: ^string,
+	selected, cover: ^string,
 ) -> bool {
-	select_play_item(items, index^ + delta, selected, cover, artist) or_return
+	select_play_item(items, index^ + delta, selected, cover) or_return
 	index^ += delta
 	return true
 }

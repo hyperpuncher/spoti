@@ -103,17 +103,11 @@ reopened_queue_continues_after_the_same_duplicate_track :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(decoded.last_played.queue), 4)
 	testing.expect_value(t, app.play_queue[2].album_uri, "spotify:album:original")
 	testing.expect_value(t, app.play_queue[2].artist_links[0].uri, "spotify:artist:original")
-	selected, cover, artist: string
-	defer {delete(selected); delete(cover); delete(artist)}
-	testing.expect(
-		t,
-		advance_play_item(app.play_queue[:], &app.play_index, 1, &selected, &cover, &artist),
-	)
+	selected, cover: string
+	defer {delete(selected); delete(cover)}
+	testing.expect(t, advance_play_item(app.play_queue[:], &app.play_index, 1, &selected, &cover))
 	testing.expect_value(t, selected, "spotify:track:next")
-	testing.expect(
-		t,
-		!advance_play_item(app.play_queue[:], &app.play_index, 1, &selected, &cover, &artist),
-	)
+	testing.expect(t, !advance_play_item(app.play_queue[:], &app.play_index, 1, &selected, &cover))
 	app.play_index = reorder_play_queue(app.play_queue[:], app.play_index, false)
 	testing.expect_value(t, app.play_index, 1)
 	testing.expect_value(t, app.play_queue[app.play_index].uri, "spotify:track:next")

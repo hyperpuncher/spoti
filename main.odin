@@ -1121,8 +1121,6 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 							player_cover = {}
 							delete(displayed_cover)
 							displayed_cover = {}
-							delete(artist)
-							artist = {}
 							free_play_queue(&play_queue)
 							delete(queue_detail)
 							queue_detail = ""
@@ -1490,6 +1488,14 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 				diagnostic.write("playback metadata ready")
 				delete(title)
 				title = packet.name
+				// Update the artist with the title, not while the next track loads.
+				ready_artist := ""
+				if play_index >= 0 &&
+				   play_index < len(play_queue) &&
+				   play_queue[play_index].uri == selected {
+					ready_artist = play_queue[play_index].artist
+				}
+				replace_string(&artist, ready_artist)
 				duration_ms = packet.duration_ms
 				stage = .Buffering
 			case .Audio:
@@ -1538,16 +1544,11 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 					play_index, play_after_stop = 0, true
 				}
 				if play_after_stop {
-					_ = select_play_item(
-						play_queue[:],
-						play_index,
-						&selected,
-						&player_cover,
-						&artist,
-					)
+					_ = select_play_item(play_queue[:], play_index, &selected, &player_cover)
 				} else {
 					replace_string(&selected, "")
 					replace_string(&title, "")
+					replace_string(&artist, "")
 				}
 				start_paused, replay_pending, seek_dragging = false, false, false
 				seek_ms = 0
@@ -1568,17 +1569,11 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 		if !seek_dragging && repeat {
 			replay_pending = true
 		} else if !seek_dragging &&
-		   advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover, &artist) {
+		   advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover) {
 			replay_pending = true
 		} else if !seek_dragging && connect_repeat_context && len(play_queue) > 0 {
 			play_index = 0
-			replay_pending = select_play_item(
-				play_queue[:],
-				play_index,
-				&selected,
-				&player_cover,
-				&artist,
-			)
+			replay_pending = select_play_item(play_queue[:], play_index, &selected, &player_cover)
 		}
 		redraw = true
 	}
@@ -2183,7 +2178,6 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 							play_index,
 							&selected,
 							&player_cover,
-							&artist,
 						)
 						handled = track_selected
 					} else {
@@ -2488,15 +2482,8 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			}
 			replace_string(&queue_detail, "")
 			play_index = 0
-			track_selected = select_play_item(
-				play_queue[:],
-				play_index,
-				&selected,
-				&player_cover,
-				&artist,
-			)
+			track_selected = select_play_item(play_queue[:], play_index, &selected, &player_cover)
 			incoming_load = track_selected
-			replace_string(&title, "")
 			seek_ms, start_paused = event.position, event.paused
 			shuffle, repeat, connect_repeat_context =
 				event.shuffle, event.repeat_track, event.repeat_context
@@ -2627,14 +2614,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		}
 	}
 	if track_delta != 0 &&
-	   advance_play_item(
-		   play_queue[:],
-		   &play_index,
-		   track_delta,
-		   &selected,
-		   &player_cover,
-		   &artist,
-	   ) {
+	   advance_play_item(play_queue[:], &play_index, track_delta, &selected, &player_cover) {
 		restart_playback = true
 	}
 	if restart_playback {
@@ -2746,9 +2726,9 @@ app_persist :: proc(app: ^App, frame: ^Frame) {
 	using app
 	using frame
 	if order_dirty {pending_redraw = true}
-	// Persist the last played track. Title and artist arrive after the
-	// selection via the Ready packet, so every field is watched, not
-	// just the URI. The state holds the saved copy; no shadow variables.
+	// Persist the last played track. Title and artist change together on
+	// the Ready packet, so watch every field, not only the URI.
+	// The state holds the saved copy; no shadow variables.
 	collection := ""
 	if library_client.detail.ready {
 		collection = detail_card_uri(library_client.detail)

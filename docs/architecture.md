@@ -91,6 +91,8 @@ pagination. show folder contents in the flat grid without adding folder UI.
 ## playback and Connect
 
 playback owns the queue. prefer Vorbis at 320, then 160, then 96 kbps.
+keep the previous title and artist together until the playback metadata is
+ready, then update both before publishing the MPRIS metadata snapshot.
 AP requests share one serialized connection and cipher state. Connect and
 AP use the same persistent device identity. library workers read the AP country
 code as an atomic two-letter copy, not a view into connection memory.
