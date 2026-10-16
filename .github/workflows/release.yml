@@ -46,7 +46,6 @@ jobs:
             chown -R builder:builder build/release/aur
             runuser --user builder -- bash scripts/prepare-aur.sh "$VERSION" build/release/spoti-linux-x64.tar.zst build/release/aur
           '
-          tar -czf "build/release/spoti-aur-$VERSION.tar.gz" -C build/release/aur spoti-bin spoti-git
       - name: generate release notes
         run: bash scripts/release-notes.sh > build/release/notes.md
       - name: publish release
@@ -54,9 +53,7 @@ jobs:
         with:
           body_path: build/release/notes.md
           fail_on_unmatched_files: true
-          files: |
-            build/release/spoti-*.tar.zst
-            build/release/spoti-aur-*.tar.gz
+          files: build/release/spoti-*.tar.zst
       - name: publish AUR packages
         env:
           AUR_KEY: ${{ secrets.AUR_KEY }}
