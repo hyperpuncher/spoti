@@ -1,6 +1,6 @@
 # spoti
 
-minimal native desktop client for [spotify](https://www.spotify.com)
+lightweight native desktop client for [spotify](https://www.spotify.com)
 
 <div>
 	<picture>
