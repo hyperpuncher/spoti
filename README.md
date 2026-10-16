@@ -40,6 +40,12 @@ lightweight native desktop client for [spotify](https://www.spotify.com)
 paru -S spoti-bin
 ```
 
+### macos
+
+```sh
+brew install --cask hyperpuncher/tap/spoti
+```
+
 ## development
 
 > requires odin, just, and the [native dependencies](docs/development.md)

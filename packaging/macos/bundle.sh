@@ -14,6 +14,13 @@ cp assets/fonts/*.ttf assets/fonts/OFL.txt "$app/Resources/fonts/"
 cp assets/app/icon.png "$app/Resources/app/"
 cp assets/app/icon.icns "$app/Resources/AppIcon.icns"
 cp packaging/macos/Info.plist "$app/"
+case "${GITHUB_REF:-}" in
+	refs/tags/v*)
+		version=${GITHUB_REF_NAME#v}
+		/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Info.plist"
+		/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $version" "$app/Info.plist"
+		;;
+esac
 mkdir -p "$app/Resources/licenses"
 cp LICENSE "$app/Resources/licenses/LICENSE"
 cp spotify/shannon/LICENSE "$app/Resources/licenses/shannon.txt"

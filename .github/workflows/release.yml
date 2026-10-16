@@ -32,7 +32,7 @@ jobs:
           pattern: spoti-*.tar.zst
           path: build/release
           merge-multiple: true
-      - name: prepare release assets and AUR recipes
+      - name: prepare release assets and package recipes
         env:
           VERSION: ${{ github.ref_name }}
         run: |
@@ -46,6 +46,9 @@ jobs:
             chown -R builder:builder build/release/aur
             runuser --user builder -- bash scripts/prepare-aur.sh "$VERSION" build/release build/release/aur
           '
+          checksum=$(sha256sum build/release/spoti-macos-arm64.tar.zst)
+          sed -e "s/@VERSION@/$VERSION/g" -e "s/@SHA256@/${checksum%% *}/g" \
+            packaging/homebrew/spoti.rb.in > build/release/spoti.rb
       - name: generate release notes
         run: bash scripts/release-notes.sh > build/release/notes.md
       - name: publish release
@@ -75,3 +78,20 @@ jobs:
               git -C "$directory" push origin HEAD:master
             fi
           done
+      - name: publish Homebrew cask
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          test -n "$GH_TOKEN"
+          gh auth setup-git --hostname github.com
+          directory="$RUNNER_TEMP/homebrew-tap"
+          git clone --depth=1 --single-branch --no-tags https://github.com/hyperpuncher/homebrew-tap.git "$directory"
+          mkdir -p "$directory/Casks"
+          cp build/release/spoti.rb "$directory/Casks/spoti.rb"
+          git -C "$directory" config user.name hyperpuncher
+          git -C "$directory" config user.email hyperpuncher@users.noreply.github.com
+          git -C "$directory" add Casks/spoti.rb
+          if ! git -C "$directory" diff --cached --quiet; then
+            git -C "$directory" commit -m "chore: update spoti for $GITHUB_REF_NAME"
+            git -C "$directory" push
+          fi

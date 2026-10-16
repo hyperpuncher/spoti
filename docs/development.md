@@ -107,6 +107,15 @@ binary for unresolved dependencies before signing and uploading.
 see [Apple\'s run-path guide](https://developer.apple.com/library/archive/documentation/DeveloperTools/Conceptual/DynamicLibraries/100-Articles/RunpathDependentLibraries.html)
 and [dylibbundler usage](https://github.com/auriamg/macdylibbundler#using-dylibbundler-on-the-terminal).
 
+## homebrew
+
+the cask installs `Spoti.app` on Apple Silicon with macOS 26 or newer.
+the macOS CI runner stays on version 26 to match that minimum.
+tagged releases generate the cask from the macOS archive checksum and push
+it to `hyperpuncher/homebrew-tap`. this needs a `GH_PAT` repository secret
+with contents write access to that tap. the app remains ad-hoc signed,
+not notarized; the cask does not bypass Gatekeeper.
+
 ## curl and linker flags
 
 Connect's Dealer socket uses libcurl's WebSocket API, which needs curl
