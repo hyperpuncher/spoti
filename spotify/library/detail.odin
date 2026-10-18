@@ -34,6 +34,7 @@ Track_Row :: struct {
 	album:        string,
 	album_uri:    string, // empty for album pages, stamped from the detail
 	duration_ms:  int,
+	explicit:     bool,
 	play_count:   i64, // zero means no count was supplied
 	added_at:     i64, // playlist occurrence timestamp, Unix milliseconds; zero is unknown
 	image:        string,
@@ -132,6 +133,7 @@ clone_row :: proc(row: Track_Row, allocator: runtime.Allocator) -> Track_Row {
 		album = strings.clone(row.album, allocator),
 		album_uri = strings.clone(row.album_uri, allocator),
 		duration_ms = row.duration_ms,
+		explicit = row.explicit,
 		play_count = row.play_count,
 		added_at = row.added_at,
 		image = strings.clone(row.image, allocator),
@@ -400,7 +402,7 @@ fetch_track_page :: proc(
 // but a full track object per item costs most of every page's bytes.
 // Playlist items carry the object under `item`; `track` is deprecated and
 // comes back unusable, so select `item` here, not `track`.
-TRACK_FIELDS :: "uri,name,duration_ms,is_playable,artists(uri,name),album(uri,name,images)"
+TRACK_FIELDS :: "uri,name,duration_ms,is_playable,explicit,artists(uri,name),album(uri,name,images)"
 
 artist_albums_address :: proc(id: string, offset: int, group: Album_Group) -> string {
 	return fmt.aprintf(
@@ -435,7 +437,7 @@ track_page_address :: proc(
 		)
 	case .Album:
 		address = fmt.aprintf(
-			"https://api.spotify.com/v1/albums/%s/tracks?limit=50&offset=%d&fields=total,offset,next,items(uri,name,duration_ms,is_playable,artists(uri,name))",
+			"https://api.spotify.com/v1/albums/%s/tracks?limit=50&offset=%d&fields=total,offset,next,items(uri,name,duration_ms,is_playable,explicit,artists(uri,name))",
 			id,
 			offset,
 		)
@@ -633,6 +635,7 @@ track_row :: proc(track: Track_Ref, allocator: runtime.Allocator) -> (row: Track
 			album = strings.clone(track.album.name, allocator),
 			album_uri = strings.clone(track.album.uri, allocator),
 			duration_ms = track.duration_ms,
+			explicit = track.explicit,
 			image = strings.clone(cover_url(track.album.images), allocator),
 			image_small = strings.clone(cover_url(track.album.images, .Smallest), allocator),
 		},

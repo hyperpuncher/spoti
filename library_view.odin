@@ -9,6 +9,7 @@ import library "spotify/library"
 import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
+import ttf "vendor:sdl3/ttf"
 
 Visible_Items :: struct {
 	first, last:   int,
@@ -284,6 +285,50 @@ card_selected :: proc(entry: ^library.Entry, detail: ^library.Detail) -> bool {
 	return strings.has_prefix(entry.uri, prefix) && entry.uri[len(prefix):] == detail.id
 }
 
+EXPLICIT_BADGE_SIZE :: 14
+EXPLICIT_BADGE_GAP :: 6
+
+explicit_badge :: proc(state: ^ui.State, d: f32) {
+	FONT_ID :: u16(ui.Font_Role.Bold)
+	FONT_SIZE :: 10
+	size := EXPLICIT_BADGE_SIZE * d
+	label: clay.FloatingElementConfig
+	if state != nil {
+		font := ui.font_for_size(state, FONT_SIZE * d, FONT_ID)
+		min_x, max_x, min_y, max_y: i32
+		if font != nil && ttf.GetGlyphMetrics(font, 'E', &min_x, &max_x, &min_y, &max_y, nil) {
+			// Center the visible letter, excluding font bearings and descent space.
+			label = {
+				offset = {
+					(size - f32(max_x - min_x)) / 2,
+					(size - f32(max_y - min_y)) / 2 - f32(ttf.GetFontAscent(font) - max_y),
+				},
+				attachTo = .Parent,
+				attachment = {element = .LeftTop, parent = .LeftTop},
+				pointerCaptureMode = .Passthrough,
+				clipTo = .AttachedParent,
+			}
+		}
+	}
+	if clay.UI()(
+	{
+		layout = {
+			sizing = {width = clay.SizingFixed(size), height = clay.SizingFixed(size)},
+			childAlignment = {x = .Center, y = .Center},
+		},
+		backgroundColor = theme.card,
+		cornerRadius = clay.CornerRadiusAll(3 * d),
+	},
+	) {
+		if clay.UI()({floating = label}) {
+			clay.Text(
+				"E",
+				{fontId = FONT_ID, fontSize = FONT_SIZE, textColor = theme.text, wrapMode = .None},
+			)
+		}
+	}
+}
+
 library_card :: proc(
 	textures: ^Textures,
 	ui_state: ^ui.State,
@@ -344,12 +389,24 @@ library_card :: proc(
 		},
 		) {
 			text_width := card_width - padding * 2
-			fitted_text(
-				ui_state,
-				entry.name,
-				text_width,
-				{fontSize = 14, textColor = theme.text, wrapMode = .None},
-			)
+			badge_width := entry.explicit ? (EXPLICIT_BADGE_SIZE + EXPLICIT_BADGE_GAP) * d : 0
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {width = clay.SizingGrow({})},
+					childAlignment = {y = .Center},
+					childGap = u16(EXPLICIT_BADGE_GAP * d),
+				},
+			},
+			) {
+				fitted_text(
+					ui_state,
+					entry.name,
+					max(0, text_width - badge_width),
+					{fontSize = 14, textColor = theme.text, wrapMode = .None},
+				)
+				if entry.explicit {explicit_badge(ui_state, d)}
+			}
 			if len(entry.subtitle) > 0 {
 				fitted_text(
 					ui_state,
@@ -557,10 +614,18 @@ track_list_row :: proc(
 	album_width, date_width, title_fraction := f32(0), f32(0), f32(0.5)
 	if playlist {album_width, date_width, title_fraction = playlist_columns(row_text, d)}
 	title_box := column_box * title_fraction / 0.5
+	badge_width := row.explicit ? (EXPLICIT_BADGE_SIZE + EXPLICIT_BADGE_GAP) * d : 0
 	if !columns {
-		title_box = min(hero_text_width(ui_state, row.name, 15, 3), title_max)
+		title_box = min(hero_text_width(ui_state, row.name, 15, 3) + badge_width, title_max)
 	}
-	title_text := hero_fit_text(ui_state, row.name, title_box, 15, 3, context.temp_allocator)
+	title_text := hero_fit_text(
+		ui_state,
+		row.name,
+		max(0, title_box - badge_width),
+		15,
+		3,
+		context.temp_allocator,
+	)
 	// Boundary-fitted segments: whole artists that fit, then an
 	// ellipsis. A first artist that alone overflows truncates with
 	// one like before. Sources that omit URIs render plain text.
@@ -612,6 +677,7 @@ track_list_row :: proc(
 					width = columns ? clay.SizingPercent(title_fraction) : clay.SizingFit({max = title_max}),
 				},
 				childAlignment = {y = .Center},
+				childGap = u16(EXPLICIT_BADGE_GAP * d),
 			},
 		},
 		) {
@@ -624,6 +690,7 @@ track_list_row :: proc(
 					wrapMode = .None,
 				},
 			)
+			if row.explicit {explicit_badge(ui_state, d)}
 		}
 		if clay.UI()(
 		{layout = {sizing = {width = clay.SizingGrow({})}, childAlignment = {y = .Center}}},

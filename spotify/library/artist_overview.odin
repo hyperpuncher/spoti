@@ -12,15 +12,18 @@ import "core:strings"
 ARTIST_OVERVIEW_HASH :: "35648a112beb1794e39ab931365f6ae4a8d45e65396d641eeda94e4003d41497"
 
 Artist_Overview_Track :: struct {
-	uri, name:   string,
-	play_count:  string `json:"playcount"`,
-	duration:    struct {
+	uri, name:      string,
+	play_count:     string `json:"playcount"`,
+	content_rating: struct {
+		label: string,
+	} `json:"contentRating"`,
+	duration:       struct {
 		milliseconds: int `json:"totalMilliseconds"`,
 	},
-	playability: struct {
+	playability:    struct {
 		playable: bool,
 	},
-	artists:     struct {
+	artists:        struct {
 		items: []struct {
 			uri:     string,
 			profile: struct {
@@ -28,7 +31,7 @@ Artist_Overview_Track :: struct {
 			},
 		},
 	},
-	album:       struct {
+	album:          struct {
 		uri:    string,
 		covers: struct {
 			sources: []Image,
@@ -86,6 +89,7 @@ parse_artist_overview :: proc(body: []u8, detail: ^Detail) -> bool {
 				uri = track.uri,
 				name = track.name,
 				duration_ms = track.duration.milliseconds,
+				explicit = track.content_rating.label == "EXPLICIT",
 				artists = artists,
 				album = Album_Ref{uri = track.album.uri, images = track.album.covers.sources},
 			},

@@ -96,12 +96,13 @@ artist_overview_keeps_banner_listeners_and_playable_counts :: proc(t: ^testing.T
 	}
 	if !testing.expect(t, virtual.arena_init_growing(&detail.arena) == nil) {return}
 	defer free_detail(&detail)
-	body := `{"data":{"artistUnion":{"uri":"spotify:artist:fixture","profile":{"name":"Artist"},"visuals":{"headerImage":{"sources":[{"url":"https://i.scdn.co/image/banner","width":2660,"height":1140}]}},"stats":{"monthlyListeners":17600000},"discography":{"topTracks":{"items":[{"track":{"uri":"spotify:track:0000000000000000000001","name":"Hit","playcount":"563387486","duration":{"totalMilliseconds":142000},"playability":{"playable":true},"artists":{"items":[{"uri":"spotify:artist:fixture","profile":{"name":"Artist"}}]}}},{"track":{"uri":"spotify:track:0000000000000000000002","name":"Unavailable","playability":{"playable":false}}}]}}}}}`
+	body := `{"data":{"artistUnion":{"uri":"spotify:artist:fixture","profile":{"name":"Artist"},"visuals":{"headerImage":{"sources":[{"url":"https://i.scdn.co/image/banner","width":2660,"height":1140}]}},"stats":{"monthlyListeners":17600000},"discography":{"topTracks":{"items":[{"track":{"uri":"spotify:track:0000000000000000000001","name":"Hit","contentRating":{"label":"EXPLICIT"},"playcount":"563387486","duration":{"totalMilliseconds":142000},"playability":{"playable":true},"artists":{"items":[{"uri":"spotify:artist:fixture","profile":{"name":"Artist"}}]}}},{"track":{"uri":"spotify:track:0000000000000000000002","name":"Unavailable","playability":{"playable":false}}}]}}}}}`
 	if !testing.expect(t, parse_artist_overview(transmute([]u8)body, &detail)) {return}
 	testing.expect_value(t, detail.banner, "https://i.scdn.co/image/banner")
 	testing.expect_value(t, detail.monthly_listeners, 17600000)
 	if testing.expect_value(t, len(detail.rows), 1) {
 		testing.expect_value(t, detail.rows[0].play_count, 563387486)
+		testing.expect(t, detail.rows[0].explicit)
 		testing.expect_value(t, detail.rows[0].duration_ms, 142000)
 		testing.expect_value(t, detail.rows[0].artist_links[0].name, "Artist")
 	}

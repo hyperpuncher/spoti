@@ -131,7 +131,7 @@ album_tracks_decode_without_album_art :: proc(t: ^testing.T) {
 	}
 	defer virtual.arena_destroy(&arena)
 
-	album: string = `{"items":[{"name":"Song","uri":"spotify:track:1TifAMm1r1MascYZ5xGiQk","duration_ms":1000,"artists":[{"name":"Y"}]}],"offset":0,"total":1}`
+	album: string = `{"items":[{"name":"Song","uri":"spotify:track:1TifAMm1r1MascYZ5xGiQk","duration_ms":1000,"explicit":true,"artists":[{"name":"Y"}]}],"offset":0,"total":1}`
 	rows, total, next, more, status, ok := parse_track_rows(
 		Track_Ref,
 		transmute([]u8)album,
@@ -142,6 +142,7 @@ album_tracks_decode_without_album_art :: proc(t: ^testing.T) {
 		t,
 		len(rows) == 1 &&
 		rows[0].artists == "Y" &&
+		rows[0].explicit &&
 		rows[0].duration_ms == 1000 &&
 		rows[0].image == "",
 	)

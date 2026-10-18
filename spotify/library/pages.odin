@@ -27,6 +27,7 @@ Entry :: struct {
 	subtitle:      string, // owner or artists
 	year:          string, // album release year, e.g. "2024"
 	saved:         bool, // came from a library tab, so membership needs no check
+	explicit:      bool, // track entries only
 	total:         int, // track count where Spotify reports one
 	album:         string, // track entries only, for the footer link
 	album_uri:     string, // track entries only, for the footer link
@@ -60,6 +61,7 @@ clone_entry :: proc(entry: Entry, allocator: runtime.Allocator) -> Entry {
 		subtitle = strings.clone(entry.subtitle, allocator),
 		year = strings.clone(entry.year, allocator),
 		saved = entry.saved,
+		explicit = entry.explicit,
 		total = entry.total,
 		album = strings.clone(entry.album, allocator),
 		album_uri = strings.clone(entry.album_uri, allocator),
@@ -111,6 +113,7 @@ Track_Ref :: struct {
 	artists:     []Artist,
 	album:       Album_Ref,
 	is_playable: json.Value, // absent/null means availability is unknown
+	explicit:    bool,
 }
 
 Playlist_Ref :: struct {
@@ -299,6 +302,7 @@ append_entry :: proc(items: ^[dynamic]Entry, row: $T, allocator: runtime.Allocat
 				album_uri = strings.clone(row.album.uri, allocator),
 				first_artist = first_artist,
 				artist_uri = artist_uri,
+				explicit = row.explicit,
 			},
 		)
 	} else {#assert(false, "unsupported library card type")}

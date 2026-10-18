@@ -61,6 +61,7 @@ internal_playlist_metadata_deduplicates_requests_but_preserves_rows :: proc(t: ^
 	ap.put_bytes(&metadata, 1, gid[:])
 	ap.put_bytes(&metadata, 2, transmute([]u8)string("Example"))
 	ap.put_number(&metadata, 7, 2000)
+	ap.put_number(&metadata, 9, 1)
 	any := make([dynamic]u8)
 	defer delete(any)
 	ap.put_bytes(&any, 2, metadata[:])
@@ -91,6 +92,7 @@ internal_playlist_metadata_deduplicates_requests_but_preserves_rows :: proc(t: ^
 	testing.expect_value(t, rows[0].name, "Example")
 	testing.expect_value(t, rows[1].name, "Example")
 	testing.expect_value(t, rows[0].duration_ms, 1000)
+	testing.expect(t, rows[0].explicit && rows[1].explicit)
 	testing.expect_value(t, rows[0].added_at, 1726617600000)
 	testing.expect_value(t, rows[1].added_at, 1726704000000)
 	_, ok = parse_playlist_metadata(nil, uris, allocator)
@@ -99,7 +101,7 @@ internal_playlist_metadata_deduplicates_requests_but_preserves_rows :: proc(t: ^
 
 @(test)
 web_playlist_items_parse_track_objects :: proc(t: ^testing.T) {
-	body := `{"total":2,"offset":0,"limit":50,"next":null,"items":[{"added_at":"2024-01-01T00:00:00Z","item":{"uri":"spotify:track:aaa","name":"Song A","duration_ms":200000,"artists":[{"name":"Art A"}],"album":{"images":[{"url":"http://x","height":64,"width":64}]}}},{"added_at":null,"item":{"uri":"spotify:track:bbb","name":"Song B","duration_ms":180000,"artists":[{"name":"Art B"}],"album":{"images":[]}}}]}`
+	body := `{"total":2,"offset":0,"limit":50,"next":null,"items":[{"added_at":"2024-01-01T00:00:00Z","item":{"uri":"spotify:track:aaa","name":"Song A","explicit":true,"duration_ms":200000,"artists":[{"name":"Art A"}],"album":{"images":[{"url":"http://x","height":64,"width":64}]}}},{"added_at":null,"item":{"uri":"spotify:track:bbb","name":"Song B","duration_ms":180000,"artists":[{"name":"Art B"}],"album":{"images":[]}}}]}`
 	arena: virtual.Arena
 	if virtual.arena_init_growing(&arena) != nil {testing.fail_now(t, "arena")}
 	defer virtual.arena_destroy(&arena)
@@ -116,6 +118,7 @@ web_playlist_items_parse_track_objects :: proc(t: ^testing.T) {
 	testing.expect_value(t, rows[0].uri, "spotify:track:aaa")
 	testing.expect_value(t, rows[0].name, "Song A")
 	testing.expect_value(t, rows[0].artists, "Art A")
+	testing.expect(t, rows[0].explicit && !rows[1].explicit)
 	testing.expect_value(t, rows[1].uri, "spotify:track:bbb")
 	testing.expect_value(t, rows[0].added_at, 1704067200000)
 	testing.expect_value(t, rows[1].added_at, 0)

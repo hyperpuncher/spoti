@@ -377,10 +377,13 @@ playlist_track_row :: proc(
 	if !present || !readable {return}
 	duration, _, decoded := ap.get_number(body, 7)
 	if !decoded || duration & 1 != 0 || duration >> 1 > u64(max(i32)) {return}
+	explicit, _, explicit_valid := ap.get_number(body, 9)
+	if !explicit_valid || explicit > 1 {return}
 	ref := Track_Ref {
 		uri         = uri,
 		name        = string(name),
 		duration_ms = int(duration >> 1),
+		explicit    = explicit == 1,
 	}
 	artists := make([dynamic]Artist, context.temp_allocator)
 	images := make([dynamic]Image, context.temp_allocator)
