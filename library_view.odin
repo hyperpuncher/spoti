@@ -587,7 +587,7 @@ ROW_COLUMN_BREAK :: 600
 
 // One track row's geometry, shared by rows, skeletons, the header labels
 // and the scroll strides so the columns never drift apart.
-ROW_HEIGHT :: 44
+ROW_HEIGHT :: 34
 ROW_PAD_LEFT :: 12
 ROW_PAD_RIGHT :: 92
 ROW_NUM_WIDTH :: 24
