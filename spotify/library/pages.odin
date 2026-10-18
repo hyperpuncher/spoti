@@ -95,14 +95,15 @@ Count :: struct {
 }
 
 Album_Ref :: struct {
-	id:           string,
-	name:         string,
-	uri:          string,
-	images:       []Image,
-	artists:      []Artist,
-	release_date: string,
-	total_tracks: int,
-	album_type:   string,
+	id:                     string,
+	name:                   string,
+	uri:                    string,
+	images:                 []Image,
+	artists:                []Artist,
+	release_date:           string,
+	release_date_precision: string,
+	total_tracks:           int,
+	album_type:             string,
 }
 
 Track_Ref :: struct {

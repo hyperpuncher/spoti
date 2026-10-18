@@ -52,6 +52,7 @@ Detail :: struct {
 	subtitle:          string,
 	artist_links:      []Artist_Link, // arena-owned; albums only
 	year:              string, // album release year, e.g. "2024"
+	release_date:      string, // album date formatted to the supplied precision
 	image:             string,
 	image_small:       string,
 	image_preview:     string, // selected card cover, retained until hero texture is ready
@@ -160,6 +161,25 @@ Raw_Artist :: struct {
 	images: []Image,
 }
 
+// Format album dates once on the library worker, without inventing missing days.
+release_date_text :: proc(date, precision: string, allocator: runtime.Allocator) -> string {
+	if precision == "year" || len(date) == 4 {return release_year(date, allocator)}
+	month_only := precision == "month" || precision == "" && len(date) == 7
+	length := month_only ? 7 : 10
+	if len(date) < length || precision != "" && precision != "month" && precision != "day" {
+		return release_year(date, allocator)
+	}
+	iso_date := date[:length]
+	if month_only {iso_date = fmt.aprintf("%s-01", iso_date, allocator = context.temp_allocator)}
+	stamp := fmt.aprintf("%sT00:00:00Z", iso_date, allocator = context.temp_allocator)
+	at, consumed := time.rfc3339_to_time_utc(stamp)
+	if consumed != len(stamp) {return release_year(date, allocator)}
+	year, month, day := time.date(at)
+	name, _ := fmt.enum_value_to_string(month)
+	if month_only {return fmt.aprintf("%s %d", name, year, allocator = allocator)}
+	return fmt.aprintf("%s %d, %d", name, day, year, allocator = allocator)
+}
+
 // Header and the first page of rows, so a page opens with one cached round trip
 // per Spotify resource. Never follow a server-supplied pagination URL.
 fetch_detail :: proc(
@@ -228,6 +248,11 @@ fetch_detail :: proc(
 		detail.subtitle = joined_artists(header.artists, allocator)
 		detail.artist_links = artist_links_from(header.artists, allocator)
 		detail.year = release_year(header.release_date, allocator)
+		detail.release_date = release_date_text(
+			header.release_date,
+			header.release_date_precision,
+			allocator,
+		)
 		detail.image = strings.clone(cover_url(header.images, .Largest), allocator)
 		detail.image_small = strings.clone(cover_url(header.images, .Smallest), allocator)
 		detail.total = header.total_tracks

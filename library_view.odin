@@ -718,7 +718,13 @@ track_list_row :: proc(
 						0,
 						context.temp_allocator,
 					)
-					metadata_link("album_link", u32(index), name, row.album_uri != "")
+					metadata_link(
+						"album_link",
+						u32(index),
+						name,
+						row.album_uri != "",
+						{fontSize = 14, textColor = theme.muted, wrapMode = .None},
+					)
 				} else {
 					fitted_text(
 						ui_state,
@@ -1264,17 +1270,21 @@ artist_link_id :: proc(slot: u32, ai: int) -> u32 {
 
 // Artist and album links hug the fitted text, not the whole column.
 // Missing URIs remain plain text. The caller owns truncation.
-metadata_link :: proc(id: string, index: u32, name: string, linked: bool) {
+metadata_link :: proc(
+	id: string,
+	index: u32,
+	name: string,
+	linked: bool,
+	style: clay.TextElementConfig,
+) {
+	config := style
+	if linked && clay.PointerOver(clay.ID(id, index)) {config.textColor = theme.text}
 	if !linked {
-		clay.Text(name, {fontSize = 14, textColor = theme.muted, wrapMode = .None})
+		clay.Text(name, config)
 		return
 	}
-	over := clay.PointerOver(clay.ID(id, index))
 	if clay.UI_WithId(clay.ID(id, index))({layout = {sizing = {width = clay.SizingFit({})}}}) {
-		clay.Text(
-			name,
-			{fontSize = 14, textColor = over ? theme.text : theme.muted, wrapMode = .None},
-		)
+		clay.Text(name, config)
 	}
 }
 
@@ -1287,28 +1297,42 @@ artist_links_row :: proc(
 	box: f32,
 	id: string,
 	base: u32,
+	emphasized: bool = false,
 ) {
+	style := clay.TextElementConfig {
+		fontId    = emphasized ? u16(ui.Font_Role.Medium) : 0,
+		fontSize  = 14,
+		textColor = emphasized ? theme.text : theme.muted,
+		wrapMode  = .None,
+	}
 	comma_w: f32
-	if len(links) > 1 {comma_w = hero_text_width(ui_state, ", ", 14, 0)}
+	if len(links) > 1 {comma_w = hero_text_width(ui_state, ", ", 14, style.fontId)}
 	used := f32(0)
 	for ai in 0 ..< min(len(links), 64) {
 		link := links[ai]
 		linked := len(link.uri) > 0
 		separator := ai + 1 < len(links) ? ", " : ""
-		need := hero_text_width(ui_state, link.name, 14, 0)
+		need := hero_text_width(ui_state, link.name, 14, style.fontId)
 		if separator != "" {need += comma_w}
 		if used + need > box {
 			if ai == 0 {
-				fit := hero_fit_text(ui_state, link.name, box, 14, 0, context.temp_allocator)
-				metadata_link(id, base + u32(ai), fit, linked)
+				fit := hero_fit_text(
+					ui_state,
+					link.name,
+					box,
+					14,
+					style.fontId,
+					context.temp_allocator,
+				)
+				metadata_link(id, base + u32(ai), fit, linked, style)
 			} else {
-				clay.Text("…", {fontSize = 14, textColor = theme.muted, wrapMode = .None})
+				clay.Text("…", style)
 			}
 			return
 		}
-		metadata_link(id, base + u32(ai), link.name, linked)
+		metadata_link(id, base + u32(ai), link.name, linked, style)
 		if separator != "" {
-			clay.Text(separator, {fontSize = 14, textColor = theme.muted, wrapMode = .None})
+			clay.Text(separator, style)
 		}
 		used += need
 	}
@@ -1343,33 +1367,73 @@ count_text :: proc(value: i64) -> string {
 	return string(out)
 }
 
-hero_metadata :: proc(detail: ^library.Detail) -> string {
+hero_metadata :: proc(detail: ^library.Detail) -> (metadata, summary: string) {
 	count_label := detail.source == .Artist ? "releases" : "songs"
-	parts := make([dynamic]string, 0, 3, context.temp_allocator)
-	// Album artists render as their own clickable segments, so the
-	// joined subtitle only serves sources that carry no links.
-	if len(detail.subtitle) > 0 && len(detail.artist_links) == 0 {
-		append(&parts, detail.subtitle)
-	}
-	if len(detail.year) >= 4 {append(&parts, detail.year)}
+	if detail.total == 1 {count_label = detail.source == .Artist ? "release" : "song"}
 	if detail.source == .Artist && detail.monthly_listeners > 0 {
-		append(
-			&parts,
-			fmt.aprintf(
-				"%s monthly listeners",
-				count_text(detail.monthly_listeners),
-				allocator = context.temp_allocator,
-			),
+		summary = fmt.aprintf(
+			"%s monthly listeners",
+			count_text(detail.monthly_listeners),
+			allocator = context.temp_allocator,
 		)
 	} else if detail.source == .Playlist && detail.rows_error != 0 {
-		append(&parts, "tracks unavailable")
+		summary = "tracks unavailable"
 	} else {
-		append(
-			&parts,
-			fmt.aprintf("%d %s", detail.total, count_label, allocator = context.temp_allocator),
+		summary = fmt.aprintf(
+			"%s %s",
+			count_text(i64(detail.total)),
+			count_label,
+			allocator = context.temp_allocator,
 		)
 	}
-	return strings.join(parts[:], " • ", context.temp_allocator)
+	// Linked album artists render separately. At most three parts share this line.
+	parts := [3]string {
+		len(detail.artist_links) == 0 ? detail.subtitle : "",
+		detail.release_date != "" ? detail.release_date : detail.year,
+		detail.source == .Artist ? summary : "",
+	}
+	used := 0
+	for part in parts {
+		if part != "" {parts[used] = part; used += 1}
+	}
+	metadata = strings.join(parts[:used], " • ", context.temp_allocator)
+	if detail.source == .Artist {return metadata, ""}
+	// A loaded page is not a collection total. Do not fetch extra pages here.
+	if detail.has_more ||
+	   detail.rows_error != 0 ||
+	   len(detail.rows) == 0 ||
+	   len(detail.rows) != detail.total {return}
+	duration_ms: i64
+	for row in detail.rows {
+		if row.duration_ms <= 0 || i64(row.duration_ms) > max(i64) - duration_ms {return}
+		duration_ms += i64(row.duration_ms)
+	}
+	seconds := duration_ms / 1000
+	minutes := seconds / 60
+	if minutes >= 60 {
+		return metadata, fmt.aprintf(
+			"%s, %d hr %d min",
+			summary,
+			minutes / 60,
+			minutes % 60,
+			allocator = context.temp_allocator,
+		)
+	}
+	if minutes > 0 {
+		return metadata, fmt.aprintf(
+			"%s, %d min %d sec",
+			summary,
+			minutes,
+			seconds % 60,
+			allocator = context.temp_allocator,
+		)
+	}
+	return metadata, fmt.aprintf(
+		"%s, %d sec",
+		summary,
+		seconds,
+		allocator = context.temp_allocator,
+	)
 }
 
 // Dedicated banners fill a bounded header; SDL crops without stretching.
@@ -1397,7 +1461,7 @@ hero_banner :: proc(
 		title_width,
 		hero_max_title_size(viewport_height, d),
 	)
-	metadata := hero_metadata(detail)
+	metadata, summary := hero_metadata(detail)
 	if clay.UI_WithId(clay.ID("hero_banner"))(
 	{layout = {sizing = {width = clay.SizingFixed(available), height = clay.SizingFixed(height)}}},
 	) {
@@ -1437,12 +1501,15 @@ hero_banner :: proc(
 		) {
 			clay.Text(detail.label, {fontSize = 13, textColor = theme.text})
 			clay.Text(title, title_style)
-			fitted_text(
-				ui_state,
-				metadata,
-				title_width,
-				{fontSize = 14, textColor = theme.text, wrapMode = .None},
-			)
+			for line in ([]string{metadata, summary}) {
+				if line == "" {continue}
+				fitted_text(
+					ui_state,
+					line,
+					title_width,
+					{fontSize = 14, textColor = theme.text, wrapMode = .None},
+				)
+			}
 		}
 	}
 	return true
@@ -1540,9 +1607,10 @@ detail_hero :: proc(
 		) {
 			clay.Text(detail.label, {fontSize = 13, textColor = theme.text})
 			clay.Text(title, title_style)
-			metadata := hero_metadata(detail)
+			metadata, summary := hero_metadata(detail)
 			if len(detail.artist_links) > 0 {
-				tail := fmt.aprintf(" • %s", metadata, allocator = context.temp_allocator)
+				tail :=
+					metadata == "" ? "" : fmt.aprintf(" • %s", metadata, allocator = context.temp_allocator)
 				tail_width := hero_text_width(ui_state, tail, 14, 0)
 				if clay.UI()(
 				{
@@ -1559,19 +1627,25 @@ detail_hero :: proc(
 						max(0, title_width - tail_width),
 						"hero_artist_link",
 						0,
+						emphasized = true,
 					)
 					clay.Text(tail, {fontSize = 14, textColor = theme.muted, wrapMode = .None})
 				}
-			} else {
-				metadata_text := hero_fit_text(
+			} else if metadata != "" {
+				fitted_text(
 					ui_state,
 					metadata,
 					title_width,
-					14,
-					0,
-					context.temp_allocator,
+					{fontSize = 14, textColor = theme.muted},
 				)
-				clay.Text(metadata_text, {fontSize = 14, textColor = theme.muted})
+			}
+			if summary != "" {
+				fitted_text(
+					ui_state,
+					summary,
+					title_width,
+					{fontSize = 14, textColor = theme.muted},
+				)
 			}
 		}
 	}
