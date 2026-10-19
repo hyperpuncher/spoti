@@ -1478,6 +1478,8 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 				   play_index < len(play_queue) &&
 				   play_queue[play_index].uri == selected {
 					ready_artist = play_queue[play_index].artist
+					replace_string(&play_queue[play_index].name, title)
+					play_queue[play_index].duration_ms = packet.duration_ms
 				}
 				replace_string(&artist, ready_artist)
 				duration_ms = packet.duration_ms
@@ -1550,14 +1552,21 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 	}
 	if finished && stage == .Playing && stream != nil && sdl.GetAudioStreamQueued(stream) == 0 {
 		stage = .Ended
-		if !seek_dragging && repeat {
-			replay_pending = true
-		} else if !seek_dragging &&
-		   advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover) {
-			replay_pending = true
-		} else if !seek_dragging && connect_repeat_context && len(play_queue) > 0 {
-			play_index = 0
-			replay_pending = select_play_item(play_queue[:], play_index, &selected, &player_cover)
+		if !seek_dragging {
+			if repeat ||
+			   advance_play_item(play_queue[:], &play_index, 1, &selected, &player_cover) {
+				replay_pending = true
+			} else if connect_repeat_context && len(play_queue) > 0 {
+				play_index = 0
+				replay_pending = select_play_item(
+					play_queue[:],
+					play_index,
+					&selected,
+					&player_cover,
+				)
+			} else {
+				app_finish_queue(app)
+			}
 		}
 		redraw = true
 	}
@@ -2505,7 +2514,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		case .Next, .Previous:
 			accepted =
 				!remote_control &&
-				(event.action == .Next ? play_index >= 0 && play_index + 1 < len(play_queue) : play_index > 0 || displayed_ms >= PREVIOUS_RESTART_MS)
+				(event.action == .Next ? play_index >= 0 && play_index < len(play_queue) : play_index > 0 || displayed_ms >= PREVIOUS_RESTART_MS)
 			if accepted {track_delta = event.action == .Next ? 1 : -1}
 		case .Volume:
 			volume = event.volume
@@ -2617,7 +2626,11 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			_ = open_entry_page(&nav_ctx, preview)
 		}
 	}
-	if track_delta != 0 &&
+	if track_delta > 0 && play_index >= 0 && play_index + track_delta >= len(play_queue) {
+		app_finish_queue(app)
+		restart_playback, seek_requested = false, false
+		space_pressed = false
+	} else if track_delta != 0 &&
 	   advance_play_item(play_queue[:], &play_index, track_delta, &selected, &player_cover) {
 		restart_playback = true
 	}
@@ -2716,7 +2729,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				repeat = repeat,
 				volume = volume,
 				can_seek = seek_enabled,
-				can_next = play_index >= 0 && play_index + 1 < len(play_queue),
+				can_next = play_index >= 0 && play_index < len(play_queue),
 				can_previous = play_index > 0 ||
 				!remote_control && displayed_ms >= PREVIOUS_RESTART_MS,
 			},

@@ -133,6 +133,8 @@ sanitize_state :: proc(app_state: ^State) {
 	clear_unless_uri(&played.collection, "spotify:playlist:", "spotify:album:", "spotify:artist:")
 	valid_queue := played.queue_index >= 0 && played.queue_index < len(played.queue)
 	for &item in played.queue {
+		cap_string(&item.name, 256)
+		item.duration_ms = max(0, item.duration_ms)
 		clear_unless_uri(&item.uri, "spotify:track:")
 		if item.uri == "" {valid_queue = false}
 		cap_string(&item.artist, 256)

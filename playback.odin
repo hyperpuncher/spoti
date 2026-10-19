@@ -27,6 +27,8 @@ Stage :: enum {
 
 Play_Item :: struct {
 	uri:          string,
+	name:         string,
+	duration_ms:  int,
 	artist:       string, // joined display names
 	artist_links: []library.Artist_Link, // owned, in display order
 	album:        string,
@@ -37,6 +39,7 @@ Play_Item :: struct {
 
 free_play_item :: proc(item: Play_Item) {
 	delete(item.uri)
+	delete(item.name)
 	delete(item.artist)
 	for link in item.artist_links {
 		delete(link.name)
@@ -84,6 +87,8 @@ append_play_item :: proc(
 		items,
 		Play_Item {
 			uri = strings.clone(row.uri),
+			name = strings.clone(row.name),
+			duration_ms = row.duration_ms,
 			artist = strings.clone(row.artists),
 			artist_links = library.clone_artist_links(row.artist_links),
 			album = strings.clone(row.album),
@@ -103,6 +108,7 @@ build_play_queue :: proc(items: ^[dynamic]Play_Item, rows: []$T, fallback_cover:
 			first: [1]library.Artist_Link
 			row = {
 				uri       = item.uri,
+				name      = item.name,
 				artists   = item.subtitle,
 				album     = item.album,
 				album_uri = item.album_uri,
@@ -208,6 +214,27 @@ advance_play_item :: proc(
 	select_play_item(items, index^ + delta, selected, cover) or_return
 	index^ += delta
 	return true
+}
+
+// End-of-queue and Next past its last track share one stopped reset.
+// Keep metadata in the queue so this needs no decode or network request.
+app_finish_queue :: proc(app: ^App) {
+	if app.preload_worker != nil {sync.atomic_store(&app.preload_work.cancel, true)}
+	if app.worker != nil {cancel_worker(app.queue, &app.cancel)}
+	clear_audio_stream(&app.stream)
+	app.stage = app.worker != nil ? .Stopping : .Idle
+	app.finished, app.play_after_stop, app.replay_pending = false, false, false
+	app.seek_dragging, app.start_paused = false, false
+	app.seek_ms, app.displayed_ms = 0, 0
+	if select_play_item(app.play_queue[:], 0, &app.selected, &app.player_cover) {
+		app.play_index = 0
+		first := app.play_queue[0]
+		replace_string(&app.title, first.name)
+		replace_string(&app.artist, first.artist)
+		app.duration_ms = first.duration_ms
+	}
+	app.state_dirty = true
+	app.pending_redraw = true
 }
 
 // Accessed only by the decode worker; main clears it after joining that worker.

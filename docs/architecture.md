@@ -110,6 +110,10 @@ starting audio. saves borrow the live queue only while encoding; there is no
 second owned queue snapshot. the last browsed collection is separate.
 rows that arrive later extend the restored queue when its source page is open;
 playback near the queue's end also requests more rows from that page.
+when the last track finishes without repeat, stop and select the first queued
+track at 0:00. Next from the last track does the same without starting audio.
+queue items retain titles and durations so the stopped footer needs no network
+request. automatic repeat-track and repeat-context transitions keep playing.
 
 Dealer requests become UI events. reply only after the UI accepts a command;
 reject unsupported commands. publish actual local playback state. send state
