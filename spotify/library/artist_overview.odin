@@ -112,6 +112,7 @@ fetch_artist_overview :: proc(
 	country: string,
 	reuse: rawptr,
 	cancel: ^bool,
+	cache_only: bool = false,
 ) -> bool {
 	key := fmt.aprintf(
 		"artist-overview:%s:%s:%s",
@@ -120,10 +121,11 @@ fetch_artist_overview :: proc(
 		country,
 		allocator = context.temp_allocator,
 	)
-	if cached, hit := cache_read("api", key, PAGE_TTL); hit {
+	if cached, hit := cache_read("api", key, cache_only ? API_STALE : PAGE_TTL); hit {
 		defer delete(cached)
 		if parse_artist_overview(cached[:], detail) {return true}
 	}
+	if cache_only {return false}
 	variables: struct {
 		uri, locale: string,
 		prerelease:  bool `json:"includePrerelease"`,

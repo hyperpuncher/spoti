@@ -44,6 +44,7 @@ Track_Row :: struct {
 Detail :: struct {
 	arena:             virtual.Arena,
 	ready:             bool,
+	header_pending:    bool, // header metadata is incomplete; do not choose its layout yet
 	liked:             bool, // in the account library; hero heart state
 	source:            Source,
 	id:                string,

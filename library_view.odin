@@ -566,18 +566,48 @@ sidebar :: proc(
 	return
 }
 
-loading_track_table :: proc(d: f32) {
-	if clay.UI_WithId(clay.ID("detail_rows"))(
+loading_spinner :: proc(fx: ^Button_Fx_Ctx, d: f32) {
+	fx.animating = true
+	if clay.UI()(
 	{
 		layout = {
-			layoutDirection = .TopToBottom,
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
-			padding = {left = u16(28 * d), top = u16(22 * d)},
-			childGap = u16(8 * d),
+			childAlignment = {x = .Center, y = .Center},
 		},
 	},
 	) {
-		clay.Text("Loading tracks...", {fontSize = 15, textColor = theme.muted})
+		if clay.UI_WithId(clay.ID("detail_spinner"))(
+		{
+			layout = {
+				sizing = {width = clay.SizingFixed(24 * d), height = clay.SizingFixed(24 * d)},
+			},
+		},
+		) {
+			phase := int((sdl.GetTicks() / 80) % 8)
+			for offset, index in ([8]clay.Vector2{{0, -1}, {0.707, -0.707}, {1, 0}, {0.707, 0.707}, {0, 1}, {-0.707, 0.707}, {-1, 0}, {-0.707, -0.707}}) {
+				color := theme.muted
+				color.a = 48 + f32((index - phase + 8) % 8) * (207.0 / 7)
+				clay.UI()(
+				{
+					layout = {
+						sizing = {
+							width = clay.SizingFixed(4 * d),
+							height = clay.SizingFixed(4 * d),
+						},
+					},
+					backgroundColor = color,
+					cornerRadius = clay.CornerRadiusAll(2 * d),
+					floating = {
+						offset = offset * (9 * d),
+						attachTo = .Parent,
+						attachment = {element = .CenterCenter, parent = .CenterCenter},
+						pointerCaptureMode = .Passthrough,
+						clipTo = .AttachedParent,
+					},
+				},
+				)
+			}
+		}
 	}
 }
 
@@ -1443,17 +1473,14 @@ hero_banner :: proc(
 	ui_state: ^ui.State,
 	width, viewport_height, d: f32,
 ) -> bool {
+	// Metadata selects the layout; texture arrival only fills the artwork.
 	if detail.banner == "" {return false}
-	texture := textures.by_key[cover_key(detail.banner)]
-	w, h: f32
-	if texture == nil || !sdl.GetTextureSize(texture, &w, &h) || w <= h || h <= 0 {return false}
 	available := max(0, width - SCROLLBAR_OUTSET * d)
-	// Keep small windows unchanged; let larger windows grow up to 40%.
-	height_limit := min(
+	// Stable height: 35% in small windows, up to 40% in larger ones.
+	height := min(
 		viewport_height * 0.40,
 		viewport_height * 0.35 + max(0, viewport_height - 900 * d) * 0.15,
 	)
-	height := min(available * h / w, height_limit)
 	title_width := max(0, available - 48 * d)
 	title, title_style := hero_title(
 		ui_state,
@@ -1462,6 +1489,11 @@ hero_banner :: proc(
 		hero_max_title_size(viewport_height, d),
 	)
 	metadata, summary := hero_metadata(detail)
+	if metadata == "" {
+		metadata = summary
+	} else if summary != "" {
+		metadata = fmt.aprintf("%s • %s", metadata, summary, allocator = context.temp_allocator)
+	}
 	if clay.UI_WithId(clay.ID("hero_banner"))(
 	{layout = {sizing = {width = clay.SizingFixed(available), height = clay.SizingFixed(height)}}},
 	) {
@@ -1501,11 +1533,11 @@ hero_banner :: proc(
 		) {
 			clay.Text(detail.label, {fontSize = 13, textColor = theme.text})
 			clay.Text(title, title_style)
-			for line in ([]string{metadata, summary}) {
-				if line == "" {continue}
+			// Reserve one metadata line for every banner, including loading states.
+			if clay.UI()({layout = {sizing = {height = clay.SizingFixed(20 * d)}}}) {
 				fitted_text(
 					ui_state,
-					line,
+					metadata,
 					title_width,
 					{fontSize = 14, textColor = theme.text, wrapMode = .None},
 				)
@@ -1697,6 +1729,10 @@ detail_page :: proc(
 		backgroundColor = theme.bg,
 	},
 	) {
+		if client.detail_loading && (!detail.ready || detail.header_pending) {
+			loading_spinner(fx, d)
+			return
+		}
 		// A failed refresh must not replace cached rows with an error page.
 		has_content :=
 			len(detail.rows) > 0 || len(detail.albums.items) > 0 || len(detail.singles.items) > 0
@@ -1713,10 +1749,7 @@ detail_page :: proc(
 			) {
 				title := "Pick a playlist, album or artist"
 				detail_line := "Covers and track lists load from your own Spotify account."
-				if client.detail_loading {
-					title = "Loading..."
-					detail_line = "Fetching this page from Spotify."
-				} else if client.detail_error != 0 {
+				if client.detail_error != 0 {
 					title = "Could not open this page"
 					detail_line = page_error_text(client.detail_error)
 				}
@@ -1809,7 +1842,7 @@ detail_page :: proc(
 		// All collection pages share the same space below their controls.
 		list_spacer(24 * d)
 		if library.detail_loading_visible(client) {
-			loading_track_table(d)
+			loading_spinner(fx, d)
 		} else if detail.source == .Artist {
 			artist_page(
 				detail,

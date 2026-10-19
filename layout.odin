@@ -144,7 +144,7 @@ Button_Fx :: struct {
 Button_Fx_Ctx :: struct {
 	anims:      ^map[string]Button_Fx,
 	mouse_down: bool,
-	animating:  bool, // a spring is mid-flight; main keeps frames coming
+	animating:  bool, // a UI animation is running; main keeps frames coming
 }
 
 // Icon scale for a button id plus its hover state. Disabled buttons skip

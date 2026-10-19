@@ -8,6 +8,7 @@ import artwork "../artwork"
 import credential "../credential"
 import http "../http"
 import oauth "../oauth"
+import session "../session"
 import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
@@ -599,6 +600,19 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	if warm_ok && warm.rows_error == 0 {
 		// The page is already on disk, so it opens with its rows in place.
 		// The queued request above still revalidates it in the background.
+		if source == .Artist {
+			code := session.cached_country()
+			country := ""
+			if code != {} {country = string(code[:])}
+			warm.header_pending = !fetch_artist_overview(
+				"",
+				&warm,
+				country,
+				nil,
+				nil,
+				cache_only = true,
+			)
+		}
 		next = warm
 		next.image_preview = strings.clone(preview.image, virtual.arena_allocator(&next.arena))
 	} else {
@@ -606,6 +620,7 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 		if virtual.arena_init_growing(&next.arena) == nil {
 			allocator := virtual.arena_allocator(&next.arena)
 			next.ready = true
+			next.header_pending = true
 			next.source = source
 			next.id = strings.clone(id, allocator)
 			next.name = strings.clone(preview.name, allocator)
@@ -702,10 +717,12 @@ discard_unavailable_track :: proc(client: ^Client, uri: string) {
 	}
 }
 
-// True while an open is slow enough, and empty enough, that a placeholder
-// helps. Pagination keeps its rows; only the first fill can show the table.
+// Cold previews show loading at once. Known headers keep the short delay;
+// pagination keeps existing rows instead of replacing them with a placeholder.
 detail_loading_visible :: proc(client: ^Client) -> bool {
-	if !client.detail_loading || time.since(client.detail_loading_at) < 0 {return false}
+	if !client.detail_loading {return false}
+	if client.detail.header_pending {return true}
+	if time.since(client.detail_loading_at) < 0 {return false}
 	return(
 		len(client.detail.rows) == 0 &&
 		len(client.detail.albums.items) == 0 &&
@@ -1150,6 +1167,7 @@ apply :: proc(client: ^Client, result: Result) {
 		   local.id != client.detail_request_id {return}
 		client.detail_loading = false
 		if !local.ok {
+			client.detail.header_pending = false
 			client.last_http_status = local.status
 			client.detail_error = local.status != 0 ? local.status : -1
 			client.state = local.status == 401 ? .Failed : client.state

@@ -14,6 +14,7 @@ loaded_detail_retains_selected_card_cover :: proc(t: ^testing.T) {
 	if virtual.arena_init_growing(&client.detail.arena) != nil {testing.fail_now(t, "arena")}
 	preview_allocator := virtual.arena_allocator(&client.detail.arena)
 	client.detail.image_preview = strings.clone("https://i.scdn.co/image/card", preview_allocator)
+	client.detail.header_pending = true
 	client.detail_request_id = strings.clone("album")
 	client.detail_request_source = .Album
 	client.detail_loading = true
@@ -46,7 +47,10 @@ loaded_detail_retains_selected_card_cover :: proc(t: ^testing.T) {
 		},
 	)
 
-	testing.expect(t, !client.detail_loading && client.detail.ready)
+	testing.expect(
+		t,
+		!client.detail_loading && client.detail.ready && !client.detail.header_pending,
+	)
 	testing.expect_value(t, client.detail.image_preview, "https://i.scdn.co/image/card")
 	testing.expect_value(t, client.detail.image, "https://i.scdn.co/image/large")
 	testing.expect_value(t, client.detail.image_small, "https://i.scdn.co/image/small")
@@ -146,6 +150,7 @@ discography_selection_clones_metadata_before_releasing_detail :: proc(t: ^testin
 	request, received := chan.try_recv(requests)
 	if received {free_request(request)}
 	testing.expect(t, opened && received && client.detail_loading && client.detail.ready)
+	testing.expect(t, client.detail.header_pending && detail_loading_visible(&client))
 	testing.expect_value(t, client.detail.name, "Release")
 	testing.expect_value(t, client.detail_request_id, "album")
 	testing.expect_value(t, client.detail.image_preview, "https://i.scdn.co/image/card")

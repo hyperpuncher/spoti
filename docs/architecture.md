@@ -72,8 +72,15 @@ is at most 35 percent of a small window and grows smoothly up to 40 percent
 on larger windows. rounded top corners are applied after cropping. captions
 use theme text colors over a smooth mask that reaches the page background
 color at the lower edge. square cover art stays uncropped and is never used
-as a wide banner. play counts are shown only when supplied and when the pane
-has space for the numeric column. hero titles keep the smaller-window size
+as a wide banner. header size does not depend on image decoding or upload.
+pages with unknown header metadata show a centered spinner, not a temporary
+header. cached headers appear at once; artist opens also read the cached
+overview without network access. only dedicated banner metadata selects a
+wide header. pages without a banner keep their square cover.
+banner captions reserve one metadata line, with owner and song totals joined
+by `•`, so metadata arrival does not move the title. play counts are shown
+only when supplied and when the pane has space for the numeric column.
+hero titles keep the smaller-window size
 and can grow to 96 on larger windows; the headline face uses Geist ExtraBold.
 
 playlist tables show album and date-added columns when space is available.
