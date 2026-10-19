@@ -17,7 +17,7 @@ Visible_Items :: struct {
 }
 
 Frame_Visible :: struct {
-	cards, tracks, releases, singles, feed: Visible_Items,
+	cards, tracks, releases, singles, feed, queue: Visible_Items,
 }
 
 // Release cards stop growing past a readable cover; wider windows gain

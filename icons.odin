@@ -24,6 +24,7 @@ ICON_NAMES :: []string {
 	"search",
 	"layout-grid",
 	"list",
+	"list-music",
 	"play",
 	"play-filled",
 	"pause",

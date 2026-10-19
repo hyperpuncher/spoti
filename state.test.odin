@@ -77,7 +77,7 @@ state_toggle_pin_and_recent_keep_most_recent_first :: proc(t: ^testing.T) {
 @(test)
 reopened_queue_continues_after_the_same_duplicate_track :: proc(t: ^testing.T) {
 	loaded := parse_state(
-		`{"last_collection":"spotify:album:browsed","last_played":{"track":"spotify:track:duplicate","collection":"spotify:playlist:playing","queue_index":2,"shuffle":true,"queue":[{"uri":"spotify:track:duplicate","name":"First track","duration_ms":120000,"order":2},{"uri":"spotify:track:other","order":3},{"uri":"spotify:track:duplicate","order":0,"album":"Album","album_uri":"spotify:album:original","artist_links":[{"name":"Artist","uri":"spotify:artist:original"}]},{"uri":"spotify:track:next","order":1}]}}`,
+		`{"last_collection":"spotify:album:browsed","last_played":{"track":"spotify:track:duplicate","collection":"spotify:playlist:playing","queue_index":2,"shuffle":true,"queue":[{"uri":"spotify:track:duplicate","name":"First track","duration_ms":120000,"order":2,"queued":true},{"uri":"spotify:track:other","order":3},{"uri":"spotify:track:duplicate","order":0,"album":"Album","album_uri":"spotify:album:original","artist_links":[{"name":"Artist","uri":"spotify:artist:original"}]},{"uri":"spotify:track:next","order":1}]}}`,
 	)
 	defer free_state(&loaded)
 	encoded := format_state(&loaded)
@@ -94,6 +94,7 @@ reopened_queue_continues_after_the_same_duplicate_track :: proc(t: ^testing.T) {
 	app_restore_play_queue(&app)
 	if !testing.expect_value(t, len(app.play_queue), 4) {return}
 	testing.expect_value(t, app.play_index, 2)
+	testing.expect_value(t, app.queue_rows, 3)
 	testing.expect_value(t, app.play_queue[app.play_index].order, 0)
 	testing.expect_value(t, app.queue_detail, "spotify:playlist:playing")
 	testing.expect_value(t, app.app_state.last_collection, "spotify:album:browsed")
@@ -107,6 +108,7 @@ reopened_queue_continues_after_the_same_duplicate_track :: proc(t: ^testing.T) {
 	decoded := parse_state(saved)
 	defer free_state(&decoded)
 	testing.expect_value(t, len(decoded.last_played.queue), 4)
+	testing.expect(t, decoded.last_played.queue[0].queued)
 	testing.expect_value(t, decoded.last_played.queue[0].name, "First track")
 	testing.expect_value(t, decoded.last_played.queue[0].duration_ms, 120_000)
 	testing.expect_value(t, app.play_queue[2].album_uri, "spotify:album:original")

@@ -124,6 +124,39 @@ shuffle_preserves_current_track_duplicates_and_original_order :: proc(t: ^testin
 }
 
 @(test)
+manual_queue_additions_keep_fifo_priority_and_collection_paging :: proc(t: ^testing.T) {
+	app := App {
+		play_index = 0,
+		stage      = .Playing,
+		selected   = strings.clone("first"),
+		queue_rows = 2,
+	}
+	build_play_queue(&app.play_queue, []library.Track_Row{{uri = "first"}, {uri = "second"}})
+	defer {free_play_queue(&app.play_queue); delete(app.selected); delete(app.toast)}
+	app_enqueue_track(&app, library.Track_Row{uri = "duplicate", name = "Queued one"})
+	app_enqueue_track(&app, library.Track_Row{uri = "duplicate", name = "Queued two"})
+	testing.expect_value(t, app.play_index, 0)
+	testing.expect_value(t, app.selected, "first")
+	testing.expect_value(t, app.stage, Stage.Playing)
+	testing.expect_value(t, app.queue_rows, 2)
+	testing.expect_value(t, app.play_queue[1].name, "Queued one")
+	testing.expect_value(t, app.play_queue[2].name, "Queued two")
+	app.play_index = reorder_play_queue(app.play_queue[:], app.play_index, true)
+	testing.expect_value(t, app.play_queue[1].name, "Queued one")
+	testing.expect_value(t, app.play_queue[2].name, "Queued two")
+	app.play_index = reorder_play_queue(app.play_queue[:], app.play_index, false)
+	append_play_queue_tail(&app.play_queue, []library.Track_Row{{uri = "third"}})
+	testing.expect_value(t, app.play_queue[3].uri, "second")
+	testing.expect_value(t, app.play_queue[4].uri, "third")
+	testing.expect(
+		t,
+		discard_play_track(&app.play_queue, "duplicate", &app.play_index, &app.queue_rows),
+	)
+	testing.expect_value(t, app.queue_rows, 2)
+	testing.expect_value(t, len(app.play_queue), 3)
+}
+
+@(test)
 stamp_queue_album_fills_missing_links_without_freeing_temps :: proc(t: ^testing.T) {
 	detail := library.Detail {
 		source = .Album,

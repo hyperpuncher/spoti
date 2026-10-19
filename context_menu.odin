@@ -14,6 +14,7 @@ Menu_Item :: enum {
 	Copy_Link,
 	Open_In_Spotify,
 	Play,
+	Add_To_Queue,
 	Save_Album,
 	Pick_Sort,
 	Add_To_Playlist,
@@ -82,30 +83,34 @@ open_track_menu :: proc(
 	removable: bool = false,
 ) {
 	open_context_menu(menu, point, uri, track)
-	menu.items[0] = .Play
-	menu.labels[0] = "Play"
-	if removable {
-		menu.items[1] = .Remove_From_Playlist
-		menu.labels[1] = "Remove from playlist"
-	} else {
-		menu.items[1] = .Add_To_Playlist
-		menu.labels[1] = "Add to playlist"
+	menu.items = {
+		.Play,
+		.Add_To_Queue,
+		removable ? .Remove_From_Playlist : .Add_To_Playlist,
+		.Copy_Link,
+		.Open_In_Spotify,
 	}
-	menu.items[2] = .Copy_Link
-	menu.labels[2] = "Copy link"
-	menu.items[3] = .Open_In_Spotify
-	menu.labels[3] = "Open in Spotify"
-	menu.count = 4
+	menu.labels = {
+		"Play",
+		"Add to queue",
+		removable ? "Remove from playlist" : "Add to playlist",
+		"Copy link",
+		"Open in Spotify",
+	}
+	menu.count = 5
 }
 
-// Search tracks play with a left click; the menu only links out.
+// Search and queue tracks can be queued or opened without a network lookup.
 open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 	open_context_menu(menu, point, uri)
-	menu.items[0] = .Copy_Link
-	menu.labels[0] = "Copy link"
-	menu.items[1] = .Open_In_Spotify
-	menu.labels[1] = "Open in Spotify"
-	menu.count = 2
+	if strings.has_prefix(uri, "spotify:track:") {
+		menu.items[0], menu.labels[0] = .Add_To_Queue, "Add to queue"
+		menu.count = 1
+	}
+	index := menu.count
+	menu.items[index], menu.labels[index] = .Copy_Link, "Copy link"
+	menu.items[index + 1], menu.labels[index + 1] = .Open_In_Spotify, "Open in Spotify"
+	menu.count += 2
 }
 
 open_release_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, saved: bool) {

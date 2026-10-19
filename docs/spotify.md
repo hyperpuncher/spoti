@@ -62,6 +62,21 @@ see [Spotify's API access changes](https://developer.spotify.com/blog/2024-11-27
 pins are local to spoti. Spotify's own pins are not synced, so a playlist
 pinned in the official app can appear farther down spoti's list.
 
+## queue
+
+select the queue icon beside the device button to open the playback queue.
+the panel shows the current track and upcoming tracks, with the titles,
+artists, and durations already held in memory. select a track to play it.
+closing the panel does not change playback or queue order. right-click a track
+in a track list, search results, or the queue and select **Add to queue**. added
+tracks play in order after existing manual additions, before the remaining
+collection tracks. adding a track does not interrupt playback; duplicates are
+kept.
+
+long queues use a bounded visible list. opening the panel sends no Spotify
+requests and does not download artwork. in narrow windows, the queue uses the
+detail pane until closed. reordering and removal are not supported yet.
+
 ## what's new
 
 select the bell beside search to see recent music from followed artists.

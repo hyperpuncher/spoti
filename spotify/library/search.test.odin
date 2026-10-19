@@ -18,6 +18,7 @@ search_results_split_into_four_relevance_pages :: proc(t: ^testing.T) {
 		pages[.Tracks].items[0].name == "Song" && pages[.Tracks].items[0].subtitle == "X",
 	)
 	testing.expect(t, pages[.Tracks].items[0].uri == "spotify:track:abc")
+	testing.expect_value(t, pages[.Tracks].items[0].duration_ms, 1000)
 	testing.expect(
 		t,
 		pages[.Albums].items[0].name == "An Album" && pages[.Albums].items[0].total == 9,

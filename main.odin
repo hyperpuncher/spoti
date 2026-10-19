@@ -179,7 +179,15 @@ update_cursor :: proc(
 	link_album: bool,
 	link_artist: bool,
 ) {
-	if pointer_over("footer_devices") {ui.set_cursor(state, .Pointer); return}
+	if pointer_over("footer_devices") ||
+	   pointer_over("footer_queue") ||
+	   pointer_over("queue_close") ||
+	   pointer_over("queue_current") ||
+	   pointer_over("queue_scrollbar") ||
+	   range_hovered("queue_item", visible.queue) {
+		ui.set_cursor(state, .Pointer)
+		return
+	}
 	for device, index in client.devices {
 		if !device.restricted && pointer_over("device_item", u32(index)) {
 			ui.set_cursor(state, .Pointer)
@@ -356,7 +364,8 @@ Smooth :: struct {
 	active: bool,
 }
 
-smooth_for :: proc(container: string, grid, detail: ^Smooth) -> ^Smooth {
+smooth_for :: proc(container: string, grid, detail, queue: ^Smooth) -> ^Smooth {
+	if container == "queue_rows" {return queue}
 	return container == "library_grid" ? grid : detail
 }
 
@@ -609,6 +618,7 @@ App :: struct {
 	play_index:             int,
 	queue_detail:           string,
 	queue_gen:              uint,
+	queue_rows:             int, // collection rows already copied; excludes manual additions
 	queue_restore_pending:  bool,
 	using editor:           ui.Editor,
 	search_mode:            bool,
@@ -640,6 +650,7 @@ App :: struct {
 	page_counts:            [library.Kind]int,
 	menu:                   Context_Menu,
 	device_open:            bool, // the Connect device panel is showing
+	queue_open:             bool,
 	resizing:               bool,
 	scrollbar_drag:         Scrollbar_Drag,
 	detail_scroll_target:   f32,
@@ -653,6 +664,7 @@ App :: struct {
 	detail_smooth:          Smooth,
 	picker_smooth:          Smooth,
 	device_smooth:          Smooth,
+	queue_smooth:           Smooth,
 	toast:                  string,
 	setup_error:            string, // setup screen error, owned
 	toast_until:            u64,
@@ -925,6 +937,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	   detail_smooth.active ||
 	   picker_smooth.active ||
 	   device_smooth.active ||
+	   queue_smooth.active ||
 	   resizing ||
 	   dragging ||
 	   seek_dragging ||
@@ -1117,6 +1130,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 							free_play_queue(&play_queue)
 							delete(queue_detail)
 							queue_detail = ""
+							queue_rows = 0
 							play_index = -1
 							delete(input)
 							input = {}
@@ -1359,12 +1373,13 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 	   library_client.detail.ready &&
 	   queue_detail == detail_card_uri(library_client.detail) &&
 	   queue_gen == library_client.detail.generation &&
-	   len(play_queue) < len(library_client.detail.rows) {
+	   queue_rows < len(library_client.detail.rows) {
 		append_play_queue_tail(
 			&play_queue,
-			library_client.detail.rows[len(play_queue):],
+			library_client.detail.rows[queue_rows:],
 			library_client.detail.image_small,
 		)
+		queue_rows = len(library_client.detail.rows)
 		stamp_queue_album(&play_queue, &library_client.detail)
 		state_dirty = true
 		redraw = true
@@ -1525,7 +1540,12 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 			case .Unavailable:
 				diagnostic.write("playback skipped unavailable track")
 				library.discard_unavailable_track(&library_client, selected)
-				play_after_stop = discard_play_track(&play_queue, selected, &play_index)
+				play_after_stop = discard_play_track(
+					&play_queue,
+					selected,
+					&play_index,
+					&queue_rows,
+				)
 				if !play_after_stop && connect_repeat_context && len(play_queue) > 0 {
 					play_index, play_after_stop = 0, true
 				}
@@ -1600,6 +1620,7 @@ app_glide :: proc(app: ^App, frame: ^Frame) {
 	smooth_dt := f32(sdl.GetTicksNS() - last) / 1e9
 	if smooth_step("playlist_picker", &picker_smooth, smooth_dt) {redraw = true}
 	if smooth_step("device_picker", &device_smooth, smooth_dt) {redraw = true}
+	if smooth_step("queue_rows", &queue_smooth, smooth_dt) {redraw = true}
 	if smooth_step("library_grid", &grid_smooth, smooth_dt) {redraw = true}
 	if smooth_step("detail_rows", &detail_smooth, smooth_dt) {redraw = true}
 	// The autoscroll step runs after layout, so a gliding frame must
@@ -1793,6 +1814,9 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		can_forward    = nav_can_forward(&nav),
 		search_kind    = search_kind,
 		menu           = &menu,
+		queue_open     = queue_open,
+		queue_items    = play_queue[:],
+		queue_index    = play_index,
 		device_open    = device_open,
 		device_active  = devices_active,
 		device_rows    = library_client.devices[:],
@@ -1812,6 +1836,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	}
 	wheel_used := scroll_wheel("device_picker", wheel.y, density, &device_smooth)
 	if !wheel_used {wheel_used = scroll_wheel("playlist_picker", wheel.y, density, &picker_smooth)}
+	if !wheel_used {wheel_used = scroll_wheel("queue_rows", wheel.y, density, &queue_smooth)}
 	if !wheel_used {wheel_used = scroll_wheel("library_grid", wheel.y, density, &grid_smooth)}
 	if !wheel_used {
 		wheel_used = scroll_wheel("detail_rows", wheel.y, density, &detail_smooth)
@@ -1889,7 +1914,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	fx_animating = fx.animating
 	if middle_clicked {
 		middle_clicked = false
-		for id in ([]string{"library_grid", "detail_rows"}) {
+		for id in ([]string{"queue_rows", "library_grid", "detail_rows"}) {
 			if !hit(id, middle_click) {continue}
 			data := clay.GetScrollContainerData(clay.ID(id))
 			if data.found &&
@@ -1904,7 +1929,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	if autoscroll_container != "" {
 		smooth_cancel(
 			autoscroll_container,
-			smooth_for(autoscroll_container, &grid_smooth, &detail_smooth),
+			smooth_for(autoscroll_container, &grid_smooth, &detail_smooth, &queue_smooth),
 		)
 		data := clay.GetScrollContainerData(clay.ID(autoscroll_container))
 		if !data.found || .MIDDLE not_in buttons {
@@ -1979,7 +2004,12 @@ app_input_click :: proc(app: ^App, frame: ^Frame) {
 app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	using app
 	using frame
-	if right_clicked {
+	if right_clicked && queue_open && hit("queue_panel", mouse_right) {
+		if index := queue_item_at(play_index, visible.queue, mouse_right);
+		   index >= 0 && index < len(play_queue) {
+			open_link_menu(&menu, mouse_right, play_queue[index].uri)
+		} else {menu.open = false}
+	} else if right_clicked {
 		open_menu_at(
 			&menu,
 			&library_client,
@@ -2047,6 +2077,8 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					} else if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
 						track_selected = app_queue_detail(app, menu.track)
 					}
+				case .Add_To_Queue:
+					_ = app_enqueue_uri(app, menu.uri)
 				case .Add_To_Playlist:
 					menu.picker_open = true
 					keep_open = true
@@ -2066,7 +2098,22 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		}
 		if !keep_open {menu.open = false}
 	} else if clicked {
-		if hit("toolbar_releases", mouse_click) {
+		if hit("footer_queue", mouse_click) || hit("queue_close", mouse_click) {
+			queue_open = hit("footer_queue", mouse_click) && !queue_open
+			queue_smooth = {}
+			if data := clay.GetScrollContainerData(clay.ID("queue_rows"));
+			   data.found && data.scrollPosition != nil {data.scrollPosition.y = 0}
+			pending_redraw = true
+		} else if queue_open && hit("queue_scrollbar", mouse_click) {
+			begin_scrollbar_drag(&scrollbar_drag, "queue_rows", mouse_click.y)
+		} else if queue_open && hit("queue_panel", mouse_click) {
+			index := queue_item_at(play_index, visible.queue, mouse_click)
+			if index >= 0 && index < len(play_queue) {
+				play_index = index
+				track_selected = select_play_item(play_queue[:], index, &selected, &player_cover)
+				pending_redraw = true
+			}
+		} else if hit("toolbar_releases", mouse_click) {
 			if !library_client.release_feed.open {nav_save_scroll(&nav, detail_scroll_y())}
 			was_open := library_client.release_feed.open
 			library.open_releases(&library_client)
@@ -2181,6 +2228,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					if !hit_clipped("card", "library_grid", mouse_click, u32(index)) {continue}
 					if search_mode && display_kind == .Tracks {
 						build_play_queue(&play_queue, display_page.items[:])
+						queue_rows = len(display_page.items)
 						delete(queue_detail)
 						queue_detail = ""
 						play_index =
@@ -2382,7 +2430,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		} else if drag_scrollbar(&scrollbar_drag, mouse.y, density) {
 			smooth_cancel(
 				scrollbar_drag.container,
-				smooth_for(scrollbar_drag.container, &grid_smooth, &detail_smooth),
+				smooth_for(scrollbar_drag.container, &grid_smooth, &detail_smooth, &queue_smooth),
 			)
 			redraw = true
 		}
@@ -2494,6 +2542,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				append(&play_queue, Play_Item{uri = strings.clone(uri), order = index})
 			}
 			replace_string(&queue_detail, "")
+			queue_rows = len(play_queue)
 			play_index = 0
 			track_selected = select_play_item(play_queue[:], play_index, &selected, &player_cover)
 			incoming_load = track_selected

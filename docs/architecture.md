@@ -115,6 +115,12 @@ track at 0:00. Next from the last track does the same without starting audio.
 queue items retain titles and durations so the stopped footer needs no network
 request. automatic repeat-track and repeat-context transitions keep playing.
 
+manual additions keep a queue-origin flag and stable ordinals. insert them
+after the current track and pending manual additions. shuffle keeps those
+pending additions in order. collection pagination counts only collection rows,
+not manual additions, so later pages do not skip tracks. saved queues retain
+the origin flag; restore rebuilds the collection-row count.
+
 Dealer requests become UI events. reply only after the UI accepts a command;
 reject unsupported commands. publish actual local playback state. send state
 changes at once and position-only changes every five seconds. stop local

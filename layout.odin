@@ -94,6 +94,9 @@ View :: struct {
 	releases:       bool,
 	search_kind:    library.Kind,
 	menu:           ^Context_Menu, // borrowed while layout runs
+	queue_open:     bool,
+	queue_items:    []Play_Item, // borrowed; playback owns the queue
+	queue_index:    int,
 	device_open:    bool, // the Connect device panel is showing
 	device_active:  bool, // a Connect device is the API-active one
 	device_rows:    []library.Device, // borrowed; the last fetched list
@@ -523,12 +526,21 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 		if clay.UI()(
 		{
 			layout = {
-				sizing = {width = clay.SizingFixed(180 * d), height = clay.SizingGrow({})},
+				sizing = {width = clay.SizingFixed(220 * d), height = clay.SizingGrow({})},
 				childGap = u16(10 * d),
 				childAlignment = {x = .Right, y = .Center},
 			},
 		},
 		) {
+			icon_button(
+				"footer_queue",
+				"list-music",
+				view.queue_open ? .Green : .Muted,
+				textures,
+				fx,
+				d,
+				icon_size = 18,
+			)
 			icon_button(
 				"footer_devices",
 				"speaker",
@@ -875,19 +887,41 @@ layout :: proc(
 				backgroundColor = theme.bg,
 			},
 			) {}
-			detail_page(
-				view,
-				client,
-				textures,
-				fx,
-				viewport_width - (sidebar_width + 6) * d,
-				viewport_height,
-				card_text_height,
-				dt,
-				d,
-				ui_state,
-				&visible,
-			)
+			detail_width := max(0, viewport_width - (sidebar_width + 6) * d)
+			queue_width: f32
+			if view.queue_open {
+				// A narrow window gives the queue the detail pane instead of
+				// compressing both lists below a readable width.
+				queue_width =
+					detail_width < (QUEUE_WIDTH + 280) * d ? detail_width : QUEUE_WIDTH * d
+				detail_width -= queue_width
+			}
+			if !view.queue_open || detail_width > 0 {
+				detail_page(
+					view,
+					client,
+					textures,
+					fx,
+					detail_width,
+					viewport_height,
+					card_text_height,
+					dt,
+					d,
+					ui_state,
+					&visible,
+				)
+			}
+			if view.queue_open {
+				visible.queue = queue_panel(
+					view,
+					textures,
+					fx,
+					queue_width,
+					viewport_height,
+					d,
+					ui_state,
+				)
+			}
 		}
 		// Breathing room between the content row and the player bar.
 		if clay.UI()(
@@ -896,6 +930,7 @@ layout :: proc(
 		player_bar(view, textures, fx, d)
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
+		if view.queue_open {scrollbar("queue_rows", "queue_scrollbar", d)}
 		context_menu(view.menu, textures, d)
 		device_panel(view, textures, d)
 		drag_ghost(view, d)
