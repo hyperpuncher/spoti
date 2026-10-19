@@ -149,8 +149,11 @@ the color font and renders cached images; SDL texture uploads and scaled
 drawing stay on the UI thread. image arrivals wake the event loop and never
 change text measurements. see [font behavior and limits](../assets/fonts/FONTS.md).
 
-cached content appears before background revalidation. successful playlist
-removal updates the existing rows only after the server confirms it.
+cached content appears before background revalidation. if a detail request
+fails, keep the available card preview, header, and rows. show the error below
+the header controls instead of replacing the page. rate limits keep the same
+retry delay. successful playlist removal updates the existing rows only after
+the server confirms it.
 
 API responses are fresh for five minutes; library pages for six hours.
 stale responses can cover network failures for up to 30 days. the audio cache

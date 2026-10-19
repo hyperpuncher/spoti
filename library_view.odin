@@ -1695,6 +1695,13 @@ page_error_text :: proc(status: int) -> string {
 	return "Could not reach Spotify. Please try again."
 }
 
+detail_error_notice :: proc(client: ^library.Client, d: f32) {
+	clay.Text(page_error_text(client.detail_error), {fontSize = 14, textColor = theme.muted})
+	if client.state == .Ready && time.since(client.page_at) >= 0 {
+		sign_in_button("detail_retry", "Try again", d)
+	}
+}
+
 detail_page :: proc(
 	view: View,
 	client: ^library.Client,
@@ -1733,10 +1740,8 @@ detail_page :: proc(
 			loading_spinner(fx, d)
 			return
 		}
-		// A failed refresh must not replace cached rows with an error page.
-		has_content :=
-			len(detail.rows) > 0 || len(detail.albums.items) > 0 || len(detail.singles.items) > 0
-		if !detail.ready || client.detail_error != 0 && !has_content {
+		// A ready detail can be only a card preview. Keep it on failed opens too.
+		if !detail.ready {
 			if clay.UI()(
 			{
 				layout = {
@@ -1747,18 +1752,16 @@ detail_page :: proc(
 				},
 			},
 			) {
-				title := "Pick a playlist, album or artist"
-				detail_line := "Covers and track lists load from your own Spotify account."
-				if client.detail_error != 0 {
-					title = "Could not open this page"
-					detail_line = page_error_text(client.detail_error)
-				}
+				title :=
+					client.detail_error != 0 ? "Could not open this page" : "Pick a playlist, album or artist"
 				clay.Text(title, {fontSize = 26, textColor = theme.text})
-				clay.Text(detail_line, {fontSize = 14, textColor = theme.muted})
-				if client.detail_error != 0 &&
-				   client.state == .Ready &&
-				   time.since(client.page_at) >= 0 {
-					sign_in_button("detail_retry", "Try again", d)
+				if client.detail_error != 0 {
+					detail_error_notice(client, d)
+				} else {
+					clay.Text(
+						"Covers and track lists load from your own Spotify account.",
+						{fontSize = 14, textColor = theme.muted},
+					)
 				}
 			}
 			return
@@ -1841,6 +1844,23 @@ detail_page :: proc(
 		}
 		// All collection pages share the same space below their controls.
 		list_spacer(24 * d)
+		if client.detail_error != 0 {
+			if clay.UI()(
+			{
+				layout = {
+					layoutDirection = .TopToBottom,
+					sizing = {width = clay.SizingGrow({})},
+					padding = clay.PaddingAll(u16(28 * d)),
+					childGap = u16(8 * d),
+				},
+			},
+			) {
+				detail_error_notice(client, d)
+			}
+			if len(detail.rows) == 0 &&
+			   len(detail.albums.items) == 0 &&
+			   len(detail.singles.items) == 0 {return}
+		}
 		if library.detail_loading_visible(client) {
 			loading_spinner(fx, d)
 		} else if detail.source == .Artist {
