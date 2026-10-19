@@ -13,6 +13,7 @@ import "core:time"
 import diagnostic "diagnostic"
 import connect "spotify/connect"
 import credential "spotify/credential"
+import http "spotify/http"
 import library "spotify/library"
 import mpris "spotify/mpris"
 import oauth "spotify/oauth"
@@ -780,6 +781,7 @@ main :: proc() {
 	mpris_active = mpris.start(WAKE_EVENT != 0 ? wake_app : nil)
 	oauth.set_prompt_handler(prompt_arrived)
 	app_state = load_state()
+	http.web_api_defer_until(time.from_nanoseconds(app_state.web_api_resume_ns))
 	if app_state.connect_device == "" {
 		app_state.connect_device = connect.new_id()
 		save_state(&app_state)
@@ -817,6 +819,9 @@ main :: proc() {
 		clear_play_source(&play_source)
 		clear_audio_stream(&stream)
 		library.stop(&library_client)
+		// A request can receive its retry deadline while the worker shuts down.
+		final_frame: Frame
+		app_persist(&app, &final_frame)
 		connect.stop(&connect_client)
 		connect.free_snapshot(&connect_snapshot)
 		session.clear_authorization()
@@ -2724,6 +2729,11 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 app_persist :: proc(app: ^App, frame: ^Frame) {
 	using app
 	using frame
+	resume := time.time_to_unix_nano(http.web_api_resume_at())
+	if resume > app_state.web_api_resume_ns {
+		app_state.web_api_resume_ns = resume
+		state_dirty = true
+	}
 	if order_dirty {pending_redraw = true}
 	// Persist the last played track. Title and artist change together on
 	// the Ready packet, so watch every field, not only the URI.

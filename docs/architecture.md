@@ -155,6 +155,22 @@ the header controls instead of replacing the page. rate limits keep the same
 retry delay. successful playlist removal updates the existing rows only after
 the server confirms it.
 
+the shared Web API retry deadline is atomic in memory and saved in `state.json`.
+restore it before workers start. save a changed deadline in the normal frame
+state save and after the library worker stops, since an in-flight request can
+finish during shutdown. a new response cannot shorten an existing deadline.
+HTTP 429 diagnostics recognise only `QUOTA_EXCEEDED`; other reasons are logged
+as unknown. response bodies and server message text are never logged.
+
+startup replaces the warm library snapshot without forcing fresh Web API
+requests. native rootlist still revalidates. cache only the account ID needed
+for playlist ownership, not the full profile. confirmed membership writes
+invalidate the first cached Web API index page for that collection type.
+a successful new browser approval clears API response caches before the worker
+handles requests, since the grant can belong to another account. saved-grant
+refreshes keep the cache. artwork, audio, local history, and retry deadlines
+are not cleared by approval.
+
 API responses are fresh for five minutes; library pages for six hours.
 stale responses can cover network failures for up to 30 days. the audio cache
 holds encrypted audio only, with a 4 GiB limit. audio keys and signed audio

@@ -4,6 +4,7 @@ import diagnostic "../../diagnostic"
 import "base:runtime"
 import c "core:c/libc"
 import "core:crypto"
+import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 import "core:sync"
@@ -101,6 +102,33 @@ web_api_resume_ns: i64
 // Keep the deadline atomic because the worker writes it and the UI reads it.
 web_api_resume_at :: proc() -> time.Time {
 	return time.from_nanoseconds(sync.atomic_load(&web_api_resume_ns))
+}
+
+// Restore saved deadlines before workers start; later responses can only extend them.
+web_api_defer_until :: proc(at: time.Time) {
+	deadline := time.time_to_unix_nano(at)
+	current := sync.atomic_load(&web_api_resume_ns)
+	for current < deadline {
+		previous, changed := sync.atomic_compare_exchange_weak(
+			&web_api_resume_ns,
+			current,
+			deadline,
+		)
+		if changed {return}
+		current = previous
+	}
+}
+
+// Only a documented, recognised reason may reach diagnostics. Never log body text.
+web_api_limit_reason :: proc(body: []u8) -> string {
+	response: struct {
+		error: struct {
+			reason: string,
+		},
+	}
+	if json.unmarshal(body, &response, allocator = context.temp_allocator) == nil &&
+	   response.error.reason == "QUOTA_EXCEEDED" {return "quota-exceeded"}
+	return "unknown"
 }
 
 init_curl :: proc() {
@@ -371,8 +399,12 @@ request :: proc(
 			// to nanoseconds so an invalid header cannot overflow the deadline.
 			seconds := retry_after > 0 ? min(retry_after, int(max(i32))) : 60
 			resume := time.time_add(time.now(), time.Duration(seconds) * time.Second)
-			sync.atomic_store(&web_api_resume_ns, time.time_to_unix_nano(resume))
-			diagnostic.writef("web api paused seconds=%d", seconds)
+			web_api_defer_until(resume)
+			diagnostic.writef(
+				"web api paused seconds=%d reason=%s",
+				seconds,
+				web_api_limit_reason(received.bytes[:]),
+			)
 		}
 	}
 	diagnostic.http(address, int(code), len(received.bytes), elapsed_ms(started), retry_after)

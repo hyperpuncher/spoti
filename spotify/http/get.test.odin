@@ -57,14 +57,28 @@ header_capture_reads_retry_after_and_resets_per_response :: proc(t: ^testing.T) 
 	feed_header(&capture, "Retry-After: soon\r\n")
 	testing.expect_value(t, retry_after, 0)
 	// A shared cooldown rejects a different Web API request without network I/O.
-	sync.atomic_store(
-		&web_api_resume_ns,
-		time.time_to_unix_nano(time.time_add(time.now(), time.Minute)),
-	)
-	defer sync.atomic_store(&web_api_resume_ns, 0)
+	previous := sync.atomic_load(&web_api_resume_ns)
+	defer sync.atomic_store(&web_api_resume_ns, previous)
+	deadline := time.time_add(time.now(), time.Minute)
+	web_api_defer_until(deadline)
+	web_api_defer_until(time.time_add(deadline, -time.Second))
+	testing.expect_value(t, web_api_resume_at(), deadline)
 	body, status, ok := get("https://api.spotify.com/v1/me", {retry_after = &retry_after})
 	defer delete(body)
 	testing.expect(t, ok && status == 429 && len(body) == 0 && retry_after > 0)
+	extended := time.time_add(deadline, time.Minute)
+	web_api_defer_until(extended)
+	web_api_defer_until(deadline)
+	testing.expect_value(t, web_api_resume_at(), extended)
+}
+
+@(test)
+web_api_limit_reason_never_returns_server_text :: proc(t: ^testing.T) {
+	quota := `{"error":{"status":429,"message":"private server text","reason":"QUOTA_EXCEEDED"}}`
+	testing.expect_value(t, web_api_limit_reason(transmute([]u8)quota), "quota-exceeded")
+	for body in ([]string{"", "not JSON", "[]", "null", `{"error":{"message":"private server text"}}`, `{"error":{"reason":"UNRECOGNISED"}}`, `{"error":{"reason":123}}`}) {
+		testing.expect_value(t, web_api_limit_reason(transmute([]u8)body), "unknown")
+	}
 }
 
 feed_header :: proc(capture: ^Header_Capture, line: string) {

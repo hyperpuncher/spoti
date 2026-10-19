@@ -821,10 +821,16 @@ edit_playlist_items :: proc(
 
 // The signed-in account's own id. Needed to tell owned playlists from the
 // ones the account merely follows, since the Web API reports no edit flag.
-// Fetched fresh, never cached: the profile carries more than this app needs.
+// Cache only the ID, not the full profile response with unrelated personal data.
+ME_CACHE_KEY :: "web-api-account"
 ME_ADDRESS :: "https://api.spotify.com/v1/me"
 
 fetch_me :: proc(access: string, reuse: rawptr = nil) -> (id: string, status: int, ok: bool) {
+	cached, hit := cache_read("api", ME_CACHE_KEY, PAGE_TTL)
+	defer delete(cached)
+	if hit && safe_id(string(cached[:]), account = true) {
+		return strings.clone(string(cached[:])), 200, true
+	}
 	body, code, fetched := http.get(ME_ADDRESS, {bearer = access, limit = 64 * 1024}, reuse)
 	defer delete(body)
 	if !fetched || code != 200 {
@@ -842,5 +848,6 @@ fetch_me :: proc(access: string, reuse: rawptr = nil) -> (id: string, status: in
 		diagnostic.writef("library me id rejected len=%d", len(profile.id))
 		return "", code, false
 	}
+	cache_write("api", ME_CACHE_KEY, transmute([]u8)profile.id)
 	return strings.clone(profile.id), code, true
 }

@@ -7,9 +7,10 @@ import library "spotify/library"
 @(test)
 state_round_trip_preserves_preferences_and_order :: proc(t: ^testing.T) {
 	loaded := parse_state(
-		`{"sidebar_width":99999,"volume":0.8,"tab":"Artists","sort":{"Albums":"Played","Playlists":"Default","Artists":"Played"},"pinned":["spotify:playlist:a","spotify:playlist:b"],"recent":["spotify:playlist:c"]}`,
+		`{"web_api_resume_ns":1831234567890123456,"sidebar_width":99999,"volume":0.8,"tab":"Artists","sort":{"Albums":"Played","Playlists":"Default","Artists":"Played"},"pinned":["spotify:playlist:a","spotify:playlist:b"],"recent":["spotify:playlist:c"]}`,
 	)
 	defer free_state(&loaded)
+	testing.expect_value(t, loaded.web_api_resume_ns, i64(1831234567890123456))
 	testing.expect_value(t, loaded.sidebar_width, f32(SIDEBAR_MAX))
 	testing.expect_value(t, loaded.volume, f32(0.8))
 	testing.expect_value(t, loaded.tab, library.Kind.Artists)
@@ -25,6 +26,7 @@ state_round_trip_preserves_preferences_and_order :: proc(t: ^testing.T) {
 	defer delete(encoded)
 	decoded := parse_state(encoded)
 	defer free_state(&decoded)
+	testing.expect_value(t, decoded.web_api_resume_ns, loaded.web_api_resume_ns)
 	testing.expect_value(t, decoded.sidebar_width, loaded.sidebar_width)
 	testing.expect_value(t, decoded.volume, loaded.volume)
 	testing.expect_value(t, decoded.tab, loaded.tab)
@@ -36,11 +38,15 @@ state_round_trip_preserves_preferences_and_order :: proc(t: ^testing.T) {
 	for input in ([]string{"{}", `{"sidebar_width":"abc","tab":"unexpected"}`, `{"sort":{"Albums":"Added"}}`}) {
 		fallback := parse_state(input)
 		defer free_state(&fallback)
+		testing.expect_value(t, fallback.web_api_resume_ns, i64(0))
 		testing.expect_value(t, fallback.sidebar_width, DEFAULT_SIDEBAR_WIDTH)
 		testing.expect_value(t, fallback.volume, DEFAULT_VOLUME)
 		testing.expect_value(t, fallback.tab, library.Kind.Playlists)
 		testing.expect_value(t, fallback.sort, default_state().sort)
 	}
+	invalid_deadline := parse_state(`{"web_api_resume_ns":-1}`)
+	defer free_state(&invalid_deadline)
+	testing.expect_value(t, invalid_deadline.web_api_resume_ns, i64(0))
 	for value, index in ([]int{-7, 7}) {
 		clamped := parse_state(index == 0 ? `{"volume":-7}` : `{"volume":7}`)
 		defer free_state(&clamped)

@@ -80,6 +80,9 @@ authorize :: proc(cancel: ^bool = nil) -> (tokens: oauth.Tokens, result: Auth_Re
 	if response == .Cancelled {return {}, .Cancelled}
 	if response != .Authorized {return {}, .Unavailable}
 	if status != .Authorized {return {}, .Unavailable}
+	// A new approval can belong to another account. Keep artwork and audio,
+	// but do not reuse the previous account's responses or cached profile ID.
+	cache_prune("api", 0)
 	if len(tokens.refresh) > 0 && !credential.save(tokens.refresh, .Library) {
 		fmt.eprintln("system keyring unavailable; library approval will be needed next time")
 	}

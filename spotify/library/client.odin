@@ -264,6 +264,7 @@ handle :: proc(
 		}
 		// Never mix native rootlist offsets with Web API offsets.
 		if !result.ok && request.account == "" {
+			// request.refresh replaces the UI snapshot, not fresh cached API bodies.
 			result.page, result.status, result.ok = fetch_index(
 				tokens.access,
 				request.list,
@@ -271,7 +272,6 @@ handle :: proc(
 				request.cursor,
 				reuse,
 				&result.retry_after,
-				refresh = request.refresh,
 			)
 		}
 	case .Detail:
@@ -330,6 +330,11 @@ handle :: proc(
 		uri := library_uri(request.source, request.id)
 		defer delete(uri)
 		result.status, result.ok = set_saved(tokens.access, uri, request.liked, reuse)
+		if kind, known := source_kind(request.source); result.ok && known {
+			address := index_address(kind)
+			defer delete(address)
+			cache_remove("api", address)
+		}
 	case .More:
 		if virtual.arena_init_growing(&result.rows_arena) != nil {return}
 		allocator := virtual.arena_allocator(&result.rows_arena)
@@ -502,7 +507,8 @@ start :: proc(client: ^Client) -> (ok: bool) {
 	client.state = .Authorizing
 	client.remaining_initial = 3
 	for kind in ([]Kind{Kind.Playlists, Kind.Albums, Kind.Artists}) {
-		// Paint the matching cached source, then refresh it in the worker.
+		// Paint the cached source, then let the worker replace the snapshot.
+		// Fresh Web API pages stay cached; native rootlist still revalidates.
 		// A Web API playlist snapshot must not precede the native rootlist.
 		page: Page
 		cached := false
@@ -707,12 +713,9 @@ discard_unavailable_track :: proc(client: ^Client, uri: string) {
 		resize(&page.items, kept)
 		if page != &client.pages[.Tracks] {continue}
 		for offset := 0; offset < page.next_offset; offset += 36 {
-			address := fmt.aprintf(
-				"https://api.spotify.com/v1/me/tracks?limit=36&offset=%d",
-				offset,
-				allocator = context.temp_allocator,
-			)
+			address := index_address(.Tracks, offset)
 			cache_remove("api", address)
+			delete(address)
 		}
 	}
 }

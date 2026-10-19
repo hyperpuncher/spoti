@@ -309,21 +309,8 @@ append_entry :: proc(items: ^[dynamic]Entry, row: $T, allocator: runtime.Allocat
 	} else {#assert(false, "unsupported library card type")}
 }
 
-fetch_index :: proc(
-	access: string,
-	kind: Kind,
-	offset: int = 0,
-	cursor: string = "",
-	reuse: rawptr = nil,
-	retry_after: ^int = nil,
-	refresh: bool = false,
-	cache_only: bool = false,
-) -> (
-	page: Page,
-	status: int,
-	ok: bool,
-) {
-	if offset < 0 || offset > 1_000_000 || len(cursor) > 128 {return}
+// Shared by reads and invalidation after a confirmed membership change.
+index_address :: proc(kind: Kind, offset: int = 0, cursor: string = "") -> string {
 	endpoint := "playlists"
 	switch kind {
 	case .Tracks:
@@ -347,7 +334,24 @@ fetch_index :: proc(
 		query = fmt.aprintf("?limit=36&offset=%d", offset)
 	}
 	defer delete(query)
-	address := fmt.aprintf("https://api.spotify.com/v1/me/%s%s", endpoint, query)
+	return fmt.aprintf("https://api.spotify.com/v1/me/%s%s", endpoint, query)
+}
+
+fetch_index :: proc(
+	access: string,
+	kind: Kind,
+	offset: int = 0,
+	cursor: string = "",
+	reuse: rawptr = nil,
+	retry_after: ^int = nil,
+	cache_only: bool = false,
+) -> (
+	page: Page,
+	status: int,
+	ok: bool,
+) {
+	if offset < 0 || offset > 1_000_000 || len(cursor) > 128 {return}
+	address := index_address(kind, offset, cursor)
 	defer delete(address)
 	bytes: [dynamic]u8
 	fetched: bool
@@ -358,7 +362,6 @@ fetch_index :: proc(
 		reuse,
 		retry_after,
 		PAGE_TTL,
-		refresh = refresh,
 		cache_only = cache_only,
 	)
 	if !fetched {return {}, status, false}

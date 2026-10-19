@@ -54,7 +54,8 @@ test: _prepare
 	odin test spotify/audio {{curl_flags}}
 	odin test spotify/artwork {{curl_flags}}
 	odin test spotify/http {{curl_flags}}
-	odin test ui {{curl_flags}}
+	# Font tests share SDL initialization and shutdown, so run them serially.
+	odin test ui -define:ODIN_TEST_THREADS=1 {{curl_flags}}
 	odin test diagnostic {{curl_flags}}
 
 # Network diagnostic: connects to a Spotify AP without signing in.

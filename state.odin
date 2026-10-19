@@ -1,6 +1,6 @@
 // Persisted app state as one JSON document: preferences (window chrome, tab,
-// sort) and session state (pins, recents, resume). Only UI state is stored,
-// never credentials, tokens or signed URLs. Playlist URIs are the user's
+// sort) and session state (pins, recents, resume, API retry deadline).
+// Never store credentials, tokens or signed URLs. Playlist URIs are the user's
 // own pins and play history. Enum names keep the file readable and stable
 // across reorder; a corrupt file falls back to defaults, so it can never
 // stop the app from opening.
@@ -37,17 +37,18 @@ Last_Played :: struct {
 }
 
 State :: struct {
-	connect_device:  string, // public persistent device identity, not a credential
-	sidebar_width:   f32,
-	volume:          f32,
-	tab:             library.Kind,
-	sort:            [library.Kind]Sort, // per-tab card order
-	pinned:          [dynamic]string, // pin order; drawn first
-	recent:          [dynamic]string, // most recently played first
-	last_played:     Last_Played, // footer resume
-	last_collection: string, // spotify:<source>:<id> reopened on launch
-	last_name:       string, // collection name for the optimistic header
-	last_saved:      bool, // membership of that collection, for the hero heart
+	connect_device:    string, // public persistent device identity, not a credential
+	sidebar_width:     f32,
+	volume:            f32,
+	tab:               library.Kind,
+	sort:              [library.Kind]Sort, // per-tab card order
+	pinned:            [dynamic]string, // pin order; drawn first
+	recent:            [dynamic]string, // most recently played first
+	last_played:       Last_Played, // footer resume
+	last_collection:   string, // spotify:<source>:<id> reopened on launch
+	last_name:         string, // collection name for the optimistic header
+	last_saved:        bool, // membership of that collection, for the hero heart
+	web_api_resume_ns: i64, // Unix nanoseconds; shared Web API retry deadline
 }
 
 free_state :: proc(app_state: ^State) {
@@ -110,6 +111,7 @@ sanitize_state :: proc(app_state: ^State) {
 	}
 	app_state.sidebar_width = clamp(app_state.sidebar_width, SIDEBAR_MIN, SIDEBAR_MAX)
 	app_state.volume = clamp(app_state.volume, 0, 1)
+	app_state.web_api_resume_ns = max(0, app_state.web_api_resume_ns)
 	prune_strings(&app_state.pinned, MAX_PINNED)
 	prune_strings(&app_state.recent, MAX_RECENT)
 	clear_unless_uri(

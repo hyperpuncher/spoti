@@ -19,6 +19,31 @@ background native reads reuse saved streaming approval and never start a
 browser approval window. Connect and library startup wait for an existing
 grant operation rather than treat a busy grant as unavailable.
 
+## Web API quotas
+
+provide a client ID, not an access token. for personal use, each user creates
+an app under their own Spotify developer account and signs in through Spotify.
+spoti obtains that user's tokens; users must not share sign-in grants.
+
+a public app can use one client ID with separate tokens for each user, but
+public use needs Spotify's extended-quota approval. the personal setup is not
+a substitute for that approval. see [quota modes and eligibility](https://developer.spotify.com/documentation/web-api/concepts/quota-modes).
+
+Spotify has short-term rate limits and separate development-mode quotas.
+endpoints share quota groups. since July 23, 2026, apps under the same developer
+account also share quota. a new token or another client ID under that account
+does not reset it. see [Spotify's quota update](https://developer.spotify.com/blog/2026-07-23-web-api-quota-updates).
+
+fresh library pages are reused for six hours. the profile cache stores only the
+account ID, not the full response. a successful library save or removal clears
+the affected first index page so the next load gets the confirmed state.
+a successful new browser approval clears API response caches so another
+account cannot reuse the old account ID or library pages. artwork, audio,
+local history, and retry deadlines are kept. refreshing a saved grant keeps
+the response cache.
+Web API retry deadlines are saved across restarts. a long wait can still occur
+when Spotify's quota is exhausted; cached content remains available.
+
 ## playlist coverage
 
 with saved streaming approval, the playlist list uses Spotify's native
