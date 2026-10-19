@@ -128,6 +128,15 @@ vcpkg and passes its library path through `SPOTI_LINKER_FLAGS`.
 `SPOTI_LINKER_FLAGS` is the single knob for native library paths: empty on
 Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
 
+## keyboard input
+
+text entry uses SDL UTF-8 text-input events. shortcuts use logical keycodes,
+so they follow the keyboard layout. `ctrl` and macOS `cmd` support `a` to
+select all, `c` to copy, `x` to cut, and `v` to paste. copy and cut require
+a selection. paste replaces selected text or appends at the end.
+`escape` leaves the text field; it does not quit the app. `s` has no playback
+shortcut. `space` toggles playback only when the text field is not active.
+
 ## runtime settings
 
 - Linux requires native Wayland. there is no XWayland fallback.

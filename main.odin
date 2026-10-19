@@ -1030,8 +1030,8 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 						.RCTRL in key_mod ||
 						.LGUI in key_mod ||
 						.RGUI in key_mod
-					#partial switch event.key.scancode {
-					case .ESCAPE:
+					switch event.key.key {
+					case sdl.K_ESCAPE:
 						select_all = false
 						input_active = false
 						_ = sdl.StopTextInput(state.window)
@@ -1046,7 +1046,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 								nav_capture(&library_client, filter, false, search_kind, ""),
 							)
 						}
-					case .BACKSPACE:
+					case sdl.K_BACKSPACE:
 						if len(input) > 0 {
 							gui := .LGUI in key_mod || .RGUI in key_mod
 							alt := .LALT in key_mod || .RALT in key_mod
@@ -1065,16 +1065,16 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 							select_all = false
 							input_changed = true
 						}
-					case .A:
+					case sdl.K_A:
 						if cmd && len(input) > 0 {select_all = true}
-					case .U:
+					case sdl.K_U:
 						if cmd && len(input) > 0 {
 							delete(input)
 							input = {}
 							select_all = false
 							input_changed = true
 						}
-					case .W:
+					case sdl.K_W:
 						if cmd && len(input) > 0 {
 							shorter := delete_last_word(input)
 							delete(input)
@@ -1082,32 +1082,43 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 							select_all = false
 							input_changed = true
 						}
-					case .V, .INSERT:
+					case sdl.K_C, sdl.K_X, sdl.K_V, sdl.K_INSERT:
 						shift := .LSHIFT in key_mod || .RSHIFT in key_mod
-						ctrl := .LCTRL in key_mod || .RCTRL in key_mod
-						inserting := event.key.scancode == .INSERT
-						if inserting && ctrl && !shift {
-							if len(input) > 0 {
+						inserting := event.key.key == sdl.K_INSERT
+						if !cmd && !(inserting && shift) {break}
+						copying := event.key.key == sdl.K_C || inserting && !shift
+						cutting := event.key.key == sdl.K_X
+						if copying || cutting {
+							if select_all && len(input) > 0 {
 								c_input := strings.clone_to_cstring(input)
 								defer delete(c_input)
-								_ = sdl.SetClipboardText(c_input)
+								if sdl.SetClipboardText(c_input) && cutting {
+									delete(input)
+									input = {}
+									select_all = false
+									input_changed = true
+								}
 							}
-						} else if ctrl || (inserting && shift) {
+						} else {
 							clipboard := sdl.GetClipboardText()
 							if clipboard != nil {
-								value := strings.trim_space(string(cstring(clipboard)))
+								value := string(cstring(clipboard))
+								prefix := select_all ? "" : input
 								paste_limit :=
 									library_client.state == .Missing_Client_ID ? 64 : 512
-								if len(value) <= paste_limit && input_text_ok(value) {
+								if len(value) > 0 &&
+								   len(prefix) + len(value) <= paste_limit &&
+								   input_text_ok(value) {
+									updated := fmt.aprintf("%s%s", prefix, value)
 									delete(input)
-									input = strings.clone(value)
+									input = updated
 									select_all = false
 									input_changed = true
 								}
 								sdl.free(rawptr(clipboard))
 							}
 						}
-					case .RETURN, .KP_ENTER:
+					case sdl.K_RETURN, sdl.K_KP_ENTER:
 						select_all = false
 						if library_client.state == .Missing_Client_ID {
 							submit_setup(app)
@@ -1148,18 +1159,14 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 						}
 					}
 				} else if !event.key.repeat {
-					#partial switch event.key.scancode {
-					case .ESCAPE:
-						running = false
-					case .S:
-						stop_pressed = true
-					case .SPACE:
+					switch event.key.key {
+					case sdl.K_SPACE:
 						space_pressed = true
-					case .LEFT:
+					case sdl.K_LEFT:
 						if .LALT in event.key.mod {nav_back_pressed = true}
-					case .RIGHT:
+					case sdl.K_RIGHT:
 						if .LALT in event.key.mod {nav_forward_pressed = true}
-					case .K:
+					case sdl.K_K:
 						mod := event.key.mod
 						if .LCTRL in mod || .RCTRL in mod || .LGUI in mod || .RGUI in mod {
 							if !input_active {
