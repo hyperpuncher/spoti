@@ -1851,43 +1851,46 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		detail_smooth.active = false
 	}
 	when ODIN_OS == .Windows {view.caption_width = ui.windows_caption_width(state.window)}
-	commands, visible := layout(
-		view,
-		&library_client,
-		&app_state,
-		filter,
-		&textures,
-		&fx,
-		sidebar_width,
-		f32(width),
-		f32(height),
-		card_text_height,
-		dt,
-		density,
-		&state,
-	)
-	fx_animating = fx.animating
-	// A banked history offset rides the growing content down as pages
-	// stream in, then snaps in once reached or fully loaded. Any direct
-	// scroll input cancels it so it never fights the user.
-	if detail_scroll_armed && library_client.detail.ready {
+	commands: clay.ClayArray(clay.RenderCommand)
+	visible: Frame_Visible
+	for pass in 0 ..< 2 {
+		commands, visible = layout(
+			view,
+			&library_client,
+			&app_state,
+			filter,
+			&textures,
+			&fx,
+			sidebar_width,
+			f32(width),
+			f32(height),
+			card_text_height,
+			pass == 0 ? dt : 0,
+			density,
+			&state,
+		)
+		// Current dimensions are known only after layout. If history changes
+		// the offset, rebuild the visible rows and commands before drawing.
+		// The second pass must not advance animations again.
+		if !detail_scroll_armed ||
+		   !library_client.detail.ready ||
+		   library.detail_loading_visible(&library_client) {break}
 		scroll_data := clay.GetScrollContainerData(clay.ID("detail_rows"))
-		if scroll_data.found && scroll_data.scrollPosition != nil {
-			viewport := scroll_data.scrollContainerDimensions.height
-			content := scroll_data.contentDimensions.height
-			loaded := !library_client.detail_loading && !library_client.detail.has_more
-			if viewport > 0 && content > viewport {
-				pos := clamp(detail_scroll_target, viewport - content, 0)
-				scroll_data.scrollPosition.y = pos
-				detail_smooth.target = pos
-				detail_smooth.active = false
-				if pos == detail_scroll_target || loaded {detail_scroll_armed = false}
-				redraw = true
-			} else if loaded || content <= viewport {
-				detail_scroll_armed = false
-			}
-		}
+		if !scroll_data.found || scroll_data.scrollPosition == nil {break}
+		viewport := scroll_data.scrollContainerDimensions.height
+		content := scroll_data.contentDimensions.height
+		if viewport <= 0 {break}
+		loaded := !library_client.detail_loading && !library_client.detail.has_more
+		pos := clamp(detail_scroll_target, min(0, viewport - content), 0)
+		previous := scroll_data.scrollPosition.y
+		scroll_data.scrollPosition.y = pos
+		detail_smooth.target = pos
+		detail_smooth.active = false
+		// Keep the target while a partial page is still too short to reach it.
+		if pos == detail_scroll_target || loaded {detail_scroll_armed = false}
+		if pos == previous {break}
 	}
+	fx_animating = fx.animating
 	if middle_clicked {
 		middle_clicked = false
 		for id in ([]string{"library_grid", "detail_rows"}) {
