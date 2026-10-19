@@ -10,7 +10,6 @@ import "core:sync"
 import "core:sync/chan"
 import "core:thread"
 import "core:time"
-import "core:unicode/utf8"
 import diagnostic "diagnostic"
 import connect "spotify/connect"
 import credential "spotify/credential"
@@ -345,17 +344,6 @@ input_text_ok :: proc(value: string) -> bool {
 	return true
 }
 
-// Drops one trailing whitespace-separated token plus the spaces after it.
-// Only ASCII bytes are compared, so the cut always lands on a rune boundary.
-delete_last_word :: proc(value: string) -> string {
-	end := len(value)
-	for end > 0 && (value[end - 1] == ' ' || value[end - 1] == '\t') {end -= 1}
-	for end > 0 && value[end - 1] != ' ' && value[end - 1] != '\t' {end -= 1}
-	out := make([]u8, end)
-	copy(out, value[:end])
-	return string(out)
-}
-
 // Debounce catalog searches while typing; Enter searches immediately.
 SEARCH_DEBOUNCE_NS :: u64(300_000_000)
 
@@ -621,9 +609,7 @@ App :: struct {
 	queue_detail:           string,
 	queue_gen:              uint,
 	queue_restore_pending:  bool,
-	input:                  string,
-	input_active:           bool,
-	select_all:             bool,
+	using editor:           ui.Editor,
 	search_mode:            bool,
 	search_kind:            library.Kind,
 	search_pending:         bool,
@@ -717,6 +703,7 @@ Frame :: struct {
 	mouse_right:      sdl.FPoint,
 	middle_click:     sdl.FPoint,
 	clicked:          bool,
+	click_count:      u8,
 	right_clicked:    bool,
 	space_pressed:    bool,
 	stop_pressed:     bool,
@@ -927,7 +914,8 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		(textures.fade_detail_bottom_alpha != 0 && textures.fade_detail_bottom_alpha != 1)
 	// Anything animating renders at the display rate, so the idle poll
 	// below can never throttle a scroll glide or a button spring.
-	if autoscroll_moving ||
+	if editor.selecting ||
+	   autoscroll_moving ||
 	   grid_smooth.active ||
 	   detail_smooth.active ||
 	   picker_smooth.active ||
@@ -998,6 +986,9 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		)
 		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
 	}
+	if blink_wait := ui.editor_blink_delay(&editor, sdl.GetTicks()); blink_wait >= 0 {
+		wait_ms = wait_ms < 0 ? blink_wait : min(wait_ms, blink_wait)
+	}
 	has_event := sdl.WaitEventTimeout(&event, wait_ms)
 	if has_event {
 		for {
@@ -1025,20 +1016,19 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 			case .KEY_DOWN:
 				if input_active {
 					key_mod := event.key.mod
-					cmd :=
-						.LCTRL in key_mod ||
-						.RCTRL in key_mod ||
-						.LGUI in key_mod ||
-						.RGUI in key_mod
+					gui := .LGUI in key_mod || .RGUI in key_mod
+					alt := .LALT in key_mod || .RALT in key_mod
+					shift := .LSHIFT in key_mod || .RSHIFT in key_mod
+					cmd := .LCTRL in key_mod || .RCTRL in key_mod || gui
 					switch event.key.key {
 					case sdl.K_ESCAPE:
-						select_all = false
+						ui.editor_move(&editor, editor.caret)
+						editor.selecting = false
 						input_active = false
 						_ = sdl.StopTextInput(state.window)
 						if len(strings.trim_space(input)) == 0 && search_mode {
 							library.clear_search(&library_client)
-							search_mode = false
-							search_pending = false
+							search_mode, search_pending = false, false
 							delete(input)
 							input = {}
 							nav_replace(
@@ -1046,80 +1036,67 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 								nav_capture(&library_client, filter, false, search_kind, ""),
 							)
 						}
-					case sdl.K_BACKSPACE:
-						if len(input) > 0 {
-							gui := .LGUI in key_mod || .RGUI in key_mod
-							alt := .LALT in key_mod || .RALT in key_mod
-							shorter: string
-							if select_all || (gui && !alt) {
-								shorter = {}
-							} else if cmd || alt {
-								shorter = delete_last_word(input)
-							} else {
-								_, size := utf8.decode_last_rune(input)
-								if size == 0 {size = 1}
-								shorter = strings.clone(input[:len(input) - size])
+					case sdl.K_BACKSPACE, sdl.K_DELETE, sdl.K_W:
+						if event.key.key == sdl.K_W && !cmd {break}
+						low, high := ui.editor_bounds(&editor)
+						if low == high {
+							backward := event.key.key != sdl.K_DELETE
+							at := ui.editor_step(input, editor.caret, backward)
+							if cmd || alt {
+								if gui && !alt {
+									at = backward ? 0 : len(input)
+								} else {at = ui.editor_word_step(input, editor.caret, backward)}
 							}
-							delete(input)
-							input = shorter
-							select_all = false
-							input_changed = true
+							ui.editor_move(&editor, at, true)
 						}
+						input_changed = ui.editor_insert(&editor, "", 512) || input_changed
+					case sdl.K_LEFT, sdl.K_RIGHT, sdl.K_HOME, sdl.K_END:
+						backward := event.key.key == sdl.K_LEFT || event.key.key == sdl.K_HOME
+						low, high := ui.editor_bounds(&editor)
+						at := backward ? low : high
+						if event.key.key == sdl.K_HOME || event.key.key == sdl.K_END || gui {
+							at = backward ? 0 : len(input)
+						} else if cmd || alt {
+							at = ui.editor_word_step(input, editor.caret, backward)
+						} else if shift ||
+						   low == high {at = ui.editor_step(input, editor.caret, backward)}
+						ui.editor_move(&editor, at, shift)
 					case sdl.K_A:
-						if cmd && len(input) > 0 {select_all = true}
+						if cmd {ui.editor_select_all(&editor)}
 					case sdl.K_U:
-						if cmd && len(input) > 0 {
-							delete(input)
-							input = {}
-							select_all = false
-							input_changed = true
-						}
-					case sdl.K_W:
-						if cmd && len(input) > 0 {
-							shorter := delete_last_word(input)
-							delete(input)
-							input = shorter
-							select_all = false
-							input_changed = true
+						if cmd {
+							ui.editor_select_all(&editor)
+							input_changed = ui.editor_insert(&editor, "", 512) || input_changed
 						}
 					case sdl.K_C, sdl.K_X, sdl.K_V, sdl.K_INSERT:
-						shift := .LSHIFT in key_mod || .RSHIFT in key_mod
 						inserting := event.key.key == sdl.K_INSERT
 						if !cmd && !(inserting && shift) {break}
 						copying := event.key.key == sdl.K_C || inserting && !shift
 						cutting := event.key.key == sdl.K_X
 						if copying || cutting {
-							if select_all && len(input) > 0 {
-								c_input := strings.clone_to_cstring(input)
+							low, high := ui.editor_bounds(&editor)
+							if low != high {
+								c_input := strings.clone_to_cstring(input[low:high])
 								defer delete(c_input)
 								if sdl.SetClipboardText(c_input) && cutting {
-									delete(input)
-									input = {}
-									select_all = false
-									input_changed = true
+									input_changed =
+										ui.editor_insert(&editor, "", 512) || input_changed
 								}
 							}
 						} else {
 							clipboard := sdl.GetClipboardText()
 							if clipboard != nil {
 								value := string(cstring(clipboard))
-								prefix := select_all ? "" : input
-								paste_limit :=
-									library_client.state == .Missing_Client_ID ? 64 : 512
-								if len(value) > 0 &&
-								   len(prefix) + len(value) <= paste_limit &&
-								   input_text_ok(value) {
-									updated := fmt.aprintf("%s%s", prefix, value)
-									delete(input)
-									input = updated
-									select_all = false
-									input_changed = true
+								limit := library_client.state == .Missing_Client_ID ? 64 : 512
+								if len(value) > 0 && input_text_ok(value) {
+									input_changed =
+										ui.editor_insert(&editor, value, limit) || input_changed
 								}
 								sdl.free(rawptr(clipboard))
 							}
 						}
 					case sdl.K_RETURN, sdl.K_KP_ENTER:
-						select_all = false
+						ui.editor_move(&editor, editor.caret)
 						if library_client.state == .Missing_Client_ID {
 							submit_setup(app)
 							break
@@ -1171,6 +1148,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 						if .LCTRL in mod || .RCTRL in mod || .LGUI in mod || .RGUI in mod {
 							if !input_active {
 								input_active = sdl.StartTextInput(state.window)
+								ui.editor_move(&editor, len(input))
 							}
 						}
 					}
@@ -1185,18 +1163,8 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 					// The setup field holds at most a 32-character key;
 					// search keeps its longer limit.
 					limit := library_client.state == .Missing_Client_ID ? 64 : 512
-					if select_all {
-						if len(added) <= limit && input_text_ok(added) {
-							delete(input)
-							input = strings.clone(added)
-							select_all = false
-							input_changed = true
-						}
-					} else if len(input) + len(added) <= limit && input_text_ok(added) {
-						updated := fmt.aprintf("%s%s", input, added)
-						delete(input)
-						input = updated
-						input_changed = true
+					if input_text_ok(added) {
+						input_changed = ui.editor_insert(&editor, added, limit) || input_changed
 					}
 				}
 			case .MOUSE_WHEEL:
@@ -1216,6 +1184,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 				} else if event.button.button == sdl.BUTTON_LEFT {
 					mouse_click = ui.mouse_position(&state, event.button.x, event.button.y)
 					clicked = true
+					click_count = event.button.clicks
 				} else if event.button.button == sdl.BUTTON_RIGHT {
 					mouse_right = ui.mouse_position(&state, event.button.x, event.button.y)
 					right_clicked = true
@@ -1229,7 +1198,10 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		}
 	}
 	// A page backoff must expire without requiring mouse movement to wake it.
-	return has_event || emoji_poll || page_wait && time.since(library_client.page_at) >= 0,
+	return has_event ||
+		emoji_poll ||
+		page_wait && time.since(library_client.page_at) >= 0 ||
+		ui.editor_blink_delay(&editor, sdl.GetTicks()) == 0,
 		fades_animating
 }
 
@@ -1262,6 +1234,8 @@ app_navigate :: proc(app: ^App, frame: ^Frame) {
 				&input,
 				&detail_pinned,
 			)
+			ui.editor_move(&editor, len(input))
+			editor.selecting = false
 			if len(nav_state.detail.uri) == 0 {
 				detail_scroll_armed = false
 			} else {
@@ -1284,8 +1258,6 @@ app_search :: proc(app: ^App, frame: ^Frame) {
 			library.clear_search(&library_client)
 			search_mode = false
 			search_pending = false
-			delete(input)
-			input = {}
 			nav_replace(&nav, nav_capture(&library_client, filter, false, search_kind, ""))
 		} else if _, valid := track.parse_id(trimmed); valid {
 			// A pasted link waits for Enter; never catalog-search it.
@@ -1619,7 +1591,7 @@ app_glide :: proc(app: ^App, frame: ^Frame) {
 	// The autoscroll step runs after layout, so a gliding frame must
 	// not take the idle continue. Last frame's flag keeps held-still
 	// autoscroll advancing until it parks in the dead zone.
-	if autoscroll_moving {redraw = true}
+	if autoscroll_moving || editor.selecting {redraw = true}
 }
 
 // Progress, view assembly, layout, cursor and render. Returns what the
@@ -1630,6 +1602,10 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	mouse_x, mouse_y: f32
 	buttons = sdl.GetMouseState(&mouse_x, &mouse_y)
 	mouse = ui.mouse_position(&state, mouse_x, mouse_y)
+	if editor.selecting {
+		ui.editor_drag(&state, &editor, mouse.x)
+		if .LEFT not_in buttons {editor.selecting = false}
+	}
 	clay.SetPointerState({mouse.x, mouse.y}, .LEFT in buttons)
 	previous_density := ui.scale(&state)
 	density = ui.update_scale(&state)
@@ -1717,7 +1693,6 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		if len(shown_input) == 0 {
 			shown_input = input_active ? "" : "Search Spotify or paste a track link"
 		}
-		if input_active {shown_input = fmt.aprintf("%s|", shown_input, allocator = context.temp_allocator)}
 	}
 	times: [2][16]u8
 	retain_player_cover(&displayed_cover, player_cover, &textures)
@@ -1794,7 +1769,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		shuffle        = shuffle,
 		volume         = volume,
 		input_active   = input_active,
-		select_all     = select_all,
+		input_editor   = &editor,
 		pinned         = detail_pinned,
 		search_mode    = search_mode,
 		releases       = library_client.release_feed.open,
@@ -1973,6 +1948,20 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 
 // Right-click menu plus the whole left-click cascade: toolbar, chips,
 // cards, hero, rows and the click-away input release.
+app_input_click :: proc(app: ^App, frame: ^Frame) {
+	using app
+	if !input_active {input_active = sdl.StartTextInput(state.window)}
+	mod := sdl.GetModState()
+	ui.editor_press(
+		&state,
+		&editor,
+		frame.mouse_click.x,
+		frame.click_count,
+		.LSHIFT in mod || .RSHIFT in mod,
+	)
+	pending_redraw = true
+}
+
 app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	using app
 	using frame
@@ -2106,7 +2095,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		} else if hit("sort_button", mouse_click) {
 			open_sort_menu(&menu, mouse_click, app_state.sort[filter])
 		} else if hit("setup_field", mouse_click) {
-			if !input_active {input_active = sdl.StartTextInput(state.window)}
+			app_input_click(app, frame)
 		} else if hit("setup_redirect", mouse_click) {
 			c_uri := strings.clone_to_cstring(oauth.WEB_REDIRECT_URI)
 			defer delete(c_uri)
@@ -2146,8 +2135,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				nav_forward_pressed = true
 				handled = true
 			} else if hit("track_input", mouse_click) {
-				if !input_active {input_active = sdl.StartTextInput(state.window)}
-				select_all = false
+				app_input_click(app, frame)
 				handled = true
 			}
 			if !handled {
@@ -2318,7 +2306,8 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			}
 			if !handled && input_active {
 				input_active = false
-				select_all = false
+				editor.selecting = false
+				ui.editor_move(&editor, editor.caret)
 				_ = sdl.StopTextInput(state.window)
 			}
 		}

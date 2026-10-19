@@ -133,7 +133,14 @@ Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
 text entry uses SDL UTF-8 text-input events. shortcuts use logical keycodes,
 so they follow the keyboard layout. `ctrl` and macOS `cmd` support `a` to
 select all, `c` to copy, `x` to cut, and `v` to paste. copy and cut require
-a selection. paste replaces selected text or appends at the end.
+a selection. typing and paste replace the selected range or insert at the
+caret. click to place the caret, drag to select, double-click to select a word,
+and triple-click to select the line. Shift-click and Shift with arrow keys or
+Home/End extend the selection. Ctrl-arrow moves by word; macOS Command-arrow
+moves to a line edge. long text scrolls horizontally to keep the caret visible.
+editing preserves spaces, including trailing spaces. the caret blinks while
+idle and becomes visible again after typing or movement; blinking does not
+require continuous redraw.
 `escape` leaves the text field; it does not quit the app. `s` has no playback
 shortcut. `space` toggles playback only when the text field is not active.
 

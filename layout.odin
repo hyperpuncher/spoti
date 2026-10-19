@@ -1,6 +1,5 @@
 package main
 
-import "core:fmt"
 import library "spotify/library"
 import oauth "spotify/oauth"
 import ui "ui"
@@ -82,7 +81,7 @@ View :: struct {
 	shuffle:        bool,
 	volume:         f32,
 	input_active:   bool,
-	select_all:     bool, // the whole query is selected
+	input_editor:   ^ui.Editor, // borrowed until this frame is rendered
 	setup_error:    string, // borrowed; setup screen error line
 	caption_width:  f32, // native Windows controls, render pixels
 	album_linked:   bool, // footer title opens the playing album
@@ -184,6 +183,20 @@ button_fx :: proc(
 	return scale, hovered
 }
 
+input_text :: proc(view: View) {
+	if view.input_editor == nil {
+		clay.Text(view.input, {fontSize = 14, textColor = theme.muted, wrapMode = .None})
+		return
+	}
+	view.input_editor.placeholder = view.input
+	clay.UI_WithId(clay.ID("input_content"))(
+	{
+		layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})}},
+		custom = {customData = view.input_editor},
+	},
+	)
+}
+
 top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 	padding := u16(10 * d)
 	search_width := clay.SizingFixed(440 * d)
@@ -237,25 +250,7 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 			cornerRadius = clay.CornerRadiusAll(20 * d),
 		},
 		) {
-			// A selected query hugs a highlight box sized to the text, so
-			// the normal path keeps its exact layout; the cap matches the
-			// pill content width.
-			if clay.UI()(
-			{
-				layout = {sizing = {width = clay.SizingFit({max = 412 * d})}},
-				backgroundColor = view.select_all ? theme.selected : clay.Color{},
-				cornerRadius = clay.CornerRadiusAll(6 * d),
-			},
-			) {
-				clay.Text(
-					view.input,
-					{
-						fontSize = 14,
-						textColor = view.input_active ? theme.text : theme.muted,
-						wrapMode = .None,
-					},
-				)
-			}
+			input_text(view)
 		}
 		icon_button(
 			"toolbar_releases",
@@ -661,13 +656,7 @@ toast_banner :: proc(view: View, d: f32) {
 // keyring, so no environment variable is needed afterwards.
 SPOTIFY_DASHBOARD :: "https://developer.spotify.com/dashboard"
 
-sign_in_screen :: proc(
-	state: library.State,
-	setup_input: string,
-	setup_active: bool,
-	setup_error: string,
-	d: f32,
-) {
+sign_in_screen :: proc(state: library.State, view: View, d: f32) {
 	if clay.UI()(
 	{
 		layout = {
@@ -693,7 +682,7 @@ sign_in_screen :: proc(
 			line := "Approve access in your browser to load your library."
 			button_id, button_label := "", ""
 			if state == .Missing_Client_ID {
-				setup_screen(setup_input, setup_active, setup_error, d)
+				setup_screen(view, d)
 			} else {
 				switch state {
 				case .Authorizing:
@@ -714,7 +703,7 @@ sign_in_screen :: proc(
 	}
 }
 
-setup_screen :: proc(setup_input: string, setup_active: bool, setup_error: string, d: f32) {
+setup_screen :: proc(view: View, d: f32) {
 	clay.Text("Connect your Spotify app", {fontSize = 28, textColor = theme.text})
 	clay.Text(
 		"spoti reads your account through your own Spotify app.",
@@ -768,18 +757,14 @@ setup_screen :: proc(setup_input: string, setup_active: bool, setup_error: strin
 			cornerRadius = clay.CornerRadiusAll(20 * d),
 		},
 		) {
-			if len(setup_input) > 0 || setup_active {
-				field := setup_input
-				if setup_active {
-					field = fmt.aprintf("%s|", setup_input, allocator = context.temp_allocator)
-				}
-				clay.Text(field, {fontSize = 14, textColor = theme.text})
+			if len(view.input) > 0 || view.input_active {
+				input_text(view)
 			} else {
 				clay.Text("paste your client id", {fontSize = 14, textColor = theme.muted})
 			}
 		}
-		if len(setup_error) > 0 {
-			clay.Text(setup_error, {fontSize = 14, textColor = theme.text})
+		if len(view.setup_error) > 0 {
+			clay.Text(view.setup_error, {fontSize = 14, textColor = theme.text})
 		}
 	}
 	sign_in_button("setup_save", "Save and continue", d)
@@ -831,7 +816,7 @@ layout :: proc(
 			backgroundColor = theme.bg,
 		},
 		) {
-			sign_in_screen(client.state, view.input, view.input_active, view.setup_error, d)
+			sign_in_screen(client.state, view, d)
 			toast_banner(view, d)
 		}
 	} else if clay.UI()(

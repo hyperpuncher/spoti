@@ -223,6 +223,17 @@ render :: proc(
 				{u8(color.r), u8(color.g), u8(color.b), u8(color.a)},
 				text.fontId,
 			)
+		case .Custom:
+			if command.id == clay.ID("input_content").id {
+				ui.editor_draw(
+					state,
+					(^ui.Editor)(command.renderData.custom.customData),
+					{box.x, box.y, box.width, box.height},
+					{u8(theme.text.r), u8(theme.text.g), u8(theme.text.b), 255},
+					{u8(theme.muted.r), u8(theme.muted.g), u8(theme.muted.b), 255},
+					{u8(theme.bg.r), u8(theme.bg.g), u8(theme.bg.b), 255},
+				)
+			}
 		case .ScissorStart:
 			clip := sdl.Rect{i32(box.x), i32(box.y), i32(box.width), i32(box.height)}
 			if clip_depth > 0 {

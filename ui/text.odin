@@ -20,6 +20,7 @@ cached_text :: proc(
 	value: string,
 	size: f32,
 	font_id: u16 = 0,
+	preserve_spaces: bool = false,
 ) -> ^ttf.Text {
 	font := font_for_size(state, size, font_id)
 	if font == nil {return nil}
@@ -27,6 +28,7 @@ cached_text :: proc(
 	if pool.text_count < len(pool.texts) {
 		content = pool.texts[pool.text_count]
 		if ttf.GetTextFont(content) == font && string(cstring(content.text)) == value {
+			_ = ttf.SetTextWrapWhitespaceVisible(content, preserve_spaces)
 			pool.text_count += 1
 			return content
 		}
@@ -43,6 +45,7 @@ cached_text :: proc(
 		if string(cstring(content.text)) != value &&
 		   !ttf.SetTextString(content, raw_data(value), len(value)) {return nil}
 	}
+	_ = ttf.SetTextWrapWhitespaceVisible(content, preserve_spaces)
 	pool.text_count += 1
 	return content
 }
@@ -54,6 +57,7 @@ text_size :: proc(
 	value: string,
 	size: f32,
 	font_id: u16 = 0,
+	preserve_spaces: bool = false,
 ) -> (
 	width, height: f32,
 ) {
@@ -76,7 +80,14 @@ text_size :: proc(
 				&h,
 			)
 		} else {
-			content := cached_text(state, &state.measured_texts, piece.value, size, font_id)
+			content := cached_text(
+				state,
+				&state.measured_texts,
+				piece.value,
+				size,
+				font_id,
+				preserve_spaces,
+			)
 			measured = content != nil && ttf.GetTextSize(content, &w, &h)
 		}
 		if measured {
@@ -94,6 +105,7 @@ text :: proc(
 	x, y, font_size: f32,
 	color: sdl.Color,
 	font_id: u16 = 0,
+	preserve_spaces: bool = false,
 ) {
 	if value == "" {return}
 	font := font_for_size(state, font_size, font_id)
@@ -112,7 +124,14 @@ text :: proc(
 			cursor += rect.w
 			continue
 		}
-		content := cached_text(state, &state.drawn_texts, piece.value, font_size, font_id)
+		content := cached_text(
+			state,
+			&state.drawn_texts,
+			piece.value,
+			font_size,
+			font_id,
+			preserve_spaces,
+		)
 		if content == nil {continue}
 		_ = ttf.SetTextColor(content, color.r, color.g, color.b, color.a)
 		pen := cursor
