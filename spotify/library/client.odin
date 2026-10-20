@@ -104,7 +104,7 @@ Client :: struct {
 	state:                 State,
 	pages:                 [Kind]Page,
 	pending:               [Kind]bool,
-	pages_dirty:           bool, // a page landed; the owner re-sorts before layout
+	pages_dirty:           [Kind]bool, // pages that landed; the owner re-sorts before layout
 	detail:                Detail,
 	prev_detail:           Detail, // last page left, with its rows; instant back-nav
 	prev_at:               time.Time,
@@ -474,6 +474,7 @@ free_result :: proc(result: Result) {
 
 start :: proc(client: ^Client) -> (ok: bool) {
 	if client.worker != nil {return true}
+	cache_init()
 	client.cancel, client.failed = false, false
 	id, found := resolve_client_id()
 	delete(id)
@@ -1159,7 +1160,7 @@ apply :: proc(client: ^Client, result: Result) {
 			destination.total,
 			destination.has_more,
 		)
-		client.pages_dirty = true
+		client.pages_dirty[local.list] = true
 		client.state = client.failed ? .Failed : client.remaining_initial > 0 ? .Loading : .Ready
 	case .Release_Feed:
 		apply_releases(client, &local)

@@ -2,6 +2,7 @@ package main
 
 import "base:runtime"
 import "core:math"
+import "core:strings"
 import "core:sync/chan"
 import "core:testing"
 import "core:thread"
@@ -120,7 +121,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		"regression must exercise a clipped row overlapping next",
 	)
 	app_state: State
-	anims := make(map[string]Button_Fx)
+	anims := make(map[u32]Button_Fx)
 	defer delete(anims)
 	fx := Button_Fx_Ctx {
 		anims = &anims,
@@ -330,7 +331,7 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 		delete(textures.requested)
 	}
 	app_state: State
-	anims := make(map[string]Button_Fx)
+	anims := make(map[u32]Button_Fx)
 	defer delete(anims)
 	fx := Button_Fx_Ctx {
 		anims = &anims,
@@ -617,7 +618,7 @@ wheel_target_glides_to_rest :: proc(t: ^testing.T) {
 	d: f32 = 1
 	clay.SetLayoutDimensions({1280, 820})
 	clay.UpdateScrollContainers(false, {}, 0)
-	glide_anims := make(map[string]Button_Fx)
+	glide_anims := make(map[u32]Button_Fx)
 	defer delete(glide_anims)
 	glide_fx := Button_Fx_Ctx {
 		anims = &glide_anims,
@@ -705,4 +706,28 @@ playlist_columns_and_dates_handle_narrow_panes_and_unknown_dates :: proc(t: ^tes
 	testing.expect(t, album > 0 && date > 0)
 	testing.expect_value(t, added_at_text(1726617600000), "Sep 18, 2024")
 	testing.expect_value(t, added_at_text(0), "")
+}
+
+@(test)
+hero_cache_invalidates_when_detail_or_title_changes :: proc(t: ^testing.T) {
+	cache: Hero_Cache
+	defer free_hero_cache(&cache)
+	detail := library.Detail {
+		source = .Album,
+		id     = "cache-test",
+		total  = 3,
+	}
+	metadata, _ := hero_metadata(&detail, &cache)
+	first := strings.clone(metadata)
+	defer delete(first)
+	testing.expect(t, cache.metadata_valid)
+	detail.subtitle = "Different artist"
+	metadata, _ = hero_metadata(&detail, &cache)
+	testing.expect(t, metadata != first)
+
+	title, _ := hero_title(nil, "Cache title", 400, 96, &cache)
+	testing.expect(t, cache.title_valid)
+	_ = title
+	changed, _ := hero_title(nil, "Another title", 400, 96, &cache)
+	testing.expect_value(t, changed, "Another title")
 }

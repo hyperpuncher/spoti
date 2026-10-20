@@ -4,6 +4,23 @@ import "core:testing"
 import library "spotify/library"
 
 @(test)
+detail_uri_matches_source_and_id_without_building_a_string :: proc(t: ^testing.T) {
+	album := library.Detail {
+		source = .Album,
+		id     = "album-1",
+	}
+	playlist := library.Detail {
+		source = .Playlist,
+		id     = "playlist-1",
+	}
+	testing.expect(t, detail_matches_uri(album, "spotify:album:album-1"))
+	testing.expect(t, !detail_matches_uri(album, "spotify:playlist:album-1"))
+	testing.expect(t, !detail_matches_uri(album, "spotify:album:album-10"))
+	testing.expect(t, detail_matches_uri(playlist, "spotify:playlist:playlist-1"))
+	testing.expect(t, detail_matches_uri(library.Detail{source = .Liked}, ""))
+}
+
+@(test)
 library_order_places_pins_then_recent_and_keeps_spotify_order :: proc(t: ^testing.T) {
 	app_state := State{}
 	defer free_state(&app_state)

@@ -46,7 +46,7 @@ release_feed_layout_keeps_big_covers_and_bounded_rows :: proc(t: ^testing.T) {
 	fake: sdl.Texture
 	textures.by_key[cover_key(client.release_feed.items[0].entry.image)] = &fake
 	app_state: State
-	anims := make(map[string]Button_Fx)
+	anims := make(map[u32]Button_Fx)
 	defer delete(anims)
 	fx := Button_Fx_Ctx {
 		anims = &anims,

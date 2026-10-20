@@ -10,7 +10,7 @@ header_dragging_keeps_window_controls_and_toolbar_clickable :: proc(t: ^testing.
 	density: f32 = 1
 	memory := layout_test_init(&density, &errors, {1280, 820})
 	defer {clay.SetCurrentContext(nil); delete(memory)}
-	anims := make(map[string]Button_Fx)
+	anims := make(map[u32]Button_Fx)
 	defer delete(anims)
 	fx := Button_Fx_Ctx {
 		anims = &anims,

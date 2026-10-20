@@ -114,7 +114,7 @@ open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 }
 
 open_release_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, saved: bool) {
-	open_link_menu(menu, point, uri)
+	open_context_menu(menu, point, uri)
 	menu.items = {.Play, .Save_Album, .Add_To_Playlist, .Copy_Link, .Open_In_Spotify}
 	menu.labels = {
 		"Play",

@@ -89,11 +89,7 @@ release_feed_page :: proc(
 				"Music from artists you follow • Last seven days",
 				{fontSize = 14, textColor = theme.muted},
 			)
-			status := fmt.aprintf(
-				"%d releases",
-				len(feed.items),
-				allocator = context.temp_allocator,
-			)
+			status := ""
 			if client.state == .Idle || client.state == .Authorizing {
 				status = "Waiting for Spotify..."
 			} else if client.state == .Missing_Client_ID || client.state == .Sign_In_Failed {
@@ -108,6 +104,12 @@ release_feed_page :: proc(
 				status = "Loading recent music..."
 			} else if len(feed.items) == 0 {
 				status = "No music releases in the last seven days."
+			} else {
+				status = fmt.aprintf(
+					"%d releases",
+					len(feed.items),
+					allocator = context.temp_allocator,
+				)
 			}
 			clay.Text(status, {fontSize = 13, textColor = theme.muted})
 		}

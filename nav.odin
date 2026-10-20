@@ -166,7 +166,7 @@ nav_restore :: proc(
 	detail_pinned^ = len(uri) > 0 && state_is_pinned(app_state, uri)
 	if len(uri) == 0 {
 		if client.detail.ready {library.clear_detail(client)}
-	} else if detail_card_uri(client.detail) != uri {
+	} else if !detail_matches_uri(client.detail, uri) {
 		if source, id, valid := parse_card_uri(uri); valid {
 			_ = library.open_detail(client, source, id, state.detail)
 		}

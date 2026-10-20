@@ -4,6 +4,7 @@ package main
 
 import "core:fmt"
 import "core:slice"
+import "core:strings"
 import library "spotify/library"
 
 Rated_Entry :: struct {
@@ -44,11 +45,29 @@ sort_library_pages :: proc(
 ) {
 	for kind in library.Kind {
 		page := &client.pages[kind]
-		if !force && !client.pages_dirty && len(page.items) == counts[kind] {continue}
+		if !force && !client.pages_dirty[kind] && len(page.items) == counts[kind] {continue}
 		sort_library_page(page, kind, app_state)
 		counts[kind] = len(page.items)
 	}
-	client.pages_dirty = false
+	client.pages_dirty = {}
+}
+
+// Compare a detail page with its grid URI without building a temporary URI.
+detail_matches_uri :: proc(detail: library.Detail, uri: string) -> bool {
+	switch detail.source {
+	case .Playlist:
+		prefix := "spotify:playlist:"
+		return strings.has_prefix(uri, prefix) && uri[len(prefix):] == detail.id
+	case .Album:
+		prefix := "spotify:album:"
+		return strings.has_prefix(uri, prefix) && uri[len(prefix):] == detail.id
+	case .Artist:
+		prefix := "spotify:artist:"
+		return strings.has_prefix(uri, prefix) && uri[len(prefix):] == detail.id
+	case .Liked:
+		return uri == ""
+	}
+	return false
 }
 
 // The grid URI for the open detail, or "" for Liked Songs.
@@ -75,6 +94,6 @@ detail_already_open :: proc(client: ^library.Client, uri: string) -> bool {
 		client.detail_error == 0 &&
 		client.detail.albums.error == 0 &&
 		client.detail.singles.error == 0 &&
-		detail_card_uri(client.detail) == uri \
+		detail_matches_uri(client.detail, uri) \
 	)
 }

@@ -20,6 +20,44 @@ Frame_Visible :: struct {
 	cards, tracks, releases, singles, feed, queue: Visible_Items,
 }
 
+// Hero labels are fitted or formatted every frame otherwise. Keys include the
+// detail revision and the row count, so page growth invalidates only what changed.
+Hero_Cache :: struct {
+	metadata_valid:      bool,
+	metadata_source:     library.Source,
+	metadata_id:         string,
+	metadata_generation: uint,
+	metadata_rows:       int,
+	metadata_total:      int,
+	metadata_has_more:   bool,
+	metadata_rows_error: int,
+	metadata_listeners:  i64,
+	metadata_subtitle:   string,
+	metadata_date:       string,
+	metadata_year:       string,
+	metadata_artists:    int,
+	metadata:            string,
+	summary:             string,
+	title_valid:         bool,
+	title_name:          string,
+	title_width:         f32,
+	title_max_size:      u16,
+	title_text:          string,
+	title_size:          u16,
+}
+
+free_hero_cache :: proc(cache: ^Hero_Cache) {
+	delete(cache.metadata_id)
+	delete(cache.metadata_subtitle)
+	delete(cache.metadata_date)
+	delete(cache.metadata_year)
+	delete(cache.metadata)
+	delete(cache.summary)
+	delete(cache.title_name)
+	delete(cache.title_text)
+	cache^ = {}
+}
+
 // Release cards stop growing past a readable cover; wider windows gain
 // columns instead of billboards.
 RELEASE_CARD_MAX :: 200
@@ -1043,10 +1081,8 @@ artist_page :: proc(
 					available_width,
 					d,
 				)
-				popular_leading :=
-					leading +
-					clay.GetElementData(clay.ID("popular_title")).boundingBox.height +
-					track_gap
+				popular_height := clay.GetElementData(clay.ID("popular_title")).boundingBox.height
+				popular_leading := leading + popular_height + track_gap
 				visible.tracks = scroll_items(
 					"detail_rows",
 					len(detail.rows),
@@ -1069,7 +1105,7 @@ artist_page :: proc(
 					d,
 				)
 				leading +=
-					clay.GetElementData(clay.ID("popular_title")).boundingBox.height +
+					popular_height +
 					track_gap +
 					f32(len(detail.rows)) * ROW_HEIGHT * d +
 					f32(max(len(detail.rows) - 1, 0)) * track_gap +
@@ -1219,6 +1255,36 @@ hero_max_title_size :: proc(viewport_height, d: f32) -> u16 {
 
 // Both cover and banner headers use the same font, fitting, and wrapping rules.
 hero_title :: proc(
+	state: ^ui.State,
+	name: string,
+	width: f32,
+	max_size: u16,
+	cache: ^Hero_Cache = nil,
+) -> (
+	string,
+	clay.TextElementConfig,
+) {
+	if cache != nil &&
+	   cache.title_valid &&
+	   cache.title_name == name &&
+	   cache.title_width == width &&
+	   cache.title_max_size == max_size {
+		return cache.title_text, {fontId = HERO_TITLE_FONT, fontSize = cache.title_size, textColor = theme.text, wrapMode = .None}
+	}
+	text, style := hero_title_uncached(state, name, width, max_size)
+	if cache != nil {
+		replace_string(&cache.title_name, name)
+		cache.title_width = width
+		cache.title_max_size = max_size
+		replace_string(&cache.title_text, text)
+		cache.title_size = style.fontSize
+		cache.title_valid = true
+		return cache.title_text, style
+	}
+	return text, style
+}
+
+hero_title_uncached :: proc(
 	state: ^ui.State,
 	name: string,
 	width: f32,
@@ -1397,7 +1463,7 @@ count_text :: proc(value: i64) -> string {
 	return string(out)
 }
 
-hero_metadata :: proc(detail: ^library.Detail) -> (metadata, summary: string) {
+hero_metadata_uncached :: proc(detail: ^library.Detail) -> (metadata, summary: string) {
 	count_label := detail.source == .Artist ? "releases" : "songs"
 	if detail.total == 1 {count_label = detail.source == .Artist ? "release" : "song"}
 	if detail.source == .Artist && detail.monthly_listeners > 0 {
@@ -1466,12 +1532,57 @@ hero_metadata :: proc(detail: ^library.Detail) -> (metadata, summary: string) {
 	)
 }
 
+hero_metadata :: proc(
+	detail: ^library.Detail,
+	cache: ^Hero_Cache = nil,
+) -> (
+	metadata, summary: string,
+) {
+	if cache != nil &&
+	   cache.metadata_valid &&
+	   cache.metadata_source == detail.source &&
+	   cache.metadata_id == detail.id &&
+	   cache.metadata_generation == detail.generation &&
+	   cache.metadata_rows == len(detail.rows) &&
+	   cache.metadata_total == detail.total &&
+	   cache.metadata_has_more == detail.has_more &&
+	   cache.metadata_rows_error == detail.rows_error &&
+	   cache.metadata_listeners == detail.monthly_listeners &&
+	   cache.metadata_subtitle == detail.subtitle &&
+	   cache.metadata_date == detail.release_date &&
+	   cache.metadata_year == detail.year &&
+	   cache.metadata_artists == len(detail.artist_links) {
+		return cache.metadata, cache.summary
+	}
+	metadata, summary = hero_metadata_uncached(detail)
+	if cache != nil {
+		replace_string(&cache.metadata_id, detail.id)
+		cache.metadata_source = detail.source
+		cache.metadata_generation = detail.generation
+		cache.metadata_rows = len(detail.rows)
+		cache.metadata_total = detail.total
+		cache.metadata_has_more = detail.has_more
+		cache.metadata_rows_error = detail.rows_error
+		cache.metadata_listeners = detail.monthly_listeners
+		replace_string(&cache.metadata_subtitle, detail.subtitle)
+		replace_string(&cache.metadata_date, detail.release_date)
+		replace_string(&cache.metadata_year, detail.year)
+		cache.metadata_artists = len(detail.artist_links)
+		replace_string(&cache.metadata, metadata)
+		replace_string(&cache.summary, summary)
+		cache.metadata_valid = true
+		return cache.metadata, cache.summary
+	}
+	return
+}
+
 // Dedicated banners fill a bounded header; SDL crops without stretching.
 hero_banner :: proc(
 	detail: ^library.Detail,
 	textures: ^Textures,
 	ui_state: ^ui.State,
 	width, viewport_height, d: f32,
+	cache: ^Hero_Cache = nil,
 ) -> bool {
 	// Metadata selects the layout; texture arrival only fills the artwork.
 	if detail.banner == "" {return false}
@@ -1487,8 +1598,9 @@ hero_banner :: proc(
 		detail.name,
 		title_width,
 		hero_max_title_size(viewport_height, d),
+		cache,
 	)
-	metadata, summary := hero_metadata(detail)
+	metadata, summary := hero_metadata(detail, cache)
 	if metadata == "" {
 		metadata = summary
 	} else if summary != "" {
@@ -1552,10 +1664,11 @@ detail_hero :: proc(
 	textures: ^Textures,
 	ui_state: ^ui.State,
 	available_width, viewport_height, d: f32,
+	cache: ^Hero_Cache = nil,
 ) {
 	// Spotify-style hero: substantial artwork and a strong, bold title.
 	// No panel behind it; the cover floats on the page with a soft shadow.
-	if hero_banner(detail, textures, ui_state, available_width, viewport_height, d) {return}
+	if hero_banner(detail, textures, ui_state, available_width, viewport_height, d, cache) {return}
 	hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
 	// Keep a density unit of slack at the text boundary.
 	title_width := max(0, available_width - hero_cover - (SCROLLBAR_OUTSET + 72) * d - d)
@@ -1564,6 +1677,7 @@ detail_hero :: proc(
 		detail.name,
 		title_width,
 		hero_max_title_size(viewport_height, d),
+		cache,
 	)
 	if clay.UI()(
 	{
@@ -1639,7 +1753,7 @@ detail_hero :: proc(
 		) {
 			clay.Text(detail.label, {fontSize = 13, textColor = theme.text})
 			clay.Text(title, title_style)
-			metadata, summary := hero_metadata(detail)
+			metadata, summary := hero_metadata(detail, cache)
 			if len(detail.artist_links) > 0 {
 				tail :=
 					metadata == "" ? "" : fmt.aprintf(" • %s", metadata, allocator = context.temp_allocator)
@@ -1683,8 +1797,7 @@ detail_hero :: proc(
 	}
 }
 
-page_error_text :: proc(status: int) -> string {
-	if status == 429 {return "Spotify is limiting requests. Please try again later."}
+http_error_text :: proc(status: int) -> string {
 	if status > 0 {
 		return fmt.aprintf(
 			"Spotify returned HTTP %d. Please try again.",
@@ -1693,6 +1806,11 @@ page_error_text :: proc(status: int) -> string {
 		)
 	}
 	return "Could not reach Spotify. Please try again."
+}
+
+page_error_text :: proc(status: int) -> string {
+	if status == 429 {return "Spotify is limiting requests. Please try again later."}
+	return http_error_text(status)
 }
 
 detail_error_notice :: proc(client: ^library.Client, d: f32) {
@@ -1710,6 +1828,7 @@ detail_page :: proc(
 	available_width, viewport_height, card_text_height, dt, d: f32,
 	ui_state: ^ui.State,
 	visible: ^Frame_Visible,
+	hero_cache: ^Hero_Cache = nil,
 ) {
 	if client.release_feed.open {
 		release_feed_page(
@@ -1766,7 +1885,7 @@ detail_page :: proc(
 			}
 			return
 		}
-		detail_hero(detail, textures, ui_state, available_width, viewport_height, d)
+		detail_hero(detail, textures, ui_state, available_width, viewport_height, d, hero_cache)
 		if clay.UI()(
 		{
 			layout = {
@@ -1897,11 +2016,7 @@ detail_page :: proc(
 				} else if detail.rows_error == library.PLAYLIST_INVALID_RESPONSE {
 					message = "Spotify returned incomplete or invalid playlist data. Please try again."
 				} else if detail.rows_error > 0 {
-					message = fmt.aprintf(
-						"Spotify returned HTTP %d. Please try again.",
-						detail.rows_error,
-						allocator = context.temp_allocator,
-					)
+					message = http_error_text(detail.rows_error)
 				}
 				clay.Text(message, {fontSize = 14, textColor = theme.muted})
 			}

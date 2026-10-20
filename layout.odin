@@ -144,7 +144,7 @@ Button_Fx :: struct {
 }
 
 Button_Fx_Ctx :: struct {
-	anims:      ^map[string]Button_Fx,
+	anims:      ^map[u32]Button_Fx,
 	mouse_down: bool,
 	animating:  bool, // a UI animation is running; main keeps frames coming
 }
@@ -160,9 +160,10 @@ button_fx :: proc(
 	hovered: bool,
 ) {
 	scale = 1
-	hovered = clay.PointerOver(clay.ID(id))
+	element_id := clay.ID(id)
+	hovered = clay.PointerOver(element_id)
 	if !enabled {return scale, false}
-	fx := ctx.anims[id]
+	fx := ctx.anims[element_id.id]
 	if hovered && ctx.mouse_down {
 		fx.held = true
 		scale = BUTTON_PRESS
@@ -182,7 +183,7 @@ button_fx :: proc(
 			}
 		}
 	}
-	ctx.anims[id] = fx
+	ctx.anims[element_id.id] = fx
 	return scale, hovered
 }
 
@@ -808,6 +809,7 @@ layout :: proc(
 	fx: ^Button_Fx_Ctx,
 	sidebar_width, viewport_width, viewport_height, card_text_height, dt, d: f32,
 	ui_state: ^ui.State,
+	hero_cache: ^Hero_Cache = nil,
 ) -> (
 	clay.ClayArray(clay.RenderCommand),
 	Frame_Visible,
@@ -909,6 +911,7 @@ layout :: proc(
 					d,
 					ui_state,
 					&visible,
+					hero_cache,
 				)
 			}
 			if view.queue_open {

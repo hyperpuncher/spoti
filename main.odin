@@ -706,7 +706,8 @@ App :: struct {
 	stage_max:              [3]f64,
 	stage_n:                int,
 	restore_pending:        bool,
-	button_anims:           map[string]Button_Fx,
+	button_anims:           map[u32]Button_Fx,
+	hero_cache:             Hero_Cache,
 	stage:                  Stage,
 	finished:               bool,
 	repeat:                 bool,
@@ -842,7 +843,7 @@ main :: proc() {
 	replace_string(&artist, played.artist)
 	replace_string(&player_cover, played.cover)
 	restore_pending = len(app_state.last_collection) > 0
-	button_anims = make(map[string]Button_Fx)
+	button_anims = make(map[u32]Button_Fx)
 	defer {
 		if worker != nil {release_worker(worker, queue, &cancel)}
 		if preload_worker != nil {
@@ -875,6 +876,7 @@ main :: proc() {
 		free_context_menu(&menu)
 		nav_free_all(&nav)
 		delete(button_anims)
+		free_hero_cache(&hero_cache)
 		if mpris_active {mpris.close()}
 	}
 	volume = app_state.volume
@@ -1386,7 +1388,7 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 	if queue_restore_pending &&
 	   library_client.detail.ready &&
 	   !library_client.detail_loading &&
-	   queue_detail == detail_card_uri(library_client.detail) {
+	   detail_matches_uri(library_client.detail, queue_detail) {
 		queue_gen = library_client.detail.generation
 		queue_restore_pending = false
 	}
@@ -1394,7 +1396,7 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 	// extend the live queue in place when it still mirrors this page.
 	if len(queue_detail) > 0 &&
 	   library_client.detail.ready &&
-	   queue_detail == detail_card_uri(library_client.detail) &&
+	   detail_matches_uri(library_client.detail, queue_detail) &&
 	   queue_gen == library_client.detail.generation &&
 	   queue_rows < len(library_client.detail.rows) {
 		append_play_queue_tail(
@@ -1882,11 +1884,13 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	// container alive across the switch, so without this the
 	// previous page's offset (and glide) would carry over and a
 	// long playlist would reopen at its bottom skeleton tail.
-	current_detail_uri :=
-		library_client.release_feed.open ? "spoti:releases" : detail_card_uri(library_client.detail)
-	if current_detail_uri != last_detail_uri {
+	detail_changed :=
+		library_client.release_feed.open ? last_detail_uri != "spoti:releases" : !detail_matches_uri(library_client.detail, last_detail_uri)
+	if detail_changed {
 		delete(last_detail_uri)
-		last_detail_uri = strings.clone(current_detail_uri)
+		last_detail_uri = strings.clone(
+			library_client.release_feed.open ? "spoti:releases" : detail_card_uri(library_client.detail),
+		)
 		if data := clay.GetScrollContainerData(clay.ID("detail_rows"));
 		   data.found && data.scrollPosition != nil {
 			data.scrollPosition.y = 0
@@ -1912,6 +1916,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 			pass == 0 ? dt : 0,
 			density,
 			&state,
+			&hero_cache,
 		)
 		// Current dimensions are known only after layout. If history changes
 		// the offset, rebuild the visible rows and commands before drawing.
@@ -2121,8 +2126,9 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		}
 		if !keep_open {menu.open = false}
 	} else if clicked {
-		if hit("footer_queue", mouse_click) || hit("queue_close", mouse_click) {
-			queue_open = hit("footer_queue", mouse_click) && !queue_open
+		toggle_queue := hit("footer_queue", mouse_click)
+		if toggle_queue || hit("queue_close", mouse_click) {
+			queue_open = toggle_queue && !queue_open
 			queue_smooth = {}
 			if data := clay.GetScrollContainerData(clay.ID("queue_rows"));
 			   data.found && data.scrollPosition != nil {data.scrollPosition.y = 0}
@@ -2464,13 +2470,16 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		if box.width > 0 {
 			volume = clamp((mouse.x - box.x) / box.width, 0, 1)
 			app_state.volume = volume
-			state_dirty = true
 			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
 			if remote_control {
 				_ = library.send_player_command(&library_client, .Volume, int(volume * 100))
 			}
 		}
-		if .LEFT not_in buttons {volume_dragging = false}
+		if .LEFT not_in buttons {
+			volume_dragging = false
+			// Save once when the drag ends; the live value already feeds audio.
+			state_dirty = true
+		}
 		first_frame = true
 	}
 	if clicked &&
@@ -2654,7 +2663,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	if release_play_uri != "" {
 		if track_selected ||
 		   stop_pressed ||
-		   release_play_uri != detail_card_uri(library_client.detail) ||
+		   !detail_matches_uri(library_client.detail, release_play_uri) ||
 		   library_client.detail_error != 0 {
 			replace_string(&release_play_uri, "")
 		} else if detail_rows_ready(&library_client) {
@@ -2823,23 +2832,22 @@ app_persist :: proc(app: ^App, frame: ^Frame) {
 	// Persist the last played track. Title and artist change together on
 	// the Ready packet, so watch every field, not only the URI.
 	// The state holds the saved copy; no shadow variables.
-	collection := ""
-	if library_client.detail.ready {
-		collection = detail_card_uri(library_client.detail)
-	}
+	detail_ready := library_client.detail.ready
+	collection_changed :=
+		detail_ready && !detail_matches_uri(library_client.detail, app_state.last_collection)
 	played_state := &app_state.last_played
 	if selected != played_state.track ||
 	   title != played_state.title ||
 	   artist != played_state.artist ||
 	   player_cover != played_state.cover ||
-	   (library_client.detail.ready &&
-			   (collection != app_state.last_collection ||
-					   app_state.last_saved != library_client.detail.liked)) {
+	   (detail_ready &&
+			   (collection_changed || app_state.last_saved != library_client.detail.liked)) {
 		replace_string(&played_state.track, selected)
 		replace_string(&played_state.title, title)
 		replace_string(&played_state.artist, artist)
 		replace_string(&played_state.cover, player_cover)
-		if library_client.detail.ready {
+		if detail_ready {
+			collection := detail_card_uri(library_client.detail)
 			replace_string(&app_state.last_collection, collection)
 			replace_string(&app_state.last_name, library_client.detail.name)
 			app_state.last_saved = library_client.detail.liked
@@ -2907,7 +2915,7 @@ app_covers :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		worker != nil &&
 		play_index >= 0 &&
 		queue_detail != "" &&
-		queue_detail == detail_card_uri(library_client.detail) &&
+		detail_matches_uri(library_client.detail, queue_detail) &&
 		library_client.detail.source != .Artist &&
 		play_index + DETAIL_LOOKAHEAD >= len(play_queue)
 	for group in library.Album_Group {

@@ -24,13 +24,17 @@ cache_directory :: proc(prefix: string) -> (dir: string, ok: bool) {
 	base, err := os.user_cache_dir(context.allocator)
 	if err != nil {return "", false}
 	defer delete(base)
-	dir = fmt.aprintf("%s/spoti/%s", base, prefix)
-	directory_error := os.make_directory_all(dir)
-	if directory_error != nil && directory_error != .Exist {
+	return fmt.aprintf("%s/spoti/%s", base, prefix), true
+}
+
+// Create both cache directories once at launch. Read paths must not mkdir.
+cache_init :: proc() {
+	for prefix in ([]string{"api", "cover"}) {
+		dir, ok := cache_directory(prefix)
+		if !ok {continue}
+		_ = os.make_directory_all(dir)
 		delete(dir)
-		return "", false
 	}
-	return dir, true
 }
 
 cache_path :: proc(prefix: string, address: string) -> (path: string, ok: bool) {
