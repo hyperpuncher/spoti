@@ -154,10 +154,15 @@ square cover artwork is not cropped or otherwise materially changed;
 dedicated banners may be cropped to fit their bounded header.
 
 ordinary text uses Geist with character-based system outline fallbacks.
-emoji uses whole grapheme clusters with stable inline cells. a worker owns
-the color font and renders cached images; SDL texture uploads and scaled
-drawing stay on the UI thread. image arrivals wake the event loop and never
-change text measurements. see [font behavior and limits](../assets/fonts/FONTS.md).
+each primary and fallback font pair is attached once; SDL_ttf appends duplicate
+entries otherwise. emoji uses whole grapheme clusters with stable inline cells.
+a worker owns the color font and renders cached images; SDL texture uploads and
+scaled drawing stay on the UI thread. image arrivals wake the event loop and
+never change text measurements. see [font behavior and limits](../assets/fonts/FONTS.md).
+
+hero titles and metadata are cached by detail revision, row count, size and
+viewport width. page growth or header changes invalidate only the matching
+entry; steady frames reuse the fitted label and summary.
 
 cached content appears before background revalidation. if a detail request
 fails, keep the available card preview, header, and rows. show the error below
@@ -182,10 +187,12 @@ refreshes keep the cache. artwork, audio, local history, and retry deadlines
 are not cleared by approval.
 
 API responses are fresh for five minutes; library pages for six hours.
-stale responses can cover network failures for up to 30 days. the audio cache
-holds encrypted audio only, with a 4 GiB limit. audio keys and signed audio
-URLs stay in memory. persistent application state uses `state.json` without
-legacy format readers.
+stale responses can cover network failures for up to 30 days. library cache
+directories are created once at launch; read paths do not create directories.
+the audio cache holds encrypted audio only, with a 4 GiB limit. audio keys and
+signed audio URLs stay in memory. persistent application state uses `state.json`
+without legacy format readers. volume changes update audio at once but the
+state file is written once when the drag ends.
 
 ## diagnostics and portability
 
