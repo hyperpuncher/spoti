@@ -32,6 +32,7 @@ State :: struct {
 	font_config:       ^fontconfig.Config,
 	fallback_sources:  [dynamic]Font_Source,
 	fallback_matches:  map[u64]int,
+	fallback_added:    map[Font_Pair]bool,
 	fonts:             map[int]^ttf.Font,
 	using drawn_texts: Text_Pool,
 	measured_texts:    Text_Pool,
@@ -127,6 +128,7 @@ close :: proc(state: ^State) {
 	for source in state.fallback_sources {delete(source.path, state.fallback_sources.allocator)}
 	delete(state.fallback_sources)
 	delete(state.fallback_matches)
+	delete(state.fallback_added)
 	if state.font_config != nil {fontconfig.ConfigDestroy(state.font_config)}
 	for _, mask in state.masks {sdl.DestroyTexture(mask.texture)}
 	delete(state.masks)

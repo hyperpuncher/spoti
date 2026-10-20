@@ -72,12 +72,14 @@ text_fallbacks_cover_scripts_and_symbols_without_replacing_geist :: proc(t: ^tes
 		)
 	}
 	count := len(state.fallback_sources)
+	pairs := len(state.fallback_added)
 	_ = font_for_text(
 		&state,
 		"千葉雄喜 ⟡ ✧ العربية עברית हिन्दी ไทย",
 		14,
 	)
 	testing.expect_value(t, len(state.fallback_sources), count)
+	testing.expect_value(t, len(state.fallback_added), pairs)
 	// A code point with no installed glyph must not repeatedly grow the cache.
 	_ = font_for_text(&state, "\U0010ffff", 14)
 	count = len(state.fallback_sources)

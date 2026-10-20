@@ -33,10 +33,17 @@ Font_Source :: struct {
 	index: int,
 }
 
+// SDL_ttf appends duplicate fallback entries. Track attached pairs so one
+// primary font is never given the same fallback twice.
+Font_Pair :: struct {
+	primary, fallback: ^ttf.Font,
+}
+
 resolve_fallbacks :: proc(state: ^State) {
 	state.font_config = fontconfig.InitLoadConfigAndFonts()
 	state.fallback_sources = make([dynamic]Font_Source)
 	state.fallback_matches = make(map[u64]int)
+	state.fallback_added = make(map[Font_Pair]bool)
 }
 
 // Assets resolve around the executable before the development checkout.
@@ -200,10 +207,11 @@ font_for_text :: proc(state: ^State, value: string, size: f32, font_id: u16 = 0)
 			state.fallback_matches[key] = -1
 			continue
 		}
-		if !ttf.AddFallbackFont(
-			font,
-			fallback,
-		) {fmt.eprintln("could not add font fallback:", sdl.GetError())}
+		pair := Font_Pair{font, fallback}
+		if state.fallback_added[pair] {continue}
+		if ttf.AddFallbackFont(font, fallback) {
+			state.fallback_added[pair] = true
+		} else {fmt.eprintln("could not add font fallback:", sdl.GetError())}
 	}
 	return font
 }
