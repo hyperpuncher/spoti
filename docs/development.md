@@ -133,8 +133,10 @@ Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
 text entry uses SDL UTF-8 text-input events. shortcuts use logical keycodes,
 so they follow the keyboard layout. `ctrl` and macOS `cmd` support `a` to
 select all, `c` to copy, `x` to cut, and `v` to paste. copy and cut require
-a selection. typing and paste replace the selected range or insert at the
-caret. click to place the caret, drag to select, double-click to select a word,
+a selection. `ctrl`+`insert` copies and `shift`+`insert` pastes. pasted text
+is reduced to one line, so a trailing newline from a terminal or browser does
+not block a search or track link. typing and paste replace the selected range
+or insert at the caret. click to place the caret, drag to select, double-click to select a word,
 and triple-click to select the line. Shift-click and Shift with arrow keys or
 Home/End extend the selection. Ctrl-arrow moves by word; macOS Command-arrow
 moves to a line edge. long text scrolls horizontally to keep the caret visible.

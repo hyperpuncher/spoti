@@ -10,6 +10,7 @@ import "core:sync"
 import "core:sync/chan"
 import "core:thread"
 import "core:time"
+import "core:unicode"
 import diagnostic "diagnostic"
 import connect "spotify/connect"
 import credential "spotify/credential"
@@ -344,13 +345,35 @@ submit_setup :: proc(app: ^App) {
 	_ = sdl.StopTextInput(app.state.window)
 }
 
-// Search accepts any text; only ASCII controls are rejected. Track links
-// are validated on submit, so pasted URLs and Unicode queries share a field.
+// Search accepts any text except control characters. Track links are
+// validated on submit, so pasted URLs and Unicode queries share a field.
 input_text_ok :: proc(value: string) -> bool {
-	for ch in transmute([]u8)value {
-		if ch < ' ' {return false}
+	for rune in value {
+		if unicode.is_control(rune) {return false}
 	}
 	return true
+}
+
+// The search and setup fields are single-line. Clipboard text often carries a
+// trailing newline; join its lines with one space instead of rejecting all of it.
+// Ordinary spaces stay untouched, including leading and trailing ones.
+paste_text :: proc(value: string) -> string {
+	builder: strings.Builder
+	strings.builder_init(&builder, 0, len(value), context.temp_allocator)
+	pending_space := false
+	for rune in value {
+		if rune == '\r' || rune == '\n' || rune == '\t' {
+			pending_space = true
+			continue
+		}
+		if unicode.is_control(rune) {continue}
+		if pending_space && rune != ' ' && strings.builder_len(builder) > 0 {
+			strings.write_byte(&builder, ' ')
+		}
+		pending_space = false
+		strings.write_rune(&builder, rune)
+	}
+	return strings.to_string(builder)
 }
 
 // Debounce catalog searches while typing; Enter searches immediately.
@@ -1089,8 +1112,8 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 					case sdl.K_C, sdl.K_X, sdl.K_V, sdl.K_INSERT:
 						inserting := event.key.key == sdl.K_INSERT
 						if !cmd && !(inserting && shift) {break}
-						copying := event.key.key == sdl.K_C || inserting && !shift
 						cutting := event.key.key == sdl.K_X
+						copying := event.key.key == sdl.K_C || inserting && !shift
 						if copying || cutting {
 							low, high := ui.editor_bounds(&editor)
 							if low != high {
@@ -1104,9 +1127,9 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 						} else {
 							clipboard := sdl.GetClipboardText()
 							if clipboard != nil {
-								value := string(cstring(clipboard))
+								value := paste_text(string(cstring(clipboard)))
 								limit := library_client.state == .Missing_Client_ID ? 64 : 512
-								if len(value) > 0 && input_text_ok(value) {
+								if len(value) > 0 {
 									input_changed =
 										ui.editor_insert(&editor, value, limit) || input_changed
 								}
