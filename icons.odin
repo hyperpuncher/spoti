@@ -22,6 +22,7 @@ ICON_NAMES :: []string {
 	"house",
 	"bell",
 	"search",
+	"x",
 	"layout-grid",
 	"list",
 	"list-music",

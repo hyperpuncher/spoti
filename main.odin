@@ -204,6 +204,10 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Resize)
 		return
 	}
+	if pointer_over("search_clear") {
+		ui.set_cursor(state, .Pointer)
+		return
+	}
 	if pointer_over("track_input") {
 		ui.set_cursor(state, .Text)
 		return
@@ -2259,6 +2263,12 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				handled = true
 			} else if hit("toolbar_forward", mouse_click) {
 				nav_forward_pressed = true
+				handled = true
+			} else if hit("search_clear", mouse_click) {
+				ui.editor_select_all(&editor)
+				input_changed = ui.editor_insert(&editor, "", 512) || input_changed
+				editor.selecting = false
+				pending_redraw = true
 				handled = true
 			} else if hit("track_input", mouse_click) {
 				app_input_click(app, frame)

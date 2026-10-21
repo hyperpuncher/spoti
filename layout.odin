@@ -201,16 +201,59 @@ input_text :: proc(view: View) {
 	)
 }
 
+search_input :: proc(view: View, textures: ^Textures, width: clay.SizingAxis, d: f32) {
+	has_text := view.input_editor != nil && len(view.input_editor.input) > 0
+	if clay.UI_WithId(clay.ID("track_input"))(
+	{
+		layout = {
+			sizing = {width = width, height = clay.SizingFixed(40 * d)},
+			padding = {left = u16(12 * d), right = u16(8 * d)},
+			childAlignment = {y = .Center},
+			childGap = u16(8 * d),
+		},
+		backgroundColor = view.input_active ? theme.card : theme.panel,
+		cornerRadius = clay.CornerRadiusAll(20 * d),
+	},
+	) {
+		icon_element(textures, "search", .Muted, 16 * d)
+		input_text(view)
+		if has_text {
+			hovered := clay.PointerOver(clay.ID("search_clear"))
+			if clay.UI_WithId(clay.ID("search_clear"))(
+			{
+				layout = {
+					sizing = {width = clay.SizingFixed(28 * d), height = clay.SizingFixed(28 * d)},
+					childAlignment = {x = .Center, y = .Center},
+				},
+				backgroundColor = hovered ? theme.hover : clay.Color{},
+				cornerRadius = clay.CornerRadiusAll(14 * d),
+			},
+			) {
+				icon_element(textures, "x", hovered ? .White : .Muted, 16 * d)
+			}
+		} else {
+			// Keep the text viewport stable when the first character appears.
+			if clay.UI()(
+			{
+				layout = {
+					sizing = {width = clay.SizingFixed(28 * d), height = clay.SizingFixed(28 * d)},
+				},
+			},
+			) {}
+		}
+	}
+}
+
 top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 	padding := u16(10 * d)
 	search_width := clay.SizingFixed(440 * d)
 	when ODIN_OS == .Darwin {
 		padding = u16(96 * d)
-		search_width = clay.SizingGrow({min = 80 * d, max = 440 * d})
+		search_width = clay.SizingGrow({min = 160 * d, max = 440 * d})
 	}
 	when ODIN_OS == .Windows {
 		padding = u16(view.caption_width + 10 * d)
-		search_width = clay.SizingGrow({min = 80 * d, max = 440 * d})
+		search_width = clay.SizingGrow({min = 160 * d, max = 440 * d})
 	}
 	if clay.UI()(
 	{
@@ -243,19 +286,7 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 			icon_size = 20,
 			target_size = 40,
 		)
-		if clay.UI_WithId(clay.ID("track_input"))(
-		{
-			layout = {
-				sizing = {width = search_width, height = clay.SizingFixed(40 * d)},
-				padding = {left = u16(14 * d), right = u16(14 * d)},
-				childAlignment = {y = .Center},
-			},
-			backgroundColor = view.input_active ? theme.card : theme.panel,
-			cornerRadius = clay.CornerRadiusAll(20 * d),
-		},
-		) {
-			input_text(view)
-		}
+		search_input(view, textures, search_width, d)
 		icon_button(
 			"toolbar_releases",
 			"bell",
