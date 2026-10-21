@@ -7,7 +7,7 @@ import library "spotify/library"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
-MENU_ITEMS_MAX :: 5
+MENU_ITEMS_MAX :: 6
 
 Menu_Item :: enum {
 	Pin,
@@ -21,13 +21,17 @@ Menu_Item :: enum {
 	Remove_From_Playlist,
 }
 
+Menu_Entry :: struct {
+	action: Menu_Item,
+	label:  string,
+}
+
 Context_Menu :: struct {
 	open:         bool,
 	point:        sdl.FPoint,
 	track:        int, // detail row index, or -1 for cards
 	uri:          string, // owned clone of the target
-	items:        [MENU_ITEMS_MAX]Menu_Item,
-	labels:       [MENU_ITEMS_MAX]string,
+	entries:      [MENU_ITEMS_MAX]Menu_Entry,
 	count:        int,
 	selected:     int, // check-marked row, or -1
 	sorts:        [4]Sort, // sort payload per row for Pick_Sort
@@ -43,10 +47,16 @@ free_context_menu :: proc(menu: ^Context_Menu) {
 	menu.selected = -1
 }
 
+set_menu :: proc(menu: ^Context_Menu, entries: []Menu_Entry) {
+	assert(len(entries) <= MENU_ITEMS_MAX)
+	copy(menu.entries[:], entries)
+	menu.count = len(entries)
+}
+
 // Row index of the add-to-playlist action, or -1 when the menu has none.
 menu_add_index :: proc(menu: ^Context_Menu) -> int {
 	for index in 0 ..< menu.count {
-		if menu.items[index] == .Add_To_Playlist {return index}
+		if menu.entries[index].action == .Add_To_Playlist {return index}
 	}
 	return -1
 }
@@ -66,13 +76,14 @@ open_context_menu :: proc(
 
 open_card_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, pinned: bool) {
 	open_context_menu(menu, point, uri)
-	menu.items[0] = .Pin
-	menu.labels[0] = pinned ? "Unpin" : "Pin"
-	menu.items[1] = .Copy_Link
-	menu.labels[1] = "Copy link"
-	menu.items[2] = .Open_In_Spotify
-	menu.labels[2] = "Open in Spotify"
-	menu.count = 3
+	set_menu(
+		menu,
+		[]Menu_Entry {
+			{.Pin, pinned ? "Unpin" : "Pin"},
+			{.Copy_Link, "Copy link"},
+			{.Open_In_Spotify, "Open in Spotify"},
+		},
+	)
 }
 
 open_track_menu :: proc(
@@ -83,47 +94,57 @@ open_track_menu :: proc(
 	removable: bool = false,
 ) {
 	open_context_menu(menu, point, uri, track)
-	menu.items = {
-		.Play,
-		.Add_To_Queue,
-		removable ? .Remove_From_Playlist : .Add_To_Playlist,
-		.Copy_Link,
-		.Open_In_Spotify,
-	}
-	menu.labels = {
-		"Play",
-		"Add to queue",
-		removable ? "Remove from playlist" : "Add to playlist",
-		"Copy link",
-		"Open in Spotify",
-	}
-	menu.count = 5
+	playlist_entry := Menu_Entry{.Add_To_Playlist, "Add to playlist"}
+	if removable {playlist_entry = {.Remove_From_Playlist, "Remove from playlist"}}
+	set_menu(
+		menu,
+		[]Menu_Entry {
+			{.Play, "Play"},
+			{.Add_To_Queue, "Add to queue"},
+			playlist_entry,
+			{.Copy_Link, "Copy link"},
+			{.Open_In_Spotify, "Open in Spotify"},
+		},
+	)
 }
 
-// Search and queue tracks can be queued or opened without a network lookup.
+// Search and queue tracks can be queued, added to a playlist, or opened
+// without a network lookup.
 open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 	open_context_menu(menu, point, uri)
 	if strings.has_prefix(uri, "spotify:track:") {
-		menu.items[0], menu.labels[0] = .Add_To_Queue, "Add to queue"
-		menu.count = 1
+		set_menu(
+			menu,
+			[]Menu_Entry {
+				{.Add_To_Queue, "Add to queue"},
+				{.Add_To_Playlist, "Add to playlist"},
+				{.Copy_Link, "Copy link"},
+				{.Open_In_Spotify, "Open in Spotify"},
+			},
+		)
+	} else {
+		set_menu(
+			menu,
+			[]Menu_Entry{{.Copy_Link, "Copy link"}, {.Open_In_Spotify, "Open in Spotify"}},
+		)
 	}
-	index := menu.count
-	menu.items[index], menu.labels[index] = .Copy_Link, "Copy link"
-	menu.items[index + 1], menu.labels[index + 1] = .Open_In_Spotify, "Open in Spotify"
-	menu.count += 2
 }
 
 open_release_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string, saved: bool) {
 	open_context_menu(menu, point, uri)
-	menu.items = {.Play, .Save_Album, .Add_To_Playlist, .Copy_Link, .Open_In_Spotify}
-	menu.labels = {
-		"Play",
-		saved ? "Remove from library" : "Save to library",
-		"Add to playlist",
-		"Copy link",
-		"Open in Spotify",
-	}
-	menu.count = 5
+	save_entry := Menu_Entry{.Save_Album, "Save to library"}
+	if saved {save_entry.label = "Remove from library"}
+	set_menu(
+		menu,
+		[]Menu_Entry {
+			{.Play, "Play"},
+			{.Add_To_Queue, "Add to queue"},
+			save_entry,
+			{.Add_To_Playlist, "Add to playlist"},
+			{.Copy_Link, "Copy link"},
+			{.Open_In_Spotify, "Open in Spotify"},
+		},
+	)
 }
 
 // Library sort picker for a tab. The current sort carries a check; the tab
@@ -133,9 +154,8 @@ open_sort_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, current: Sort) {
 	open_context_menu(menu, point)
 	for option in options {
 		index := menu.count
-		menu.items[index] = .Pick_Sort
+		menu.entries[index] = {.Pick_Sort, sort_name(option)}
 		menu.sorts[index] = option
-		menu.labels[index] = sort_name(option)
 		if option == current {menu.selected = index}
 		menu.count += 1
 	}
@@ -178,7 +198,7 @@ context_menu :: proc(menu: ^Context_Menu, textures: ^Textures, d: f32) {
 				} else if reserve {
 					if clay.UI()({layout = {sizing = {width = clay.SizingFixed(14 * d)}}}) {}
 				}
-				clay.Text(menu.labels[index], {fontSize = 14, textColor = theme.text})
+				clay.Text(menu.entries[index].label, {fontSize = 14, textColor = theme.text})
 			}
 		}
 	}

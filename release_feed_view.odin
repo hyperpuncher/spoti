@@ -32,8 +32,8 @@ release_age_label :: proc(released_at, now: time.Time) -> string {
 	)
 }
 
-// Load the existing album queue without changing the visible feed or history.
-release_feed_load_playback :: proc(client: ^library.Client, entry: library.Entry) -> bool {
+// Open an album detail under the feed without changing the visible feed or history.
+release_feed_open_album :: proc(client: ^library.Client, entry: library.Entry) -> bool {
 	source, id, valid := parse_card_uri(entry.uri)
 	if !valid || source != .Album {return false}
 	was_open := client.release_feed.open

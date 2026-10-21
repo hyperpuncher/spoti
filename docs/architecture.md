@@ -119,7 +119,9 @@ manual additions keep a queue-origin flag and stable ordinals. insert them
 after the current track and pending manual additions. shuffle keeps those
 pending additions in order. collection pagination counts only collection rows,
 not manual additions, so later pages do not skip tracks. saved queues retain
-the origin flag; restore rebuilds the collection-row count.
+the origin flag; restore rebuilds the collection-row count. a release queued
+from What's New loads under the feed, finishes all album pages, then inserts
+one FIFO run. queue and search tracks use the same add-to-playlist picker.
 
 Dealer requests become UI events. reply only after the UI accepts a command;
 reject unsupported commands. publish actual local playback state. send state

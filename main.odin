@@ -680,6 +680,7 @@ App :: struct {
 	detail_scroll_armed:    bool,
 	last_detail_uri:        string,
 	release_play_uri:       string,
+	release_queue_uri:      string,
 	autoscroll_container:   string,
 	autoscroll_anchor:      sdl.FPoint,
 	autoscroll_moving:      bool,
@@ -828,6 +829,7 @@ main :: proc() {
 	sidebar_width = app_state.sidebar_width
 	defer delete(last_detail_uri)
 	defer delete(release_play_uri)
+	defer delete(release_queue_uri)
 	defer delete(toast)
 	defer delete(setup_error)
 	drag_index = -1
@@ -1408,6 +1410,30 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 		stamp_queue_album(&play_queue, &library_client.detail)
 		state_dirty = true
 		redraw = true
+	}
+	// A release queued from What's New loads under the feed. Wait for every
+	// album page, then add one FIFO run to the live queue.
+	if release_queue_uri != "" {
+		detail := &library_client.detail
+		switch {
+		case !detail_matches_uri(detail^, release_queue_uri):
+			replace_string(&release_queue_uri, "")
+		case library_client.detail_error != 0 || detail.rows_error != 0:
+			replace_string(&release_queue_uri, "")
+			show_toast(app, "Couldn't add to queue")
+		case detail.has_more:
+			if !library_client.detail_loading && library.more_rows(&library_client) {
+				redraw = true
+			}
+		case !library_client.detail_loading:
+			if detail_rows_ready(&library_client) {
+				app_enqueue_detail_rows(app, detail)
+				redraw = true
+			} else {
+				show_toast(app, "Couldn't add to queue")
+			}
+			replace_string(&release_queue_uri, "")
+		}
 	}
 	// Spread texture uploads across frames; draining a backlog at once
 	// stalls a frame for every rounded corner and GPU upload in it.
@@ -2070,7 +2096,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		if !picked {
 			for index in 0 ..< menu.count {
 				if !hit_index("menu_item", mouse_click, u32(index)) {continue}
-				switch menu.items[index] {
+				switch menu.entries[index].action {
 				case .Pin:
 					_ = state_toggle_pin(&app_state, menu.uri)
 					if menu.uri == detail_card_uri(library_client.detail) {
@@ -2099,14 +2125,23 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				case .Play:
 					if release := release_feed_find(&library_client, menu.uri);
 					   menu.track < 0 && release != nil {
-						if release_feed_load_playback(&library_client, release.entry) {
+						replace_string(&release_queue_uri, "")
+						if release_feed_open_album(&library_client, release.entry) {
 							replace_string(&release_play_uri, menu.uri)
 						}
 					} else if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
 						track_selected = app_queue_detail(app, menu.track)
 					}
 				case .Add_To_Queue:
-					_ = app_enqueue_uri(app, menu.uri)
+					if release := release_feed_find(&library_client, menu.uri);
+					   menu.track < 0 && release != nil {
+						replace_string(&release_play_uri, "")
+						if release_feed_open_album(&library_client, release.entry) {
+							replace_string(&release_queue_uri, menu.uri)
+						}
+					} else if !app_enqueue_uri(app, menu.uri) {
+						show_toast(app, "Couldn't add to queue")
+					}
 				case .Add_To_Playlist:
 					menu.picker_open = true
 					keep_open = true
@@ -2167,7 +2202,8 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 						)
 					}
 				} else if hit(release_feed_action("play", index), mouse_click) {
-					if release_feed_load_playback(&library_client, release.entry) {
+					replace_string(&release_queue_uri, "")
+					if release_feed_open_album(&library_client, release.entry) {
 						replace_string(&release_play_uri, release.entry.uri)
 					}
 				} else {

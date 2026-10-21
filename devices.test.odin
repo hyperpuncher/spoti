@@ -66,8 +66,7 @@ floating_picker_panels_keep_rows_bounded :: proc(t: ^testing.T) {
 			picker_open  = true,
 			picker_items = playlists,
 		}
-		picker.items[0] = .Add_To_Playlist
-		picker.labels[0] = "Add to playlist"
+		picker.entries[0] = {.Add_To_Playlist, "Add to playlist"}
 		for fraction in ([]f32{0, 0.5, 1}) {
 			for _ in 0 ..< 3 {
 				scroll := clay.GetScrollContainerData(clay.ID("playlist_picker"))

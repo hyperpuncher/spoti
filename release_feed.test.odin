@@ -134,16 +134,17 @@ release_feed_layout_keeps_big_covers_and_bounded_rows :: proc(t: ^testing.T) {
 				)
 				testing.expect(t, menu.open && menu.track == -1)
 				testing.expect_value(t, menu.uri, client.release_feed.items[index].entry.uri)
-				testing.expect_value(t, menu.count, 5)
+				testing.expect_value(t, menu.count, 6)
 				testing.expect_value(
 					t,
-					menu.items,
-					[MENU_ITEMS_MAX]Menu_Item {
-						.Play,
-						.Save_Album,
-						.Add_To_Playlist,
-						.Copy_Link,
-						.Open_In_Spotify,
+					menu.entries,
+					[MENU_ITEMS_MAX]Menu_Entry {
+						{.Play, "Play"},
+						{.Add_To_Queue, "Add to queue"},
+						{.Save_Album, "Save to library"},
+						{.Add_To_Playlist, "Add to playlist"},
+						{.Copy_Link, "Copy link"},
+						{.Open_In_Spotify, "Open in Spotify"},
 					},
 				)
 				free_context_menu(&menu)
@@ -239,7 +240,7 @@ release_play_loads_rows_without_leaving_the_feed :: proc(t: ^testing.T) {
 		name = "Release",
 		uri  = "spotify:album:AAAAAAAAAAAAAAAAAAAAAA",
 	}
-	if !testing.expect(t, release_feed_load_playback(&client, entry)) {return}
+	if !testing.expect(t, release_feed_open_album(&client, entry)) {return}
 	testing.expect(t, client.release_feed.open)
 	testing.expect_value(t, client.detail.source, library.Source.Album)
 	request, received := chan.try_recv(client.requests)

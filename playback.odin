@@ -137,21 +137,42 @@ build_play_queue :: proc(items: ^[dynamic]Play_Item, rows: []$T, fallback_cover:
 
 // Manual additions remain FIFO immediately after the current track. Keep
 // stable ordinals so turning shuffle off restores this requested position.
-app_enqueue_track :: proc(app: ^App, row: $T) {
-	if row.uri == "" {return}
-	item := clone_play_item(row, 0)
-	item.queued = true
+// Takes ownership of the item strings; the caller must not free them.
+app_enqueue_items :: proc(app: ^App, items: []Play_Item) {
+	if len(items) == 0 {return}
 	at := clamp(app.play_index + 1, 0, len(app.play_queue))
 	for at < len(app.play_queue) && app.play_queue[at].queued {at += 1}
-	item.order = at > 0 ? app.play_queue[at - 1].order + 1 : 0
-	for &existing in app.play_queue {if existing.order >= item.order {existing.order += 1}}
-	inject_at(&app.play_queue, at, item)
+	base := at > 0 ? app.play_queue[at - 1].order + 1 : 0
+	for &existing in app.play_queue {if existing.order >= base {existing.order += len(items)}}
+	for &item, index in items {
+		item.queued = true
+		item.order = base + index
+	}
+	inject_at(&app.play_queue, at, ..items)
 	if app.worker == nil &&
 	   (app.selected == "" ||
 			   app.play_index < 0 ||
 			   app.play_index >= len(app.play_queue)) {app_finish_queue(app)}
 	app.state_dirty, app.pending_redraw = true, true
 	show_toast(app, "Added to queue")
+}
+
+app_enqueue_track :: proc(app: ^App, row: $T) {
+	if row.uri == "" {return}
+	items := [1]Play_Item{clone_play_item(row, 0)}
+	app_enqueue_items(app, items[:])
+}
+
+// Add every loaded track from a release page as one FIFO run. The detail
+// supplies album links that bare album track objects omit.
+app_enqueue_detail_rows :: proc(app: ^App, detail: ^library.Detail) {
+	items := make([dynamic]Play_Item, 0, len(detail.rows), context.temp_allocator)
+	for row in detail.rows {
+		if row.uri == "" {continue}
+		append(&items, clone_play_item(row, 0, detail.image_small))
+	}
+	stamp_queue_album(&items, detail)
+	app_enqueue_items(app, items[:])
 }
 
 // Menus retain only a URI. Resolve against current owned data at activation,

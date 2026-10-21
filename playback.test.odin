@@ -157,6 +157,32 @@ manual_queue_additions_keep_fifo_priority_and_collection_paging :: proc(t: ^test
 }
 
 @(test)
+queue_batch_additions_keep_fifo_order :: proc(t: ^testing.T) {
+	app := App {
+		play_index = 0,
+		stage      = .Playing,
+		selected   = strings.clone("first"),
+	}
+	build_play_queue(&app.play_queue, []library.Track_Row{{uri = "first"}, {uri = "second"}})
+	defer {
+		free_play_queue(&app.play_queue)
+		delete(app.selected)
+		delete(app.toast)
+	}
+	app_enqueue_items(
+		&app,
+		[]Play_Item {
+			clone_play_item(library.Track_Row{uri = "a"}, 0),
+			clone_play_item(library.Track_Row{uri = "b"}, 0),
+		},
+	)
+	testing.expect_value(t, len(app.play_queue), 4)
+	testing.expect_value(t, app.play_queue[1].uri, "a")
+	testing.expect_value(t, app.play_queue[2].uri, "b")
+	testing.expect(t, app.play_queue[1].queued && app.play_queue[2].queued)
+}
+
+@(test)
 stamp_queue_album_fills_missing_links_without_freeing_temps :: proc(t: ^testing.T) {
 	detail := library.Detail {
 		source = .Album,
