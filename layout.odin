@@ -595,6 +595,10 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 autoscroll_indicator :: proc(view: View, textures: ^Textures, d: f32) {
 	if !view.scroll_active {return}
 	size := 40 * d
+	// Fill with the text color so the opposite icon tint contrasts in both
+	// themes; dark mode flips the badge to a light circle.
+	background := theme.text
+	background.a = 220
 	if clay.UI_WithId(clay.ID("autoscroll"))(
 	{
 		layout = {
@@ -606,11 +610,11 @@ autoscroll_indicator :: proc(view: View, textures: ^Textures, d: f32) {
 			zIndex = 11,
 			attachTo = .Root,
 		},
-		backgroundColor = clay.Color{12, 12, 12, 220},
+		backgroundColor = background,
 		cornerRadius = clay.CornerRadiusAll(size / 2),
 	},
 	) {
-		icon_element(textures, "chevrons-up-down", .White, 20 * d)
+		icon_element(textures, "chevrons-up-down", .Dark, 20 * d)
 	}
 }
 
