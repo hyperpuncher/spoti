@@ -1,6 +1,7 @@
 // Streaming approval is separate from the user's Web API grant.
 package session
 
+import diagnostic "../../diagnostic"
 import credential "../credential"
 import oauth "../oauth"
 import "core:crypto"
@@ -59,22 +60,36 @@ authorize :: proc(
 	refresh :=
 		authorization_tokens.refresh != "" ? authorization_tokens.refresh : refresh_token != "" ? refresh_token : stored
 	if refresh != "" {
-		fresh, result := oauth.refresh(refresh)
-		switch result {
-		case .Authorized:
-			if keyring_mode != .None && !credential.save(fresh.refresh) {
-				fmt.eprintln("keyring did not save rotated streaming sign-in")
+		// The keyring can hold a newer grant than this process cached, for
+		// example after another instance rotated it. Try that once as well.
+		for candidate, index in ([2]string{refresh, stored}) {
+			if candidate == "" || (index == 1 && candidate == refresh) {continue}
+			fresh, result := oauth.refresh(candidate)
+			if index == 0 {
+				diagnostic.writef("streaming refresh=%v", result)
+			} else {
+				diagnostic.writef("streaming refresh stored=%v", result)
 			}
-			return fresh, true
-		case .Rejected:
-			if found && refresh == stored {credential.clear()}
-			authorization_tokens.expires_at = time.now()
-		case .Network_Error, .Invalid_Response:
-			fmt.eprintln(
-				"could not refresh streaming sign-in; try again when Spotify is reachable",
-			)
-			return
+			switch result {
+			case .Authorized:
+				if keyring_mode != .None && !credential.save(fresh.refresh) {
+					fmt.eprintln("keyring did not save rotated streaming sign-in")
+				}
+				return fresh, true
+			case .Rejected:
+				if found && candidate == stored {credential.clear()}
+				if index == 0 {
+					// Stop background workers from retrying the rejected grant.
+					oauth.wipe_tokens(&authorization_tokens)
+				}
+			case .Network_Error, .Invalid_Response:
+				fmt.eprintln(
+					"could not refresh streaming sign-in; try again when Spotify is reachable",
+				)
+				return
+			}
 		}
+		diagnostic.write("streaming refresh rejected; sign-in required")
 	}
 	if cancel != nil && sync.atomic_load(cancel) {return}
 	// A stored grant that would not refresh must not open a browser here;
