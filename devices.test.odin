@@ -80,7 +80,7 @@ floating_picker_panels_keep_rows_bounded :: proc(t: ^testing.T) {
 						)
 				}
 				clay.BeginLayout()
-				context_menu(&picker, &textures, d)
+				context_menu(&picker, &textures, nil, 1280, 820, d)
 				commands := clay.EndLayout(0)
 				testing.expect(t, commands.length < 150)
 			}

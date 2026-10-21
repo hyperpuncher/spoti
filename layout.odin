@@ -969,7 +969,7 @@ layout :: proc(
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
 		if view.queue_open {scrollbar("queue_rows", "queue_scrollbar", d)}
-		context_menu(view.menu, textures, d)
+		context_menu(view.menu, textures, ui_state, viewport_width, viewport_height, d)
 		device_panel(view, textures, d)
 		drag_ghost(view, d)
 		toast_banner(view, d)

@@ -4,6 +4,7 @@ package main
 import "core:fmt"
 import "core:strings"
 import library "spotify/library"
+import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
@@ -51,6 +52,51 @@ set_menu :: proc(menu: ^Context_Menu, entries: []Menu_Entry) {
 	assert(len(entries) <= MENU_ITEMS_MAX)
 	copy(menu.entries[:], entries)
 	menu.count = len(entries)
+}
+
+context_menu_metrics :: proc(
+	menu: ^Context_Menu,
+	state: ^ui.State,
+	d: f32,
+) -> (
+	width, height: f32,
+) {
+	if menu.count <= 0 {return}
+	widest: f32
+	for index in 0 ..< menu.count {
+		label := menu.entries[index].label
+		if state != nil {
+			w, _ := ui.text_size(state, label, 14 * d)
+			if w > 0 {
+				widest = max(widest, w)
+				continue
+			}
+		}
+		widest = max(widest, f32(len(label)) * 7 * d)
+	}
+	reserve := menu.selected >= 0 && menu.selected < menu.count
+	width = widest + (32 + (reserve ? 22 : 0)) * d
+	height = f32(12 + menu.count * 32 + max(0, menu.count - 1) * 2) * d
+	return
+}
+
+// Keep the menu on screen: flip it left or up when its normal anchor would
+// cross the viewport edge.
+place_context_menu :: proc(
+	menu: ^Context_Menu,
+	state: ^ui.State,
+	viewport_width, viewport_height, d: f32,
+) -> (
+	x, y: f32,
+) {
+	width, height := context_menu_metrics(menu, state, d)
+	x = menu.point.x
+	if x + width > viewport_width {x -= width}
+	x = clamp(x, 0, max(0, viewport_width - width))
+	y = menu.point.y
+	if y + height > viewport_height {y -= height}
+	y = clamp(y, 0, max(0, viewport_height - height))
+	return
 }
 
 // Row index of the add-to-playlist action, or -1 when the menu has none.
@@ -161,8 +207,14 @@ open_sort_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, current: Sort) {
 	}
 }
 
-context_menu :: proc(menu: ^Context_Menu, textures: ^Textures, d: f32) {
+context_menu :: proc(
+	menu: ^Context_Menu,
+	textures: ^Textures,
+	state: ^ui.State,
+	viewport_width, viewport_height, d: f32,
+) {
 	if menu == nil || !menu.open {return}
+	x, y := place_context_menu(menu, state, viewport_width, viewport_height, d)
 	if clay.UI_WithId(clay.ID("context_menu"))(
 	{
 		layout = {
@@ -171,7 +223,7 @@ context_menu :: proc(menu: ^Context_Menu, textures: ^Textures, d: f32) {
 			padding = clay.PaddingAll(u16(6 * d)),
 			childGap = u16(2 * d),
 		},
-		floating = {offset = {menu.point.x, menu.point.y}, zIndex = 10, attachTo = .Root},
+		floating = {offset = {x, y}, zIndex = 10, attachTo = .Root},
 		backgroundColor = theme.panel,
 		cornerRadius = clay.CornerRadiusAll(8 * d),
 	},
@@ -202,7 +254,7 @@ context_menu :: proc(menu: ^Context_Menu, textures: ^Textures, d: f32) {
 			}
 		}
 	}
-	if menu.picker_open {playlist_picker(menu, d)}
+	if menu.picker_open {playlist_picker(menu, d, viewport_width, viewport_height)}
 }
 
 PICKER_WIDTH :: 260
@@ -223,21 +275,28 @@ rebuild_picker_items :: proc(menu: ^Context_Menu, client: ^library.Client) {
 // Nested submenu of the track menu: the playlists the account can add items
 // to. It opens beside the add-to-playlist row and scrolls when the list is
 // taller than the panel.
-playlist_picker :: proc(menu: ^Context_Menu, d: f32) {
+playlist_picker :: proc(menu: ^Context_Menu, d, viewport_width, viewport_height: f32) {
 	add_index := menu_add_index(menu)
 	if add_index < 0 {return}
 	menu_box := clay.GetElementData(clay.ID("context_menu")).boundingBox
 	add_box := clay.GetElementData(clay.ID("menu_item", u32(add_index))).boundingBox
+	picker_width := PICKER_WIDTH * d
 	picker_x := menu_box.x + menu_box.width + 4 * d
-	picker_y := add_box.y
+	if picker_x + picker_width > viewport_width {
+		picker_x = menu_box.x - picker_width - 4 * d
+	}
+	picker_x = clamp(picker_x, 0, max(0, viewport_width - picker_width))
 	rows := f32(len(menu.picker_items))
 	panel_height := rows == 0 ? 44 * d : min(rows * PICKER_ROW * d + 12 * d, PICKER_MAX_HEIGHT * d)
+	picker_y := add_box.y
+	if picker_y + panel_height > viewport_height {picker_y -= panel_height}
+	picker_y = clamp(picker_y, 0, max(0, viewport_height - panel_height))
 	if clay.UI_WithId(clay.ID("playlist_picker_panel"))(
 	{
 		layout = {
 			layoutDirection = .TopToBottom,
 			sizing = {
-				width = clay.SizingFixed(PICKER_WIDTH * d),
+				width = clay.SizingFixed(picker_width),
 				height = clay.SizingFixed(panel_height),
 			},
 			padding = clay.PaddingAll(u16(6 * d)),
