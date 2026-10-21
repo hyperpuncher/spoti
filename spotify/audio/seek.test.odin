@@ -137,3 +137,33 @@ seek_callbacks_reject_out_of_bounds_offsets :: proc(t: ^testing.T) {
 	testing.expect_value(t, seek_position(&s, -10, 2), c.int(0))
 	testing.expect_value(t, s.position, 90)
 }
+
+@(test)
+read_errors_reach_vorbisfile_but_clean_eof_does_not :: proc(t: ^testing.T) {
+	buffer: [8]u8
+	size := SPOTIFY_OGG_OFFSET + 100
+	failed := Seek_Stream {
+		size   = size,
+		failed = true,
+	}
+	c.errno()^ = 0
+	testing.expect_value(t, seek_read(&buffer, 1, len(buffer), &failed), c.size_t(0))
+	testing.expect(t, c.errno()^ != 0, "a failed range must abort libvorbisfile")
+
+	cancel := true
+	cancelled := Seek_Stream {
+		size   = size,
+		cancel = &cancel,
+	}
+	c.errno()^ = 0
+	testing.expect_value(t, seek_read(&buffer, 1, len(buffer), &cancelled), c.size_t(0))
+	testing.expect(t, c.errno()^ != 0, "cancellation must abort libvorbisfile")
+
+	eof := Seek_Stream {
+		size     = size,
+		position = size - SPOTIFY_OGG_OFFSET,
+	}
+	c.errno()^ = 0
+	testing.expect_value(t, seek_read(&buffer, 1, len(buffer), &eof), c.size_t(0))
+	testing.expect_value(t, c.errno()^, 0)
+}

@@ -10,6 +10,9 @@ import "core:sync"
 
 SPOTIFY_OGG_OFFSET :: 0xa7
 RANGE_SIZE :: 64 * 1024
+// libvorbisfile checks errno after a zero-byte read to distinguish clean EOF
+// from a read error. EIO is 5 on POSIX and Windows C runtimes.
+EIO :: 5
 
 when ODIN_OS == .Windows {
 	foreign import vorbisfile {"../../build/vorbisfile.a", "system:vorbisfile.lib"}
@@ -108,18 +111,27 @@ cache_seek_range :: proc(
 	return true
 }
 
+// A failed range or cancellation is fatal, not EOF. libvorbisfile's backward
+// page scan otherwise keeps retrying and can spin forever without progress.
+read_failed :: proc "contextless" (s: ^Seek_Stream) -> c.size_t {
+	s.failed = true
+	c.errno()^ = EIO
+	return 0
+}
+
 seek_read :: proc "c" (dst: rawptr, size, count: c.size_t, source: rawptr) -> c.size_t {
 	context = runtime.default_context()
 	s := (^Seek_Stream)(source)
 	context.allocator = s.allocator
 	if size == 0 || count == 0 || count > c.size_t(max(int)) / size {return 0}
+	if s.failed || (s.cancel != nil && sync.atomic_load(s.cancel)) {return read_failed(s)}
 	buffer := ([^]u8)(dst)[:int(size * count)]
 	copied := 0
 	for copied < len(buffer) && s.position < s.size - SPOTIFY_OGG_OFFSET {
-		if s.cancel != nil && sync.atomic_load(s.cancel) {s.failed = true; break}
+		if s.cancel != nil && sync.atomic_load(s.cancel) {return read_failed(s)}
 		absolute := s.position + SPOTIFY_OGG_OFFSET
 		if absolute < s.cache_offset || absolute >= s.cache_offset + len(s.cache) {
-			if !load_seek_range(s, absolute / RANGE_SIZE * RANGE_SIZE) {break}
+			if !load_seek_range(s, absolute / RANGE_SIZE * RANGE_SIZE) {return read_failed(s)}
 		}
 		index := absolute - s.cache_offset
 		length := min(len(buffer) - copied, len(s.cache) - index)
