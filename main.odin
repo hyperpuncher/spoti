@@ -652,6 +652,7 @@ App :: struct {
 	search_kind:            library.Kind,
 	search_pending:         bool,
 	search_deadline:        u64,
+	input_changed:          bool, // clicks run after app_search; consume next frame
 	textures:               Textures,
 	theme_dark:             bool,
 	mpris_active:           bool,
@@ -750,7 +751,6 @@ Frame :: struct {
 	space_pressed:    bool,
 	stop_pressed:     bool,
 	middle_clicked:   bool,
-	input_changed:    bool,
 	track_selected:   bool,
 	restart_playback: bool,
 	redraw:           bool,
