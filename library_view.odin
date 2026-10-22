@@ -58,11 +58,6 @@ free_hero_cache :: proc(cache: ^Hero_Cache) {
 	cache^ = {}
 }
 
-// Release cards stop growing past a readable cover; wider windows gain
-// columns instead of billboards.
-RELEASE_CARD_MAX :: 200
-RELEASE_CARD_COLUMNS :: 8
-
 // A playlist card under a dragged track lights green.
 DROP_TARGET :: clay.Color{30, 215, 96, 80}
 
@@ -1057,8 +1052,8 @@ artist_page :: proc(
 	},
 	) {
 		usable := max(280 * d, available_width - (40 + SCROLLBAR_OUTSET) * d)
-		columns := clamp(int(usable / (168 * d)), 2, RELEASE_CARD_COLUMNS)
-		card_width := min(usable / f32(columns), RELEASE_CARD_MAX * d)
+		columns := max(2, int(usable / (168 * d)))
+		card_width := usable / f32(columns)
 		row_height := card_row_height(card_width, card_text_height, d)
 		row_gap := f32(u16(8 * d))
 		leading: f32
