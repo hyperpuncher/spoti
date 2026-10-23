@@ -98,6 +98,16 @@ text_size :: proc(
 	return
 }
 
+// Single-glyph labels can use visible ink bounds instead of the font's
+// advance and line height. This keeps badge digits centered at every size.
+glyph_bounds :: proc(font: ^ttf.Font, value: string) -> sdl.Rect {
+	if font == nil {return {}}
+	r, _ := utf8.decode_rune_in_string(value)
+	min_x, max_x, min_y, max_y: c.int
+	if !ttf.GetGlyphMetrics(font, u32(r), &min_x, &max_x, &min_y, &max_y, nil) {return {}}
+	return {min_x, ttf.GetFontAscent(font) - max_y, max_x - min_x, max_y - min_y}
+}
+
 // Draw text and inline emoji on the renderer thread.
 text :: proc(
 	state: ^State,
@@ -106,10 +116,13 @@ text :: proc(
 	color: sdl.Color,
 	font_id: u16 = 0,
 	preserve_spaces: bool = false,
+	ink_bounds: bool = false,
 ) {
 	if value == "" {return}
 	font := font_for_size(state, font_size, font_id)
 	if font == nil {return}
+	top := y
+	if ink_bounds {top -= f32(glyph_bounds(font, value).y)}
 	cursor := x
 	for piece in text_pieces(value) {
 		if piece.emoji {
@@ -136,7 +149,7 @@ text :: proc(
 		_ = ttf.SetTextColor(content, color.r, color.g, color.b, color.a)
 		pen := cursor
 		if cursor == x {pen -= glyph_left_bearing(font, piece.value)}
-		_ = ttf.DrawRendererText(content, f32(int(pen + 0.5)), f32(int(y + 0.5)))
+		_ = ttf.DrawRendererText(content, f32(int(pen + 0.5)), f32(int(top + 0.5)))
 		width: c.int
 		if ttf.GetTextSize(content, &width, nil) {cursor += f32(width)}
 	}
@@ -144,10 +157,7 @@ text :: proc(
 
 // Offset the first pen position so visible ink starts at the layout edge.
 glyph_left_bearing :: proc(font: ^ttf.Font, value: string) -> f32 {
-	r, _ := utf8.decode_rune_in_string(value)
-	min_x: c.int
-	if !ttf.GetGlyphMetrics(font, u32(r), &min_x, nil, nil, nil, nil) {return 0}
-	return f32(min_x)
+	return f32(glyph_bounds(font, value).x)
 }
 
 finish_text_frame :: proc(state: ^State) {

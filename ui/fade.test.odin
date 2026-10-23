@@ -41,6 +41,54 @@ banner_crop_fills_the_header_without_stretching :: proc(t: ^testing.T) {
 }
 
 @(test)
+rounded_controls_have_level_edges_and_symmetric_corners :: proc(t: ^testing.T) {
+	surface := sdl.CreateSurface(800, 200, .RGBA32)
+	if !testing.expect(t, surface != nil) {return}
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	if !testing.expect(t, renderer != nil) {return}
+	defer sdl.DestroyRenderer(renderer)
+	state := State {
+		renderer = renderer,
+		masks    = make(map[u64]Rounded_Mask),
+	}
+	defer {
+		for _, mask in state.masks {sdl.DestroyTexture(mask.texture)}
+		delete(state.masks)
+	}
+	// This wide button previously had a step in its bottom edge.
+	W, H, R :: 744, 60, 30
+	_ = sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
+	_ = sdl.RenderClear(renderer)
+	fill_rounded(&state, {10.25, 10.25, W, H}, {R, R, R, R}, {255, 255, 255, 255})
+	_ = sdl.RenderPresent(renderer)
+	pixels := ([^]u8)(surface.pixels)
+	for x in R ..< W - R {
+		for y in ([]int{0, H - 1}) {
+			testing.expect_value(t, pixels[(10 + y) * int(surface.pitch) + (10 + x) * 4], 255)
+		}
+	}
+	partial := false
+	for y in 0 ..< R {
+		for x in 0 ..< R {
+			value := pixels[(10 + y) * int(surface.pitch) + (10 + x) * 4]
+			partial ||= value > 0 && value < 255
+			testing.expect_value(
+				t,
+				value,
+				pixels[(10 + y) * int(surface.pitch) + (10 + W - 1 - x) * 4],
+			)
+			testing.expect_value(
+				t,
+				value,
+				pixels[(10 + H - 1 - y) * int(surface.pitch) + (10 + x) * 4],
+			)
+		}
+	}
+	testing.expect(t, partial, "curves must have antialiased pixels")
+}
+
+@(test)
 cropped_banner_rounds_only_the_displayed_top_corners :: proc(t: ^testing.T) {
 	surface := sdl.CreateSurface(24, 24, .RGBA32)
 	if !testing.expect(t, surface != nil) {return}

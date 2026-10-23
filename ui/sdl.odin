@@ -172,8 +172,7 @@ scale :: proc(state: ^State) -> f32 {
 	return state.density
 }
 
-// Large rounded panels use an indexed triangle fan around their centre.
-// SDL3 has no rounded-rect call; Clay's own SDL3 renderer does the same.
+// Unequal corner radii use a triangle fan. Uniform radii use cached masks.
 ROUND_SEGMENTS :: 24
 
 // Corner radii run clockwise from the top left.
@@ -191,8 +190,8 @@ draw_rounded :: proc(state: ^State, rect: sdl.FRect, radius: [4]f32, color: sdl.
 		f32(color.b) / 255,
 		f32(color.a) / 255,
 	}
-	vertices: [1 + 4 * ROUND_SEGMENTS]sdl.Vertex
-	indices: [3 * 4 * ROUND_SEGMENTS]c.int
+	vertices: [1 + 4 * (ROUND_SEGMENTS + 1)]sdl.Vertex
+	indices: [3 * 4 * (ROUND_SEGMENTS + 1)]c.int
 	vertices[0] = {
 		position = {rect.x + rect.w / 2, rect.y + rect.h / 2},
 		color    = fill_color,
@@ -213,7 +212,7 @@ draw_rounded :: proc(state: ^State, rect: sdl.FRect, radius: [4]f32, color: sdl.
 			}
 			continue
 		}
-		for step in 0 ..< ROUND_SEGMENTS {
+		for step in 0 ..= ROUND_SEGMENTS {
 			angle := (arc[2] + f32(step) * 90 / ROUND_SEGMENTS) * math.PI / 180
 			x := arc[0] + corners[i] * f32(math.cos(f64(angle)))
 			y := arc[1] + corners[i] * f32(math.sin(f64(angle)))
@@ -364,20 +363,9 @@ make_fade_texture :: proc(state: ^State, flip: bool, smooth: bool = false) -> ^s
 	return create_texture(state, pixels[:], FADE_TEX_W, FADE_TEX_H)
 }
 
-// Rounded variants used by the Clay renderer, which carries a radius per corner.
-// A solid rounded box is drawn from a supersampled alpha mask, so its curved
-// edges are antialiased; SDL3's renderer has no multisampling of its own.
-mask_key :: proc(width, height, radius: int) -> u64 {
-	return u64(width) << 32 | u64(height) << 16 | u64(radius)
-}
-
-rounded_mask :: proc(
-	state: ^State,
-	width, height, radius: int,
-	inverse: bool = false,
-) -> ^sdl.Texture {
-	key := mask_key(width, height, radius)
-	if inverse {key |= 1 << 63}
+// Square coverage masks serve rounded boxes and inverse banner corners.
+rounded_mask :: proc(state: ^State, radius: int, inverse: bool = false) -> ^sdl.Texture {
+	key := u64(radius) << 1 | u64(inverse ? 1 : 0)
 	if mask, found := &state.masks[key]; found {
 		mask.used = true
 		return mask.texture
@@ -386,29 +374,25 @@ rounded_mask :: proc(
 	// interpolates nearby texels; it does not average an entire supersampled
 	// source image, which is why the previous 8x masks still looked jagged.
 	SAMPLES :: 8
-	pixels := make([]u8, width * height * 4)
+	// The nine-grid center needs a solid strip; inverse masks need only corners.
+	side := radius * 2 + (inverse ? 0 : 2)
+	pixels := make([]u8, side * side * 4)
 	defer delete(pixels)
-	half_width := f32(width) / 2
-	half_height := f32(height) / 2
-	inset: f32 = 0.25
-	shape_half_width := half_width - inset
-	shape_half_height := half_height - inset
-	shape_radius := min(f32(radius) - inset, min(shape_half_width, shape_half_height))
-	for y in 0 ..< height {
-		for x in 0 ..< width {
+	half := f32(side) / 2
+	r := f32(radius)
+	for y in 0 ..< side {
+		for x in 0 ..< side {
 			covered := 0
 			for sy in 0 ..< SAMPLES {
 				for sx in 0 ..< SAMPLES {
 					px := f32(x) + (f32(sx) + 0.5) / f32(SAMPLES)
 					py := f32(y) + (f32(sy) + 0.5) / f32(SAMPLES)
-					qx := abs(px - half_width) - (shape_half_width - shape_radius)
-					qy := abs(py - half_height) - (shape_half_height - shape_radius)
-					dx := max(qx, 0)
-					dy := max(qy, 0)
-					if dx * dx + dy * dy <= shape_radius * shape_radius {covered += 1}
+					dx := max(abs(px - half) - (half - r), 0)
+					dy := max(abs(py - half) - (half - r), 0)
+					if dx * dx + dy * dy <= r * r {covered += 1}
 				}
 			}
-			index := (y * width + x) * 4
+			index := (y * side + x) * 4
 			pixels[index + 0] = 255
 			pixels[index + 1] = 255
 			pixels[index + 2] = 255
@@ -416,7 +400,7 @@ rounded_mask :: proc(
 			pixels[index + 3] = inverse ? 255 - alpha : alpha
 		}
 	}
-	texture := create_texture(state, pixels, width, height)
+	texture := create_texture(state, pixels, side, side)
 	if texture != nil {state.masks[key] = {texture, true}}
 	return texture
 }
@@ -426,7 +410,7 @@ rounded_mask :: proc(
 mask_top_corners :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl.Color) {
 	r := int(clamp(radius, 0, min(rect.w, rect.h) / 2) + 0.5)
 	if r == 0 {return}
-	mask := rounded_mask(state, r * 2, r * 2, r, inverse = true)
+	mask := rounded_mask(state, r, inverse = true)
 	if mask == nil {return}
 	_ = sdl.SetTextureColorMod(mask, color.r, color.g, color.b)
 	_ = sdl.SetTextureAlphaMod(mask, color.a)
@@ -440,29 +424,34 @@ mask_top_corners :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl
 
 fill_rounded :: proc(state: ^State, rect: sdl.FRect, radius: [4]f32, color: sdl.Color) {
 	if rect.w <= 0 || rect.h <= 0 {return}
-	corners := int(clamp(radius[0], 0, min(rect.w, rect.h) / 2) + 0.5)
-	width := int(rect.w + 0.5)
-	height := int(rect.h + 0.5)
-	// Supersampled masks are reserved for controls. Large panels and cards keep
-	// the cheaper geometry path, where their shallow radius is less noticeable.
-	if radius[0] != radius[1] ||
-	   radius[1] != radius[2] ||
-	   radius[2] != radius[3] ||
-	   corners <= 0 ||
-	   height > 128 ||
-	   width > height * 8 {
+	// Pixel-aligned destinations keep straight edges level, including at
+	// fractional display scales. The mask's corners are copied at native size.
+	area := sdl.FRect {
+		math.round(rect.x),
+		math.round(rect.y),
+		math.round(rect.w),
+		math.round(rect.h),
+	}
+	corners := int(clamp(radius[0], 0, min(area.w, area.h) / 2))
+	if max(max(radius[0], radius[1]), max(radius[2], radius[3])) <= 0 {
+		fill(state, area, color)
+		return
+	}
+	if radius[0] != radius[1] || radius[1] != radius[2] || radius[2] != radius[3] || corners <= 0 {
 		draw_rounded(state, rect, radius, color)
 		return
 	}
-	texture := rounded_mask(state, width, height, min(corners, min(width, height) / 2))
+	// SDL's nine-grid copy stretches only the solid middle and straight edges.
+	// One small mask per radius serves buttons, fields, and large panels.
+	texture := rounded_mask(state, corners)
 	if texture == nil {
 		draw_rounded(state, rect, radius, color)
 		return
 	}
 	_ = sdl.SetTextureColorMod(texture, color.r, color.g, color.b)
 	_ = sdl.SetTextureAlphaMod(texture, color.a)
-	area := rect
-	_ = sdl.RenderTexture(state.renderer, texture, nil, &area)
+	r := f32(corners)
+	_ = sdl.RenderTexture9Grid(state.renderer, texture, nil, r, r, r, r, 1, &area)
 	_ = sdl.SetTextureColorMod(texture, 255, 255, 255)
 	_ = sdl.SetTextureAlphaMod(texture, 255)
 }

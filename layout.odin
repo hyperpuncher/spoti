@@ -704,7 +704,7 @@ toast_banner :: proc(view: View, d: f32) {
 // keyring, so no environment variable is needed afterwards.
 SPOTIFY_DASHBOARD :: "https://developer.spotify.com/dashboard"
 
-sign_in_screen :: proc(state: library.State, view: View, d: f32) {
+sign_in_screen :: proc(state: library.State, view: View, textures: ^Textures, d: f32) {
 	if clay.UI()(
 	{
 		layout = {
@@ -716,7 +716,9 @@ sign_in_screen :: proc(state: library.State, view: View, d: f32) {
 		},
 	},
 	) {
-		if clay.UI()(
+		if state == .Missing_Client_ID {
+			setup_screen(view, textures, d)
+		} else if clay.UI()(
 		{
 			layout = {
 				layoutDirection = .TopToBottom,
@@ -729,100 +731,218 @@ sign_in_screen :: proc(state: library.State, view: View, d: f32) {
 			title := "Connect to Spotify"
 			line := "Approve access in your browser to load your library."
 			button_id, button_label := "", ""
-			if state == .Missing_Client_ID {
-				setup_screen(view, d)
-			} else {
-				switch state {
-				case .Authorizing:
-					button_id, button_label = "library_sign_in", "Sign in with Spotify"
-				case .Sign_In_Failed:
-					title = "Could not sign in"
-					line = "Browser approval did not complete."
-					button_id, button_label = "library_retry", "Try again"
-				case .Idle, .Loading, .Ready, .Missing_Client_ID, .Failed:
+			switch state {
+			case .Authorizing:
+				button_id, button_label = "library_sign_in", "Sign in with Spotify"
+			case .Sign_In_Failed:
+				title = "Could not sign in"
+				line = "Browser approval did not complete."
+				button_id, button_label = "library_retry", "Try again"
+			case .Idle, .Loading, .Ready, .Missing_Client_ID, .Failed:
+			}
+			clay.Text(title, {fontSize = 28, textColor = theme.text})
+			clay.Text(line, {fontSize = 14, textColor = theme.muted})
+			if len(button_id) > 0 {
+				sign_in_button(button_id, button_label, d)
+			}
+		}
+	}
+}
+
+Setup_Step_Kind :: enum {
+	Dashboard,
+	Redirect,
+	Client_ID,
+}
+
+setup_step :: proc(
+	kind: Setup_Step_Kind,
+	number, title, detail: string,
+	view: View,
+	textures: ^Textures,
+	d: f32,
+) {
+	if clay.UI()(
+	{
+		layout = {
+			sizing = {width = clay.SizingGrow({})},
+			childGap = u16(12 * d),
+			childAlignment = {y = .Top},
+		},
+	},
+	) {
+		if clay.UI()(
+		{
+			layout = {
+				sizing = {width = clay.SizingFixed(26 * d), height = clay.SizingFixed(26 * d)},
+				childAlignment = {x = .Center, y = .Center},
+			},
+			backgroundColor = theme.bg,
+			cornerRadius = clay.CornerRadiusAll(13 * d),
+		},
+		) {
+			clay.Text(
+				number,
+				{fontId = 1, fontSize = 13, textColor = theme.muted, userData = &GLYPH_INK_BOUNDS},
+			)
+		}
+		if clay.UI()(
+		{
+			layout = {
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingGrow({})},
+				childGap = u16(8 * d),
+			},
+		},
+		) {
+			if clay.UI()({layout = {layoutDirection = .TopToBottom, childGap = u16(3 * d)}}) {
+				clay.Text(title, {fontId = 3, fontSize = 14, textColor = theme.text})
+				clay.Text(detail, {fontSize = 13, textColor = theme.muted, wrapMode = .Words})
+			}
+			switch kind {
+			case .Dashboard:
+				sign_in_button("setup_dashboard", "Open dashboard", d)
+			case .Redirect:
+				hovered := clay.PointerOver(clay.ID("setup_redirect"))
+				if clay.UI_WithId(clay.ID("setup_redirect"))(
+				{
+					layout = {
+						sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(42 * d)},
+						padding = {left = u16(14 * d), right = u16(14 * d)},
+						childAlignment = {y = .Center},
+						childGap = u16(8 * d),
+					},
+					backgroundColor = hovered ? theme.hover : theme.bg,
+					cornerRadius = clay.CornerRadiusAll(10 * d),
+				},
+				) {
+					clay.Text(
+						oauth.WEB_REDIRECT_URI,
+						{fontId = 1, fontSize = 13, textColor = theme.text, wrapMode = .None},
+					)
+					if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {}
+					icon_element(textures, "copy", hovered ? .White : .Muted, 16 * d)
 				}
-				clay.Text(title, {fontSize = 28, textColor = theme.text})
-				clay.Text(line, {fontSize = 14, textColor = theme.muted})
-				if len(button_id) > 0 {
-					sign_in_button(button_id, button_label, d)
+			case .Client_ID:
+				if clay.UI_WithId(clay.ID("setup_field"))(
+				{
+					layout = {
+						sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(42 * d)},
+						padding = {left = u16(14 * d), right = u16(14 * d)},
+						childAlignment = {y = .Center},
+					},
+					backgroundColor = theme.bg,
+					cornerRadius = clay.CornerRadiusAll(10 * d),
+				},
+				) {
+					if len(view.input) > 0 || view.input_active {
+						input_text(view)
+					} else {
+						clay.Text(
+							"Paste the 32-character Client ID",
+							{fontSize = 14, textColor = theme.muted, wrapMode = .None},
+						)
+					}
+				}
+				if len(view.setup_error) > 0 {
+					if clay.UI()(
+					{
+						layout = {
+							sizing = {width = clay.SizingGrow({})},
+							padding = {
+								left = u16(12 * d),
+								right = u16(12 * d),
+								top = u16(9 * d),
+								bottom = u16(9 * d),
+							},
+						},
+						backgroundColor = theme.bg,
+						cornerRadius = clay.CornerRadiusAll(8 * d),
+					},
+					) {
+						clay.Text(
+							view.setup_error,
+							{fontId = 3, fontSize = 13, textColor = theme.text, wrapMode = .Words},
+						)
+					}
 				}
 			}
 		}
 	}
 }
 
-setup_screen :: proc(view: View, d: f32) {
-	clay.Text("Connect your Spotify app", {fontSize = 28, textColor = theme.text})
-	clay.Text(
-		"spoti reads your account through your own Spotify app.",
-		{fontSize = 14, textColor = theme.muted},
-	)
-	// Steps read as a left-aligned block while the block itself stays centered.
+setup_screen :: proc(view: View, textures: ^Textures, d: f32) {
 	if clay.UI()(
 	{
 		layout = {
 			layoutDirection = .TopToBottom,
-			sizing = {width = clay.SizingFit({})},
-			childGap = u16(12 * d),
-			childAlignment = {x = .Left},
+			sizing = {width = clay.SizingGrow({max = 560 * d})},
+			padding = clay.PaddingAll(u16(32 * d)),
+			childGap = u16(24 * d),
 		},
+		backgroundColor = theme.panel,
+		cornerRadius = clay.CornerRadiusAll(18 * d),
 	},
 	) {
-		clay.Text(
-			"1. Open the Spotify dashboard and create an app.",
-			{fontSize = 14, textColor = theme.muted},
-		)
-		sign_in_button("setup_dashboard", "Open dashboard", d)
-		clay.Text(
-			"2. Add this redirect URI in the app settings, click it to copy:",
-			{fontSize = 14, textColor = theme.muted},
-		)
-		if clay.UI_WithId(clay.ID("setup_redirect"))(
+		if clay.UI()({layout = {layoutDirection = .TopToBottom, childGap = u16(6 * d)}}) {
+			clay.Text(
+				"Connect your Spotify app",
+				{fontId = 2, fontSize = 28, textColor = theme.text},
+			)
+			clay.Text(
+				"Create a Spotify developer app and give spoti its Client ID.",
+				{fontSize = 14, textColor = theme.muted, wrapMode = .Words},
+			)
+		}
+		if clay.UI()(
 		{
 			layout = {
-				sizing = {width = clay.SizingFit({}), height = clay.SizingFixed(40 * d)},
-				padding = {left = u16(16 * d), right = u16(16 * d)},
-				childAlignment = {y = .Center},
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingGrow({})},
+				childGap = u16(20 * d),
 			},
-			backgroundColor = clay.PointerOver(clay.ID("setup_redirect")) ? theme.hover : theme.card,
-			cornerRadius = clay.CornerRadiusAll(20 * d),
 		},
 		) {
-			clay.Text(oauth.WEB_REDIRECT_URI, {fontSize = 14, textColor = theme.text})
+			setup_step(
+				.Dashboard,
+				"1",
+				"Create a Spotify app with Web API",
+				"Name and description can be anything.\nUnder \"Which API/SDKs are you planning to use?\", select \"Web API\".",
+				view,
+				textures,
+				d,
+			)
+			setup_step(
+				.Redirect,
+				"2",
+				"Add the redirect URI",
+				`Add this exact URI under "Redirect URIs" in the app settings.`,
+				view,
+				textures,
+				d,
+			)
+			setup_step(
+				.Client_ID,
+				"3",
+				"Paste the Client ID",
+				`Open your new app, copy "Client ID", and paste it here.`,
+				view,
+				textures,
+				d,
+			)
 		}
-		clay.Text(
-			"3. Paste the 32-character client id below and save.",
-			{fontSize = 14, textColor = theme.muted},
-		)
-		if clay.UI_WithId(clay.ID("setup_field"))(
-		{
-			layout = {
-				sizing = {width = clay.SizingFixed(360 * d), height = clay.SizingFixed(40 * d)},
-				padding = {left = u16(16 * d), right = u16(16 * d)},
-				childAlignment = {y = .Center},
-			},
-			backgroundColor = theme.card,
-			cornerRadius = clay.CornerRadiusAll(20 * d),
-		},
-		) {
-			if len(view.input) > 0 || view.input_active {
-				input_text(view)
-			} else {
-				clay.Text("paste your client id", {fontSize = 14, textColor = theme.muted})
-			}
-		}
-		if len(view.setup_error) > 0 {
-			clay.Text(view.setup_error, {fontSize = 14, textColor = theme.text})
-		}
+		sign_in_button("setup_save", "Save and continue", d, grow = true)
 	}
-	sign_in_button("setup_save", "Save and continue", d)
 }
 
-sign_in_button :: proc(id, label: string, d: f32) {
+sign_in_button :: proc(id, label: string, d: f32, grow := false) {
 	if clay.UI_WithId(clay.ID(id))(
 	{
 		layout = {
-			sizing = {width = clay.SizingFit({}), height = clay.SizingFixed(40 * d)},
+			sizing = {
+				width = grow ? clay.SizingGrow({}) : clay.SizingFit({}),
+				height = clay.SizingFixed(40 * d),
+			},
 			padding = {left = u16(20 * d), right = u16(20 * d)},
 			childAlignment = {x = .Center, y = .Center},
 		},
@@ -865,7 +985,7 @@ layout :: proc(
 			backgroundColor = theme.bg,
 		},
 		) {
-			sign_in_screen(client.state, view, d)
+			sign_in_screen(client.state, view, textures, d)
 			toast_banner(view, d)
 		}
 	} else if clay.UI()(

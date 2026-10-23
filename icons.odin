@@ -53,6 +53,7 @@ ICON_NAMES :: []string {
 	"circle-plus",
 	"circle-check",
 	"link",
+	"copy",
 	"external-link",
 }
 
