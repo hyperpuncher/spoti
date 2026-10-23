@@ -94,7 +94,7 @@ queue_panel :: proc(
 			childGap = u16(12 * d),
 		},
 		backgroundColor = theme.sidebar,
-		cornerRadius = clay.CornerRadiusAll(8 * d),
+		cornerRadius = clay.CornerRadius{topLeft = 8 * d, bottomLeft = 8 * d},
 	},
 	) {
 		if clay.UI()(
