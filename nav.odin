@@ -21,7 +21,7 @@ Nav_State :: struct {
 
 Nav :: struct {
 	states: [dynamic]Nav_State,
-	index:  int, // -1 until the first state is recorded
+	index:  int, // live entry; invalid when states is empty
 }
 
 nav_capture :: proc(
@@ -88,7 +88,7 @@ nav_commit :: proc(nav: ^Nav, state: Nav_State) {
 // Refining the current page (typing a query) rewrites its entry instead of
 // stacking a new one; anything ahead is still dropped.
 nav_replace :: proc(nav: ^Nav, state: Nav_State) {
-	if nav.index < 0 {
+	if nav.index < 0 || nav.index >= len(nav.states) {
 		nav_commit(nav, state)
 		return
 	}
@@ -105,7 +105,7 @@ nav_record_search :: proc(
 	input: string,
 ) {
 	state := nav_capture(client, filter, true, search_kind, input)
-	if nav.index >= 0 && nav.states[nav.index].searching {
+	if nav.index >= 0 && nav.index < len(nav.states) && nav.states[nav.index].searching {
 		nav_replace(nav, state)
 	} else {
 		nav_commit(nav, state)

@@ -10,6 +10,25 @@ nav_state :: proc(name: string) -> Nav_State {
 }
 
 @(test)
+empty_nav_history_commits_the_first_entry :: proc(t: ^testing.T) {
+	nav: Nav
+	defer nav_free_all(&nav)
+
+	nav_replace(&nav, nav_state("first"))
+	testing.expect_value(t, len(nav.states), 1)
+	testing.expect_value(t, nav.index, 0)
+	testing.expect_value(t, nav.states[0].input, "first")
+
+	nav_free_all(&nav)
+	client: library.Client
+	nav_record_search(&nav, &client, .Playlists, .Albums, "query")
+	testing.expect_value(t, len(nav.states), 1)
+	testing.expect_value(t, nav.index, 0)
+	testing.expect(t, nav.states[0].searching)
+	testing.expect_value(t, nav.states[0].input, "query")
+}
+
+@(test)
 nav_walks_back_and_forward_and_drops_stale_forward_history :: proc(t: ^testing.T) {
 	nav: Nav
 	defer nav_free_all(&nav)
