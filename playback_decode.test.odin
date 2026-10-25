@@ -46,7 +46,6 @@ playback_decoder_reuses_cached_media_and_transfers_partial_pcm :: proc(t: ^testi
 		cancel = &cancel,
 	}
 	if !testing.expect(t, audio.open_seek_stream(&media)) {return}
-	handle := media.handle
 	for start in ([]int{0, 150, 0}) {
 		work.start_ms = start
 		if !testing.expect(t, player.decode(&work)) {return}
@@ -60,14 +59,13 @@ playback_decoder_reuses_cached_media_and_transfers_partial_pcm :: proc(t: ^testi
 		testing.expect_value(t, len(packet.pcm), player.BUFFER_FRAMES * 2)
 		ending, ended := chan.try_recv(queue)
 		testing.expect(t, ended && ending.kind == .End)
-		testing.expect(t, media.handle == handle, "seeks and replay must retain the decoder")
 	}
-	// A decoding failure must release the unsent allocation.
-	media.sample_rate = 0
+	// An invalid seek sends a failure, not audio.
+	work.start_ms = -1
 	testing.expect(t, !player.decode(&work))
 	failure, failed := chan.try_recv(queue)
 	testing.expect(t, failed && failure.kind == .Failed)
-	media.sample_rate = 44100
+	work.start_ms = 0
 	// Cancellation sends nothing, and a closed receiver releases rejected PCM.
 	sync.atomic_store(&cancel, true)
 	testing.expect(t, !player.decode(&work))

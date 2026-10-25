@@ -1,55 +1,36 @@
 package audio
 
 import http "../http"
-import "base:runtime"
-import c "core:c/libc"
+import "core:c"
 import "core:crypto"
 import "core:fmt"
-import "core:mem"
+import "core:math"
 import "core:sync"
+import stb "vendor:stb/vorbis"
 
 SPOTIFY_OGG_OFFSET :: 0xa7
 RANGE_SIZE :: 64 * 1024
-// libvorbisfile checks errno after a zero-byte read to distinguish clean EOF
-// from a read error. EIO is 5 on POSIX and Windows C runtimes.
-EIO :: 5
+MAX_OGG_PAGE_BYTES :: 65307
+SEEK_PREROLL_SECONDS :: 4
 
-when ODIN_OS == .Windows {
-	foreign import vorbisfile {"../../build/vorbisfile.a", "system:vorbisfile.lib"}
-} else {
-	foreign import vorbisfile {"../../build/vorbisfile.a", "system:vorbisfile"}
-}
-Vorbis_File :: struct {}
-Vorbis_Callbacks :: struct {
-	read:  proc "c" (_: rawptr, _: c.size_t, _: c.size_t, _: rawptr) -> c.size_t,
-	seek:  proc "c" (_: rawptr, _: i64, _: c.int) -> c.int,
-	close: proc "c" (_: rawptr) -> c.int,
-	tell:  proc "c" (_: rawptr) -> c.long,
-}
-@(default_calling_convention = "c")
-foreign vorbisfile {
-	spoti_vorbis_open :: proc(_: rawptr, _: Vorbis_Callbacks) -> ^Vorbis_File ---
-	spoti_vorbis_close :: proc(_: ^Vorbis_File) ---
-	spoti_vorbis_rate :: proc(_: ^Vorbis_File) -> c.int ---
-	spoti_vorbis_read :: proc(_: ^Vorbis_File, _: [^]i16, _: c.int) -> c.int ---
-	ov_pcm_seek :: proc(_: ^Vorbis_File, _: i64) -> c.int ---
-	ov_pcm_tell :: proc(_: ^Vorbis_File) -> i64 ---
-}
-
-// Must not move after opening: libvorbisfile borrows this address for callbacks.
-// Only one decrypted 64-KiB range is retained, regardless of file/seek size.
+// Keep one decrypted range and one bounded decoder input buffer.
+// stb owns the planar PCM frame; it remains valid until the next decode.
 Seek_Stream :: struct {
-	url:                          string,
-	key:                          [16]u8,
-	cancel:                       ^bool,
-	handle:                       ^Vorbis_File,
-	sample_rate:                  int,
-	size, position, cache_offset: int,
-	cache:                        [dynamic]u8,
-	failed:                       bool,
-	allocator:                    mem.Allocator,
-	file_id:                      [20]u8,
-	disk:                         Disk_Cache,
+	url:                                   string,
+	key:                                   [16]u8,
+	cancel:                                ^bool,
+	handle:                                ^stb.vorbis,
+	sample_rate, channels:                 int,
+	size, position, cache_offset:          int,
+	cache:                                 [dynamic]u8,
+	input:                                 []u8,
+	input_first, input_count:              int,
+	total_frames, pcm_position:            int,
+	output:                                [^]^f32,
+	frame_first, frame_count, frame_start: int,
+	failed, sync_needed:                   bool,
+	file_id:                               [20]u8,
+	disk:                                  Disk_Cache,
 }
 
 load_seek_range :: proc(s: ^Seek_Stream, start: int) -> bool {
@@ -111,27 +92,15 @@ cache_seek_range :: proc(
 	return true
 }
 
-// A failed range or cancellation is fatal, not EOF. libvorbisfile's backward
-// page scan otherwise keeps retrying and can spin forever without progress.
-read_failed :: proc "contextless" (s: ^Seek_Stream) -> c.size_t {
-	s.failed = true
-	c.errno()^ = EIO
-	return 0
-}
-
-seek_read :: proc "c" (dst: rawptr, size, count: c.size_t, source: rawptr) -> c.size_t {
-	context = runtime.default_context()
-	s := (^Seek_Stream)(source)
-	context.allocator = s.allocator
-	if size == 0 || count == 0 || count > c.size_t(max(int)) / size {return 0}
-	if s.failed || (s.cancel != nil && sync.atomic_load(s.cancel)) {return read_failed(s)}
-	buffer := ([^]u8)(dst)[:int(size * count)]
+// A failed or cancelled read is not EOF. Every decoder loop must either
+// consume input, fetch more bytes, or return.
+read_seek_bytes :: proc(s: ^Seek_Stream, buffer: []u8) -> int {
+	if s.failed || (s.cancel != nil && sync.atomic_load(s.cancel)) {s.failed = true; return -1}
 	copied := 0
 	for copied < len(buffer) && s.position < s.size - SPOTIFY_OGG_OFFSET {
-		if s.cancel != nil && sync.atomic_load(s.cancel) {return read_failed(s)}
 		absolute := s.position + SPOTIFY_OGG_OFFSET
 		if absolute < s.cache_offset || absolute >= s.cache_offset + len(s.cache) {
-			if !load_seek_range(s, absolute / RANGE_SIZE * RANGE_SIZE) {return read_failed(s)}
+			if !load_seek_range(s, absolute / RANGE_SIZE * RANGE_SIZE) {return -1}
 		}
 		index := absolute - s.cache_offset
 		length := min(len(buffer) - copied, len(s.cache) - index)
@@ -139,71 +108,229 @@ seek_read :: proc "c" (dst: rawptr, size, count: c.size_t, source: rawptr) -> c.
 		s.position += length
 		copied += length
 	}
-	return c.size_t(copied) / size
+	return copied
 }
 
-seek_position :: proc "c" (source: rawptr, offset: i64, whence: c.int) -> c.int {
-	context = runtime.default_context()
-	s := (^Seek_Stream)(source)
-	length := s.size - SPOTIFY_OGG_OFFSET
-	base: int
-	switch whence {
-	case 0:
-		base = 0
-	case 1:
-		base = s.position
-	case 2:
-		base = length
-	case:
-		return -1
+reset_seek_input :: proc(s: ^Seek_Stream, position: int) {
+	s.input_first, s.input_count, s.position = 0, 0, position
+	s.frame_first, s.frame_count = 0, 0
+}
+
+fill_seek_input :: proc(s: ^Seek_Stream) -> bool {
+	if s.input_count == len(s.input) {s.failed = true; return false}
+	copy(s.input, s.input[s.input_first:s.input_first + s.input_count])
+	s.input_first = 0
+	count := read_seek_bytes(s, s.input[s.input_count:min(s.input_count + 8192, len(s.input))])
+	if count < 0 {return false}
+	s.input_count += count
+	return count > 0
+}
+
+restart_seek_decoder :: proc(s: ^Seek_Stream) -> bool {
+	if s.handle != nil {stb.close(s.handle); s.handle = nil}
+	reset_seek_input(s, 0)
+	for fill_seek_input(s) {
+		used: c.int
+		error: stb.Error
+		s.handle = stb.open_pushdata(raw_data(s.input), c.int(s.input_count), &used, &error, nil)
+		if s.handle != nil {
+			info := stb.get_info(s.handle)
+			s.sample_rate, s.channels = int(info.sample_rate), int(info.channels)
+			if s.sample_rate <= 0 ||
+			   (s.channels != 1 && s.channels != 2) {s.failed = true; return false}
+			s.input_first, s.input_count = int(used), s.input_count - int(used)
+			s.pcm_position, s.sync_needed = 0, false
+			return true
+		}
+		if error != .need_more_data {s.failed = true; return false}
 	}
-	if offset < -i64(base) || offset > i64(length - base) {return -1}
-	s.position = base + int(offset)
-	return 0
+	return false
 }
 
-seek_tell :: proc "c" (source: rawptr) -> c.long {
-	return c.long((^Seek_Stream)(source).position)
+// Scanning and decoding use the same input and error handling. Channels
+// come from get_info; the push API does not need to return them again.
+push_seek_input :: proc(s: ^Seek_Stream) -> (used, samples: int) {
+	count: c.int
+	used = int(
+		stb.decode_frame_pushdata(
+			s.handle,
+			raw_data(s.input[s.input_first:]),
+			c.int(s.input_count),
+			nil,
+			&s.output,
+			&count,
+		),
+	)
+	s.input_first += used
+	s.input_count -= used
+	error := stb.Error(stb.get_error(s.handle))
+	if error != .none && error != .need_more_data {s.failed = true; return used, -1}
+	return used, int(count)
+}
+
+// Use stb's CRC-checked page scanner, not an application-owned Ogg parser.
+probe_seek_page :: proc(s: ^Seek_Stream, position: int) -> int {
+	stb.flush_pushdata(s.handle)
+	s.sync_needed = true
+	reset_seek_input(s, position)
+	padded := false
+	for {
+		used, samples := push_seek_input(s)
+		if samples < 0 {return -1}
+		if sample := stb.get_sample_offset(s.handle); sample >= 0 {
+			if padded {s.input_count -= 3}
+			return int(sample)
+		}
+		if used == 0 && !fill_seek_input(s) {
+			if s.failed || padded {return -1}
+			// The scanner needs three lookahead bytes to finish the CRC at
+			// EOF. Do not count them as file data or pass them to decoding.
+			for &value in s.input[s.input_count:s.input_count + 3] {value = 0}
+			s.input_count += 3
+			padded = true
+		}
+	}
+}
+
+read_seek_frame :: proc(s: ^Seek_Stream) -> bool {
+	for {
+		used, samples := push_seek_input(s)
+		if samples < 0 {return false}
+		if samples > 0 {
+			s.frame_first, s.frame_count = 0, samples
+			s.frame_start = int(stb.get_sample_offset(s.handle)) - samples
+			if s.sync_needed {
+				// Short/long block transitions can make the first page's
+				// running offset inaccurate after a flush. Its final packet
+				// restores the exact granule position.
+				if s.input_count < 4 &&
+				   s.position < s.size - SPOTIFY_OGG_OFFSET {_ = fill_seek_input(s)}
+				if s.failed {return false}
+				boundary :=
+					s.position - s.input_count == s.size - SPOTIFY_OGG_OFFSET ||
+					s.input_count >= 4 &&
+						string(s.input[s.input_first:s.input_first + 4]) == "OggS"
+				if !boundary {continue}
+				s.sync_needed = false
+			}
+			return true
+		}
+		if used == 0 && !fill_seek_input(s) {return false}
+	}
+}
+
+probe_seek_sample :: proc(s: ^Seek_Stream, position: int) -> int {
+	if probe_seek_page(s, position) < 0 || !read_seek_frame(s) {return -1}
+	return s.frame_start + s.frame_count
 }
 
 open_seek_stream :: proc(s: ^Seek_Stream) -> bool {
-	s.allocator = context.allocator
 	if s.disk.path == "" {s.disk = open_disk_cache(s.file_id)}
 	if s.size == 0 && !load_seek_range(s, 0) {return false}
-	s.handle = spoti_vorbis_open(s, {read = seek_read, seek = seek_position, tell = seek_tell})
-	if s.handle == nil || s.failed {return false}
-	s.sample_rate = int(spoti_vorbis_rate(s.handle))
-	return true
+	if s.input == nil {s.input = make([]u8, RANGE_SIZE)}
+	if !restart_seek_decoder(s) {return false}
+	// A complete final page fits in this tail window. Scan each complete
+	// page to obtain the exact final granule without fetching the track.
+	last_end := max(0, s.size - SPOTIFY_OGG_OFFSET - MAX_OGG_PAGE_BYTES)
+	s.total_frames = -1
+	for {
+		position := probe_seek_page(s, last_end)
+		if position < 0 {break}
+		s.total_frames = position
+		last_end = s.position - s.input_count
+	}
+	if s.failed || s.total_frames < 0 || last_end != s.size - SPOTIFY_OGG_OFFSET {return false}
+	return restart_seek_decoder(s)
 }
 
 close_seek_stream :: proc(s: ^Seek_Stream) {
-	if s.handle != nil {spoti_vorbis_close(s.handle); s.handle = nil}
+	if s.handle != nil {stb.close(s.handle); s.handle = nil}
 	close_disk_cache(&s.disk)
 	crypto.zero_explicit(&s.key, size_of(s.key))
 	if len(s.cache) > 0 {crypto.zero_explicit(raw_data(s.cache), len(s.cache))}
+	if len(s.input) > 0 {crypto.zero_explicit(raw_data(s.input), len(s.input))}
 	delete(s.cache)
-	s.cache = nil
+	delete(s.input)
+	s.cache, s.input = nil, nil
 }
 
 seek_to_ms :: proc(s: ^Seek_Stream, position_ms: int) -> bool {
-	return(
-		position_ms >= 0 &&
-		ov_pcm_seek(s.handle, i64(position_ms) * i64(s.sample_rate) / 1000) == 0 &&
-		!s.failed \
-	)
+	if s.handle == nil ||
+	   s.failed ||
+	   s.sample_rate <= 0 ||
+	   position_ms < 0 ||
+	   position_ms > s.total_frames * 1000 / s.sample_rate ||
+	   (s.cancel != nil && sync.atomic_load(s.cancel)) {return false}
+	target := position_ms * s.sample_rate / 1000
+	if target == s.total_frames {
+		s.frame_first, s.frame_count, s.pcm_position = 0, 0, target
+		return true
+	}
+	lo, hi := 0, s.size - SPOTIFY_OGG_OFFSET
+	if target <= s.sample_rate {hi = 0}
+	positioned := false
+	for attempt := 0; hi - lo > RANGE_SIZE; attempt += 1 {
+		mid := lo + (hi - lo) / 2
+		if attempt == 0 {
+			// Allow page recovery before the target. This is only an
+			// estimate; exact positions and binary search handle VBR.
+			ratio := clamp(
+				f64(target - SEEK_PREROLL_SECONDS * s.sample_rate) / f64(s.total_frames),
+				0.01,
+				0.99,
+			)
+			mid = lo + int(f64(hi - lo) * ratio)
+		}
+		position := probe_seek_sample(s, mid)
+		if position < 0 {
+			if s.failed {return false}
+			hi, positioned = mid, false
+			continue
+		}
+		positioned = position <= target
+		if positioned {
+			lo = mid
+			if target - position <= SEEK_PREROLL_SECONDS * s.sample_rate {break}
+		} else {hi = mid}
+	}
+	if lo == 0 {
+		if !restart_seek_decoder(s) {return false}
+	} else if !positioned && probe_seek_sample(s, lo) < 0 {return false}
+	for read_seek_frame(s) {
+		if s.frame_start > target {return false}
+		if s.frame_start + s.frame_count > target {
+			s.frame_first = target - s.frame_start
+			s.pcm_position = target
+			return true
+		}
+	}
+	return false
 }
 
 read_seek_pcm :: proc(s: ^Seek_Stream, dst: []i16) -> (frames: int, ok: bool) {
-	if len(dst) == 0 || len(dst) % 2 != 0 {return 0, false}
-	for frames < len(dst) / 2 {
-		count := spoti_vorbis_read(s.handle, &dst[frames * 2], c.int(len(dst) / 2 - frames))
-		if count < 0 || s.failed {return 0, false}
-		if count == 0 {break}
-		frames += int(count)
+	if s.handle == nil ||
+	   len(dst) == 0 ||
+	   len(dst) % 2 != 0 ||
+	   s.failed ||
+	   (s.cancel != nil && sync.atomic_load(s.cancel)) {return 0, false}
+	for frames < len(dst) / 2 && s.pcm_position < s.total_frames {
+		if s.frame_first == s.frame_count && !read_seek_frame(s) {s.failed = true; return 0, false}
+		count := min(s.frame_count - s.frame_first, len(dst) / 2 - frames)
+		for i in 0 ..< count {
+			for channel in 0 ..< 2 {
+				sample := ([^]f32)(s.output[min(channel, s.channels - 1)])[s.frame_first + i]
+				dst[(frames + i) * 2 + channel] = i16(
+					clamp(math.round(sample * 32768), -32768, 32767),
+				)
+			}
+		}
+		s.frame_first += count
+		s.pcm_position += count
+		frames += count
 	}
 	return frames, true
 }
 
 seek_frame_position :: proc(s: ^Seek_Stream) -> int {
-	return int(ov_pcm_tell(s.handle))
+	return s.pcm_position
 }

@@ -26,6 +26,7 @@ cp LICENSE "$app/Resources/licenses/LICENSE"
 cp spotify/shannon/LICENSE "$app/Resources/licenses/shannon.txt"
 cp vendor/clay/LICENSE.md "$app/Resources/licenses/clay.txt"
 cp docs/licenses/unicode.txt "$app/Resources/licenses/unicode.txt"
+cp docs/licenses/stb_vorbis.txt "$app/Resources/licenses/stb_vorbis.txt"
 
 # Use the native bundler to resolve absolute, @rpath, and @loader_path
 # dependencies from the original libraries before moving them.

@@ -16,4 +16,5 @@ tar --zstd -cf "$out" \
 	LICENSE \
 	spotify/shannon/LICENSE \
 	vendor/clay/LICENSE.md \
-	docs/licenses/unicode.txt
+	docs/licenses/unicode.txt \
+	docs/licenses/stb_vorbis.txt

@@ -1,4 +1,4 @@
-// Bounded, seekable libvorbisfile playback worker.
+// Bounded, seekable Vorbis playback worker.
 package player
 
 import audio "../audio"

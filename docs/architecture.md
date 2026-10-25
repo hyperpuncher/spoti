@@ -98,6 +98,18 @@ pagination. show folder contents in the flat grid without adding folder UI.
 ## playback and Connect
 
 playback owns the queue. prefer Vorbis at 320, then 160, then 96 kbps.
+Odin's `vendor:stb/vorbis` push API decodes the ranged, decrypted input.
+retain one 64 KiB decrypted range and one 64 KiB decoder input buffer,
+regardless of track length. headers or packets that exceed the input limit
+fail instead of growing the buffer. decoded PCM stays in the decoder's frame
+and the bounded playback queue; mono output is copied to both stereo channels.
+
+stb's CRC-checked page scanner reads the final sample position from the file
+tail. seeking uses one byte estimate, then binary search when needed. decode
+through the first page after resynchronization to restore its exact sample
+position before returning audio. skip decoded samples before the requested
+position. cancellation and read errors stop the worker; they are not clean EOF.
+
 keep the previous title and artist together until the playback metadata is
 ready, then update both before publishing the MPRIS metadata snapshot.
 AP requests share one serialized connection and cipher state. Connect and

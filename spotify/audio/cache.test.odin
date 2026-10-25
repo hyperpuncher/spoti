@@ -8,7 +8,7 @@ import "core:time"
 
 @(test)
 independent_cache_handles_read_and_write_concurrently :: proc(t: ^testing.T) {
-	dir, err := os.make_directory_temp("/tmp", "spoti-audio-parallel-*", context.allocator)
+	dir, err := os.make_directory_temp("", "spoti-audio-parallel-*", context.allocator)
 	if !testing.expect(t, err == nil) {return}
 	defer {_ = os.remove_all(dir); delete(dir)}
 	Work :: struct {
@@ -55,7 +55,7 @@ independent_cache_handles_read_and_write_concurrently :: proc(t: ^testing.T) {
 
 @(test)
 encrypted_ranges_survive_reopening_and_missing_ranges_stay_missing :: proc(t: ^testing.T) {
-	dir, err := os.make_directory_temp("/tmp", "spoti-audio-cache-*", context.allocator)
+	dir, err := os.make_directory_temp("", "spoti-audio-cache-*", context.allocator)
 	testing.expect(t, err == nil)
 	if err != nil {return}
 	defer {_ = os.remove_all(dir); delete(dir)}
@@ -87,7 +87,7 @@ encrypted_ranges_survive_reopening_and_missing_ranges_stay_missing :: proc(t: ^t
 
 @(test)
 corrupt_ciphertext_is_rejected_and_can_be_replaced :: proc(t: ^testing.T) {
-	dir, err := os.make_directory_temp("/tmp", "spoti-audio-corrupt-*", context.allocator)
+	dir, err := os.make_directory_temp("", "spoti-audio-corrupt-*", context.allocator)
 	testing.expect(t, err == nil)
 	if err != nil {return}
 	defer {_ = os.remove_all(dir); delete(dir)}
@@ -109,7 +109,7 @@ corrupt_ciphertext_is_rejected_and_can_be_replaced :: proc(t: ^testing.T) {
 
 @(test)
 cache_retains_closed_tracks_when_the_budget_has_room :: proc(t: ^testing.T) {
-	dir, err := os.make_directory_temp("/tmp", "spoti-audio-room-*", context.allocator)
+	dir, err := os.make_directory_temp("", "spoti-audio-room-*", context.allocator)
 	if !testing.expect(t, err == nil) {return}
 	defer {_ = os.remove_all(dir); delete(dir)}
 	budget := i64(2 * (512 + cache_payload_offset(512)))
@@ -135,7 +135,7 @@ cache_retains_closed_tracks_when_the_budget_has_room :: proc(t: ^testing.T) {
 
 @(test)
 cache_evicts_least_recently_used_closed_track :: proc(t: ^testing.T) {
-	dir, err := os.make_directory_temp("/tmp", "spoti-audio-lru-*", context.allocator)
+	dir, err := os.make_directory_temp("", "spoti-audio-lru-*", context.allocator)
 	testing.expect(t, err == nil)
 	if err != nil {return}
 	defer {_ = os.remove_all(dir); delete(dir)}
@@ -169,7 +169,7 @@ cache_evicts_least_recently_used_closed_track :: proc(t: ^testing.T) {
 
 @(test)
 cache_budget_evicts_closed_tracks_but_protects_active_tracks :: proc(t: ^testing.T) {
-	dir, err := os.make_directory_temp("/tmp", "spoti-audio-eviction-*", context.allocator)
+	dir, err := os.make_directory_temp("", "spoti-audio-eviction-*", context.allocator)
 	testing.expect(t, err == nil)
 	if err != nil {return}
 	defer {_ = os.remove_all(dir); delete(dir)}
@@ -202,7 +202,7 @@ cache_budget_evicts_closed_tracks_but_protects_active_tracks :: proc(t: ^testing
 
 @(test)
 disk_cache_complete_tracks_range_presence :: proc(t: ^testing.T) {
-	dir, err := os.make_directory_temp("/tmp", "spoti-audio-complete-*", context.allocator)
+	dir, err := os.make_directory_temp("", "spoti-audio-complete-*", context.allocator)
 	testing.expect(t, err == nil)
 	if err != nil {return}
 	defer {_ = os.remove_all(dir); delete(dir)}

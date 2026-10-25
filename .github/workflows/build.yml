@@ -38,7 +38,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang just pkg-config libsdl3-dev libsdl3-ttf-dev libfontconfig-dev libcurl4-openssl-dev libvorbis-dev libwebp-dev libsecret-1-dev libsystemd-dev fonts-noto-core fonts-noto-cjk fonts-noto-extra fonts-noto-color-emoji
+          sudo apt-get install -y clang just pkg-config libsdl3-dev libsdl3-ttf-dev libfontconfig-dev libcurl4-openssl-dev libwebp-dev libsecret-1-dev libsystemd-dev fonts-noto-core fonts-noto-cjk fonts-noto-extra fonts-noto-color-emoji
           mkdir -p "$RUNNER_TEMP/odin"
           gh release download --repo odin-lang/Odin --pattern 'odin-linux-${{ matrix.odin_arch }}-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
           tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
@@ -74,14 +74,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          brew install just pkg-config dylibbundler sdl3 sdl3_ttf fontconfig curl libvorbis webp
+          brew install just pkg-config dylibbundler sdl3 sdl3_ttf fontconfig curl webp
           mkdir -p "$RUNNER_TEMP/odin"
           gh release download --repo odin-lang/Odin --pattern 'odin-macos-arm64-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
           tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
           "$RUNNER_TEMP/odin/vendor/stb/src/build_stb.sh"
           echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
-      - name: test native credential queries
-        run: odin test spotify/credential
+      - name: test native credentials and audio
+        run: |
+          odin test spotify/credential
+          odin test spotify/audio -extra-linker-flags:"-L$(brew --prefix curl)/lib"
       - run: just release
       - name: bundle
         run: sh packaging/macos/bundle.sh "build/spoti-macos-arm64-${GITHUB_SHA:0:12}.tar.zst"
@@ -108,7 +110,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           winget install --id odin-lang.Odin --exact --silent --accept-package-agreements --accept-source-agreements
           winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements
-          vcpkg install --triplet x64-windows fontconfig libvorbis libwebp
+          vcpkg install --triplet x64-windows fontconfig libwebp
           $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
           $odin = Get-ChildItem "$env:LOCALAPPDATA/Microsoft/WinGet/Packages" -Filter odin.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($odin) {
@@ -122,8 +124,10 @@ jobs:
           "SPOTI_LINKER_FLAGS=/LIBPATH:$PWD/build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:$PWD/build/deps/SDL3_ttf-3.2.2/lib/x64 /LIBPATH:$root/lib" >> $env:GITHUB_ENV
           "FONTCONFIG_FILE=$root/etc/fonts/fonts.conf" >> $env:GITHUB_ENV
           "FONTCONFIG_PATH=$root/etc/fonts" >> $env:GITHUB_ENV
-      - name: test HTTP and linked curl protocols
-        run: odin test spotify/http
+      - name: test HTTP, linked curl protocols, and audio
+        run: |
+          odin test spotify/http
+          odin test spotify/audio
       - run: just release
       - name: archive
         run: pwsh -NoProfile -File packaging/windows/bundle.ps1 "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst"
