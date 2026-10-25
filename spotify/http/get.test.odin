@@ -1,8 +1,25 @@
 package http
 
+import c "core:c/libc"
 import "core:sync"
 import "core:testing"
 import "core:time"
+import curl "vendor:curl"
+
+@(test)
+linked_curl_supports_https_and_websockets :: proc(t: ^testing.T) {
+	handle := open_handle()
+	if !testing.expect(t, handle != nil) {return}
+	defer close_handle(handle)
+	info := curl.version_info(curl.VERSION_NOW)
+	for required in ([]string{"https", "ws", "wss"}) {
+		found := false
+		for index := 0; info.protocols[index] != nil; index += 1 {
+			if string(info.protocols[index]) == required {found = true; break}
+		}
+		testing.expectf(t, found, "linked libcurl must support %s", required)
+	}
+}
 
 @(test)
 get_rejects_invalid_or_non_https_addresses :: proc(t: ^testing.T) {
@@ -82,7 +99,7 @@ web_api_limit_reason_never_returns_server_text :: proc(t: ^testing.T) {
 }
 
 feed_header :: proc(capture: ^Header_Capture, line: string) {
-	_ = read_headers(raw_data(line), 1, len(line), capture)
+	_ = read_headers(raw_data(line), 1, c.size_t(len(line)), capture)
 }
 
 @(test)
@@ -94,8 +111,7 @@ response_buffer_rejects_overflow_and_excess_data :: proc(t: ^testing.T) {
 	defer delete(buffer.bytes)
 	input := []u8{1, 2, 3, 4, 5, 6, 7, 8}
 	// Reject the multiplication before an overflowing length can bypass the bound.
-	max_int := max(int)
-	testing.expect_value(t, write_response(raw_data(input), max_int, 2, &buffer), 0)
+	testing.expect_value(t, write_response(raw_data(input), max(c.size_t), 2, &buffer), 0)
 	testing.expect_value(t, len(buffer.bytes), 0)
 	testing.expect_value(t, write_response(raw_data(input), 1, 8, &buffer), 8)
 	testing.expect_value(t, write_response(raw_data(input), 1, 1, &buffer), 0)

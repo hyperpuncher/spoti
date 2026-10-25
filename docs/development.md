@@ -15,7 +15,7 @@ emoji, such as Noto Color Emoji on Linux. see
 | SDL3 | system package | `brew install sdl3` | official SDL dev bundle |
 | SDL3_ttf | system package | `brew install sdl3_ttf` | official SDL dev bundle |
 | fontconfig | system package | `brew install fontconfig` | vcpkg `fontconfig` |
-| libcurl | system package | `brew install curl` | vcpkg `curl` |
+| libcurl | system package | `brew install curl` | included with Odin |
 | vorbisfile | system package | `brew install libvorbis` | vcpkg `libvorbis` |
 | libwebp | system package | `brew install webp` | vcpkg `libwebp` |
 | credential store | libsecret | system Keychain | system Credential Manager |
@@ -24,7 +24,7 @@ emoji, such as Noto Color Emoji on Linux. see
 macOS also needs the Xcode command line tools.
 
 on Windows, install Odin and `just` with winget and the C libraries with
-vcpkg: `fontconfig`, `curl[websockets]`, `libvorbis`, `libwebp` for
+vcpkg: `fontconfig`, `libvorbis`, `libwebp` for
 `x64-windows`. SDL3 and SDL3_ttf come from SDL's official pinned `-VC`
 dev bundles, fetched automatically by `scripts/prepare-windows.ps1`
 alongside the small Vorbis bridge compile; no MSYS2 is needed. point
@@ -120,11 +120,12 @@ not notarized; the cask does not bypass Gatekeeper.
 
 Connect's Dealer socket uses libcurl's WebSocket API, which needs curl
 7.86 or newer with `ws`/`wss` support. check the protocol list with
-`curl --version`. Linux links the system curl.
-macOS links Homebrew curl because the system library lacks that API; the
-`justfile` adds its library path by default. Windows has no system curl
-development files, so CI builds curl with the `websockets` feature via
-vcpkg and passes its library path through `SPOTI_LINKER_FLAGS`.
+`curl --version` on Linux and macOS. the HTTP package uses Odin's
+`vendor:curl` bindings. Linux links the system library. macOS links Homebrew
+curl because the system library lacks the WebSocket API; the `justfile`
+adds its library path by default. Windows links Odin's bundled static curl,
+not vcpkg curl. an offline HTTP test checks that the linked library supports
+`https`, `ws`, and `wss`; CI runs it on Windows before building the archive.
 `SPOTI_LINKER_FLAGS` is the single knob for native library paths: empty on
 Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
 

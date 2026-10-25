@@ -4,7 +4,8 @@ $PSNativeCommandUseErrorActionPreference = $true
 # Thin libvorbisfile ABI bridge; all network and playback control stays in Odin.
 # Uses the compiler and SDK already installed on the runner.
 # SDL's official MSVC dev bundles. Pinned; vcpkg only supplies the ports
-# with no upstream Windows bundle (fontconfig, curl, vorbis, webp).
+# with no upstream Windows bundle (fontconfig, vorbis, webp).
+# vendor:curl uses the static Windows library included with Odin.
 $deps = @{
 	'SDL3-3.4.18'     = 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-devel-3.4.18-VC.zip'
 	'SDL3_ttf-3.2.2' = 'https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-devel-3.2.2-VC.zip'

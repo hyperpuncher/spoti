@@ -7,11 +7,12 @@ import "core:crypto"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import curl "vendor:curl"
 
 WS_LIMIT :: 1024 * 1024
 
 WebSocket :: struct {
-	handle:    rawptr,
+	handle:    ^curl.CURL,
 	message:   [dynamic]u8,
 	last_pong: time.Time,
 }
@@ -28,15 +29,15 @@ ws_open :: proc(address: string, cancel: ^bool) -> (socket: WebSocket, ok: bool)
 	}
 	defer delete(response.bytes)
 	socket.last_pong = time.now()
-	if easy_setopt(socket.handle, CURL_URL, url) != 0 ||
-	   easy_setopt(socket.handle, CURL_CONNECT_ONLY, c.long(2)) != 0 ||
-	   easy_setopt(socket.handle, CURL_WRITEFUNCTION, write_response) != 0 ||
-	   easy_setopt(socket.handle, CURL_WRITEDATA, &response) != 0 ||
-	   easy_setopt(socket.handle, CURL_TIMEOUT, c.long(15)) != 0 ||
-	   easy_setopt(socket.handle, CURL_NOPROGRESS, c.long(0)) != 0 ||
-	   easy_setopt(socket.handle, CURL_XFERINFOFUNCTION, transfer_progress) != 0 ||
-	   easy_setopt(socket.handle, CURL_XFERINFODATA, cancel) != 0 {return socket, false}
-	ok = easy_perform(socket.handle) == 0
+	if curl.easy_setopt(socket.handle, .URL, url) != .E_OK ||
+	   curl.easy_setopt(socket.handle, .CONNECT_ONLY, c.long(2)) != .E_OK ||
+	   curl.easy_setopt(socket.handle, .WRITEFUNCTION, write_response) != .E_OK ||
+	   curl.easy_setopt(socket.handle, .WRITEDATA, &response) != .E_OK ||
+	   curl.easy_setopt(socket.handle, .TIMEOUT, c.long(15)) != .E_OK ||
+	   curl.easy_setopt(socket.handle, .NOPROGRESS, c.long(0)) != .E_OK ||
+	   curl.easy_setopt(socket.handle, .XFERINFOFUNCTION, transfer_progress) != .E_OK ||
+	   curl.easy_setopt(socket.handle, .XFERINFODATA, cancel) != .E_OK {return socket, false}
+	ok = curl.easy_perform(socket.handle) == .E_OK
 	return
 }
 
@@ -51,19 +52,19 @@ ws_close :: proc(socket: ^WebSocket) {
 ws_read :: proc(socket: ^WebSocket) -> (body: []u8, ready, ok: bool) {
 	buffer: [16384]u8
 	count: uint
-	frame: ^WS_Frame
-	code := ws_recv(socket.handle, raw_data(buffer[:]), uint(len(buffer)), &count, &frame)
-	if code == 81 {return nil, false, true} 	// CURLE_AGAIN
-	if code != 0 || frame == nil {return nil, false, false}
-	if frame.flags & 8 != 0 {return nil, false, false} 	// CLOSE
-	if frame.flags & 64 != 0 {socket.last_pong = time.now()}
-	if frame.flags & (16 | 64) != 0 {return nil, false, true} 	// PING/PONG
-	if frame.flags & 1 == 0 ||
+	frame: ^curl.ws_frame
+	code := curl.ws_recv(socket.handle, raw_data(buffer[:]), uint(len(buffer)), &count, &frame)
+	if code == .E_AGAIN {return nil, false, true}
+	if code != .E_OK || frame == nil {return nil, false, false}
+	if .CLOSE in frame.flags {return nil, false, false}
+	if .PONG in frame.flags {socket.last_pong = time.now()}
+	if .PING in frame.flags || .PONG in frame.flags {return nil, false, true}
+	if .TEXT not_in frame.flags ||
 	   count > uint(WS_LIMIT - len(socket.message)) ||
 	   frame.bytesleft >
 		   i64(WS_LIMIT - len(socket.message) - int(count)) {return nil, false, false}
 	append(&socket.message, ..buffer[:int(count)])
-	if frame.bytesleft != 0 || frame.flags & 4 != 0 {return nil, false, true}
+	if frame.bytesleft != 0 || .CONT in frame.flags {return nil, false, true}
 	body = socket.message[:]
 	// Retain the bytes for the caller, but overwrite them on the next read.
 	clear(&socket.message)
@@ -78,17 +79,17 @@ ws_write :: proc(socket: ^WebSocket, body: []u8, cancel: ^bool, ping: bool = fal
 		   time.tick_diff(time.tick_now(), deadline) <= 0 {return false}
 		sent: uint
 		remaining := len(body) - offset
-		code := ws_send(
+		code := curl.ws_send(
 			socket.handle,
 			raw_data(body[offset:]),
 			uint(remaining),
 			&sent,
 			0,
-			ping ? c.uint(16) : c.uint(1),
+			ping ? curl.WS_PING : curl.WS_TEXT,
 		)
-		if code != 0 && code != 81 {return false}
+		if code != .E_OK && code != .E_AGAIN {return false}
 		offset += int(sent)
-		if offset == len(body) && code == 0 {return true}
+		if offset == len(body) && code == .E_OK {return true}
 		time.sleep(10 * time.Millisecond)
 	}
 }

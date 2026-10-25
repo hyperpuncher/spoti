@@ -108,7 +108,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           winget install --id odin-lang.Odin --exact --silent --accept-package-agreements --accept-source-agreements
           winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements
-          vcpkg install --triplet x64-windows fontconfig curl[websockets] libvorbis libwebp
+          vcpkg install --triplet x64-windows fontconfig libvorbis libwebp
           $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
           $odin = Get-ChildItem "$env:LOCALAPPDATA/Microsoft/WinGet/Packages" -Filter odin.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($odin) {
@@ -122,6 +122,8 @@ jobs:
           "SPOTI_LINKER_FLAGS=/LIBPATH:$PWD/build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:$PWD/build/deps/SDL3_ttf-3.2.2/lib/x64 /LIBPATH:$root/lib" >> $env:GITHUB_ENV
           "FONTCONFIG_FILE=$root/etc/fonts/fonts.conf" >> $env:GITHUB_ENV
           "FONTCONFIG_PATH=$root/etc/fonts" >> $env:GITHUB_ENV
+      - name: test HTTP and linked curl protocols
+        run: odin test spotify/http
       - run: just release
       - name: archive
         run: pwsh -NoProfile -File packaging/windows/bundle.ps1 "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst"

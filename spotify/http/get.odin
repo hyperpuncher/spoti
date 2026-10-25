@@ -9,6 +9,7 @@ import "core:fmt"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import curl "vendor:curl"
 
 Options :: struct {
 	bearer:        string, // empty for signed CDN URLs; never forward account tokens
@@ -33,9 +34,9 @@ Header_Capture :: struct {
 	retry_after: ^int,
 }
 
-read_headers :: proc "c" (input: [^]u8, size, count: int, user: rawptr) -> int {
+read_headers :: proc "c" (input: [^]u8, size, count: c.size_t, user: rawptr) -> c.size_t {
 	context = runtime.default_context()
-	if size < 0 || count < 0 || count > 0 && size > 8192 / count {return 0}
+	if count > 0 && size > 8192 / count {return 0}
 	length := size * count
 	capture := (^Header_Capture)(user)
 	line := strings.trim_space(string(input[:length]))
@@ -132,17 +133,14 @@ web_api_limit_reason :: proc(body: []u8) -> string {
 }
 
 init_curl :: proc() {
-	curl_ready = global_init(c.long(3)) == 0
+	curl_ready = curl.global_init(curl.GLOBAL_DEFAULT) == .E_OK
 }
 
-write_response :: proc "c" (input: [^]u8, size, count: int, user: rawptr) -> int {
+write_response :: proc "c" (input: [^]u8, size, count: c.size_t, user: rawptr) -> c.size_t {
 	context = runtime.default_context()
 	state := (^Response_Buffer)(user)
-	if size < 0 ||
-	   count < 0 ||
-	   count > 0 && size > (state.limit - len(state.bytes)) / count {return 0}
+	if count > 0 && size > c.size_t(state.limit - len(state.bytes)) / count {return 0}
 	length := size * count
-	if length > state.limit - len(state.bytes) {return 0}
 	append(&state.bytes, ..input[:length])
 	return length
 }
@@ -280,16 +278,14 @@ request :: proc(
 			return nil, 429, true
 		}
 	}
-	sync.once_do(&curl_once, init_curl)
-	if !curl_ready {return nil, 0, false}
-	client := reuse
+	client := (^curl.CURL)(reuse)
 	if client == nil {
-		client = easy_init()
+		client = open_handle()
 		if client == nil {return nil, 0, false}
-	} else {easy_reset(client)}
+	} else {curl.easy_reset(client)}
 	// Owned handles are cleaned up here; reused worker handles outlive the call.
 	defer if reuse == nil {
-		easy_cleanup(client)
+		curl.easy_cleanup(client)
 	}
 	received := Response_Buffer {
 		bytes = make([dynamic]u8),
@@ -301,17 +297,17 @@ request :: proc(
 	}
 	c_address := strings.clone_to_cstring(address)
 	defer delete(c_address)
-	if easy_setopt(client, CURL_URL, c_address) != 0 ||
-	   easy_setopt(client, CURL_TIMEOUT, timeout) != 0 ||
-	   easy_setopt(client, CURL_WRITEFUNCTION, write_response) != 0 ||
-	   easy_setopt(client, CURL_WRITEDATA, &received) != 0 {
+	if curl.easy_setopt(client, .URL, c_address) != .E_OK ||
+	   curl.easy_setopt(client, .TIMEOUT, timeout) != .E_OK ||
+	   curl.easy_setopt(client, .WRITEFUNCTION, write_response) != .E_OK ||
+	   curl.easy_setopt(client, .WRITEDATA, &received) != .E_OK {
 		return nil, 0, false
 	}
 	if options.cancel != nil {
 		if sync.atomic_load(options.cancel) {return nil, 0, false}
-		if easy_setopt(client, CURL_NOPROGRESS, c.long(0)) != 0 ||
-		   easy_setopt(client, CURL_XFERINFOFUNCTION, transfer_progress) != 0 ||
-		   easy_setopt(client, CURL_XFERINFODATA, options.cancel) != 0 {return nil, 0, false}
+		if curl.easy_setopt(client, .NOPROGRESS, c.long(0)) != .E_OK ||
+		   curl.easy_setopt(client, .XFERINFOFUNCTION, transfer_progress) != .E_OK ||
+		   curl.easy_setopt(client, .XFERINFODATA, options.cancel) != .E_OK {return nil, 0, false}
 	}
 	// curl keeps this pointer until perform completes, not just until setopt.
 	retry_after := 0
@@ -323,75 +319,70 @@ request :: proc(
 	if options.range_info != nil || options.retry_after != nil || web_api {
 		if options.range_info != nil {options.range_info^ = {}}
 		if options.retry_after != nil {options.retry_after^ = 0}
-		if easy_setopt(client, CURL_HEADERFUNCTION, read_headers) != 0 ||
-		   easy_setopt(client, CURL_HEADERDATA, &capture) != 0 {return nil, 0, false}
+		if curl.easy_setopt(client, .HEADERFUNCTION, read_headers) != .E_OK ||
+		   curl.easy_setopt(client, .HEADERDATA, &capture) != .E_OK {return nil, 0, false}
 	}
 	if len(form) > 0 {
-		if easy_setopt(client, CURL_POSTFIELDSIZE, c.long(len(form))) != 0 ||
-		   easy_setopt(client, CURL_POSTFIELDS, raw_data(form)) != 0 {return nil, 0, false}
+		if curl.easy_setopt(client, .POSTFIELDSIZE, c.long(len(form))) != .E_OK ||
+		   curl.easy_setopt(client, .POSTFIELDS, raw_data(form)) != .E_OK {return nil, 0, false}
 	}
 	if options.method != "" {
 		c_method := strings.clone_to_cstring(options.method)
 		defer delete(c_method)
-		if easy_setopt(client, CURL_CUSTOMREQUEST, c_method) != 0 {return nil, 0, false}
+		if curl.easy_setopt(client, .CUSTOMREQUEST, c_method) != .E_OK {return nil, 0, false}
 		// An explicit empty body so a bodyless write carries Content-Length: 0.
 		// A JSON body was already installed above and must not be cleared.
 		if len(form) == 0 {
-			if easy_setopt(client, CURL_POSTFIELDS, "") != 0 ||
-			   easy_setopt(client, CURL_POSTFIELDSIZE, c.long(0)) != 0 {return nil, 0, false}
+			if curl.easy_setopt(client, .POSTFIELDS, "") != .E_OK ||
+			   curl.easy_setopt(client, .POSTFIELDSIZE, c.long(0)) != .E_OK {return nil, 0, false}
 		}
 	}
 	if options.range != "" {
 		c_range := strings.clone_to_cstring(options.range)
 		defer delete(c_range)
-		if easy_setopt(client, CURL_RANGE, c_range) != 0 {return nil, 0, false}
+		if curl.easy_setopt(client, .RANGE, c_range) != .E_OK {return nil, 0, false}
 	}
-	headers: ^Slist
+	headers: ^curl.slist
 	defer {
 		for node := headers; node != nil; node = node.next {
-			text := string(node.data)
+			text := string(cstring(node.data))
 			crypto.zero_explicit(raw_data(text), len(text))
 		}
-		slist_free_all(headers)
+		curl.slist_free_all(headers)
 	}
 	if content_type != nil {
-		headers = slist_append(nil, content_type)
+		headers = curl.slist_append(nil, content_type)
 		if headers == nil {return nil, 0, false}
 	}
 	if options.bearer != "" {
-		line := fmt.aprintf("Authorization: Bearer %s", options.bearer)
+		line := fmt.caprintf("Authorization: Bearer %s", options.bearer)
 		defer {
-			crypto.zero_explicit(raw_data(line), len(line))
+			crypto.zero_explicit(rawptr(line), len(string(line)))
 			delete(line)
 		}
-		c_line := strings.clone_to_cstring(line)
-		defer {
-			crypto.zero_explicit(rawptr(c_line), len(line))
-			delete(c_line)
-		}
-		extended := slist_append(headers, c_line)
+		extended := curl.slist_append(headers, line)
 		if extended == nil {return nil, 0, false}
 		headers = extended
 	}
 	if options.connection_id != "" {
-		line := fmt.aprintf(
+		line := fmt.caprintf(
 			"X-Spotify-Connection-Id: %s",
 			options.connection_id,
 			allocator = context.temp_allocator,
 		)
-		c_line := strings.clone_to_cstring(line, context.temp_allocator)
-		extended := slist_append(headers, c_line)
+		extended := curl.slist_append(headers, line)
 		if extended == nil {return nil, 0, false}
 		headers = extended
 	}
-	if headers != nil && easy_setopt(client, CURL_HTTPHEADER, headers) != 0 {return nil, 0, false}
+	if headers != nil &&
+	   curl.easy_setopt(client, .HTTPHEADER, headers) != .E_OK {return nil, 0, false}
 	started := time.now()
-	if easy_perform(client) != 0 {
+	if curl.easy_perform(client) != .E_OK {
 		diagnostic.http(address, -1, 0, elapsed_ms(started))
 		return nil, 0, false
 	}
 	code: c.long
-	if easy_getinfo(client, CURL_RESPONSE_CODE, &code) != 0 {return nil, 0, false}
+	if curl.easy_getinfo(client, .RESPONSE_CODE, &code) != .E_OK {return nil, 0, false}
 	if web_api {
 		if options.retry_after != nil {options.retry_after^ = retry_after}
 		if code == 429 {
@@ -417,12 +408,12 @@ elapsed_ms :: proc(start: time.Time) -> f64 {
 
 // A worker-owned easy handle for connection reuse. Thread-confined: create
 // and use on one thread, close it there too.
-open_handle :: proc() -> rawptr {
+open_handle :: proc() -> ^curl.CURL {
 	sync.once_do(&curl_once, init_curl)
 	if !curl_ready {return nil}
-	return easy_init()
+	return curl.easy_init()
 }
 
 close_handle :: proc(handle: rawptr) {
-	if handle != nil {easy_cleanup(handle)}
+	if handle != nil {curl.easy_cleanup((^curl.CURL)(handle))}
 }
