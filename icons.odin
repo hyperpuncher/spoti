@@ -54,6 +54,7 @@ ICON_NAMES :: []string {
 	"circle-check",
 	"link",
 	"copy",
+	"command",
 	"external-link",
 }
 

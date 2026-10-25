@@ -14,6 +14,7 @@ Theme :: struct {
 	sidebar:      clay.Color,
 	panel:        clay.Color,
 	card:         clay.Color,
+	keycap:       clay.Color,
 	hover:        clay.Color,
 	selected:     clay.Color,
 	player:       clay.Color,
@@ -29,6 +30,7 @@ DARK_THEME :: Theme {
 	sidebar      = {24, 24, 24, 255},
 	panel        = {32, 32, 32, 255},
 	card         = {45, 45, 45, 255},
+	keycap       = {45, 45, 45, 255},
 	hover        = {52, 52, 52, 255},
 	selected     = {36, 36, 36, 255},
 	player       = {12, 12, 12, 255},
@@ -44,6 +46,7 @@ LIGHT_THEME :: Theme {
 	sidebar      = {242, 242, 242, 255},
 	panel        = {233, 233, 233, 255},
 	card         = {229, 229, 229, 255},
+	keycap       = {255, 255, 255, 255},
 	hover        = {214, 214, 214, 255},
 	selected     = {226, 226, 226, 255},
 	player       = {247, 247, 247, 255},
@@ -222,7 +225,7 @@ search_input :: proc(view: View, textures: ^Textures, width: clay.SizingAxis, d:
 			if clay.UI_WithId(clay.ID("search_clear"))(
 			{
 				layout = {
-					sizing = {width = clay.SizingFixed(28 * d), height = clay.SizingFixed(28 * d)},
+					sizing = {width = clay.SizingFixed(68 * d), height = clay.SizingFixed(28 * d)},
 					childAlignment = {x = .Center, y = .Center},
 				},
 				backgroundColor = hovered ? theme.hover : clay.Color{},
@@ -231,15 +234,45 @@ search_input :: proc(view: View, textures: ^Textures, width: clay.SizingAxis, d:
 			) {
 				icon_element(textures, "x", hovered ? .White : .Muted, 16 * d)
 			}
-		} else {
-			// Keep the text viewport stable when the first character appears.
-			if clay.UI()(
-			{
-				layout = {
-					sizing = {width = clay.SizingFixed(28 * d), height = clay.SizingFixed(28 * d)},
-				},
+		} else if clay.UI()(
+		{
+			layout = {
+				sizing = {width = clay.SizingFixed(68 * d), height = clay.SizingFixed(18 * d)},
+				childAlignment = {x = .Center, y = .Center},
+				childGap = u16(3 * d),
 			},
-			) {}
+		},
+		) {
+			if !view.input_active {
+				for key, index in ([2]string{"ctrl", "k"}) {
+					if clay.UI()(
+					{
+						layout = {
+							sizing = {height = clay.SizingFixed(18 * d)},
+							padding = {left = u16(6 * d), right = u16(6 * d)},
+							childAlignment = {x = .Center, y = .Center},
+						},
+						backgroundColor = theme.keycap,
+						cornerRadius = clay.CornerRadiusAll(5 * d),
+					},
+					) {
+						if ODIN_OS == .Darwin && index == 0 {
+							icon_element(textures, "command", .Muted, 11 * d)
+						} else {
+							clay.Text(
+								key,
+								{
+									fontId = 1,
+									fontSize = 11,
+									textColor = theme.muted,
+									wrapMode = .None,
+									userData = &LABEL_INK_BOUNDS,
+								},
+							)
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -783,7 +816,7 @@ setup_step :: proc(
 		) {
 			clay.Text(
 				number,
-				{fontId = 1, fontSize = 13, textColor = theme.muted, userData = &GLYPH_INK_BOUNDS},
+				{fontId = 1, fontSize = 13, textColor = theme.muted, userData = &LABEL_INK_BOUNDS},
 			)
 		}
 		if clay.UI()(

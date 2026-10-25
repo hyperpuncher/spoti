@@ -152,9 +152,9 @@ clay_error :: proc "c" (data: clay.ErrorData) {
 }
 
 // Text userData is passed through Clay's measurement and render commands.
-// Only single-glyph badge labels use this marker.
+// Only short monospace labels use this marker.
 @(rodata)
-GLYPH_INK_BOUNDS := true
+LABEL_INK_BOUNDS := true
 
 measure_text :: proc "c" (
 	text: clay.StringSlice,
@@ -165,9 +165,9 @@ measure_text :: proc "c" (
 	state := (^ui.State)(user_data)
 	value := string(text.chars[:text.length])
 	state.text_measures += 1
-	if config.userData == &GLYPH_INK_BOUNDS {
+	if config.userData == &LABEL_INK_BOUNDS {
 		font := ui.font_for_size(state, f32(config.fontSize) * ui.scale(state), config.fontId)
-		bounds := ui.glyph_bounds(font, value)
+		bounds := ui.label_bounds(font, value)
 		return {f32(bounds.w), f32(bounds.h)}
 	}
 	width, height := ui.text_size(
@@ -242,7 +242,7 @@ render :: proc(
 				f32(text.fontSize) * ui.scale(state),
 				{u8(color.r), u8(color.g), u8(color.b), u8(color.a)},
 				text.fontId,
-				ink_bounds = command.userData == &GLYPH_INK_BOUNDS,
+				ink_bounds = command.userData == &LABEL_INK_BOUNDS,
 			)
 		case .Custom:
 			if command.id == clay.ID("input_content").id {

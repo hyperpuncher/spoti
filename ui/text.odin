@@ -108,6 +108,22 @@ glyph_bounds :: proc(font: ^ttf.Font, value: string) -> sdl.Rect {
 	return {min_x, ttf.GetFontAscent(font) - max_y, max_x - min_x, max_y - min_y}
 }
 
+// Short monospace labels need no shaping or kerning. Include every glyph
+// so "ctrl" uses the tall l, not only the first letter's x-height.
+label_bounds :: proc(font: ^ttf.Font, value: string) -> (bounds: sdl.Rect) {
+	if font == nil {return}
+	pen: c.int
+	ascent := ttf.GetFontAscent(font)
+	for r in value {
+		min_x, max_x, min_y, max_y, advance: c.int
+		if !ttf.GetGlyphMetrics(font, u32(r), &min_x, &max_x, &min_y, &max_y, &advance) {return {}}
+		glyph := sdl.Rect{pen + min_x, ascent - max_y, max_x - min_x, max_y - min_y}
+		_ = sdl.GetRectUnion(bounds, glyph, &bounds)
+		pen += advance
+	}
+	return
+}
+
 // Draw text and inline emoji on the renderer thread.
 text :: proc(
 	state: ^State,
@@ -122,7 +138,7 @@ text :: proc(
 	font := font_for_size(state, font_size, font_id)
 	if font == nil {return}
 	top := y
-	if ink_bounds {top -= f32(glyph_bounds(font, value).y)}
+	if ink_bounds {top -= f32(label_bounds(font, value).y)}
 	cursor := x
 	for piece in text_pieces(value) {
 		if piece.emoji {
