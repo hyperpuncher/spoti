@@ -9,6 +9,11 @@ cask "spoti" do
 
   depends_on arch: :arm64
   depends_on macos: :tahoe
+  depends_on formula: "curl"
+  depends_on formula: "fontconfig"
+  depends_on formula: "sdl3"
+  depends_on formula: "sdl3_image"
+  depends_on formula: "sdl3_ttf"
 
   app "Spoti.app"
 end

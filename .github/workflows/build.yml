@@ -74,7 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          brew install just pkg-config dylibbundler sdl3 sdl3_image sdl3_ttf fontconfig curl
+          brew install just pkg-config sdl3 sdl3_image sdl3_ttf fontconfig curl
           mkdir -p "$RUNNER_TEMP/odin"
           gh release download --repo odin-lang/Odin --pattern 'odin-macos-arm64-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
           tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
@@ -132,10 +132,10 @@ jobs:
           "$PWD/build/deps/SDL3-3.4.18/lib/x64", "$PWD/build/deps/SDL3_ttf-3.2.2/lib/x64", "$PWD/build/deps/SDL3_image-3.4.8/lib/x64", "$PWD/build/deps/SDL3_image-3.4.8/lib/x64/optional" >> $env:GITHUB_PATH
       - name: test HTTP, audio, and image codecs
         run: |
-          odin test spotify/http
-          odin test spotify/audio
-          odin test spotify/artwork -extra-linker-flags:"$env:SPOTI_LINKER_FLAGS"
-          odin test . -define:ODIN_TEST_NAMES=main.svg_icons_decode_to_white_tint_masks -extra-linker-flags:"$env:SPOTI_LINKER_FLAGS"
+          odin test spotify/http -linker:msvc
+          odin test spotify/audio -linker:msvc
+          odin test spotify/artwork -linker:msvc -extra-linker-flags:"$env:SPOTI_LINKER_FLAGS"
+          odin test . -linker:msvc -define:ODIN_TEST_NAMES=main.svg_icons_decode_to_white_tint_masks -extra-linker-flags:"$env:SPOTI_LINKER_FLAGS"
       - run: just release
       - name: archive
         run: pwsh -NoProfile -File packaging/windows/bundle.ps1 "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst"
