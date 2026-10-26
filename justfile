@@ -16,7 +16,7 @@ project_packages := "main,ap,artwork,audio,connect,credential,diagnostic,http,li
 default: run
 
 _prepare:
-	{{if os() == "windows" { "pwsh -NoProfile -File scripts/prepare-windows.ps1" } else { "./scripts/build-mpris.sh" }}}
+	{{if os() == "windows" { "pwsh -NoProfile -File scripts/prepare-windows.ps1" } else { "mkdir -p build && ./scripts/build-mpris.sh" }}}
 
 # Fast dev build with default optimization.
 build: _prepare
