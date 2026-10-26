@@ -150,10 +150,13 @@ cache_make_room :: proc(directory: string, limit, reserve: i64) -> bool {
 	})
 	for entry in entries {
 		if total + reserve <= limit {return true}
-		if entry.type != .Regular ||
-		   !strings.has_suffix(entry.name, ".audio") ||
-		   entry.fullpath in cache_active {continue}
-		if os.remove(entry.fullpath) == nil {total -= entry.size}
+		if entry.type != .Regular || !strings.has_suffix(entry.name, ".audio") {continue}
+		// Match the spelling registered by open_disk_cache, not the scan's
+		// resolved directory path (macOS /var may become /private/var).
+		path := fmt.aprintf("%s/%s", directory, entry.name)
+		defer delete(path)
+		if path in cache_active {continue}
+		if os.remove(path) == nil {total -= entry.size}
 	}
 	return total + reserve <= limit
 }

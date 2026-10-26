@@ -173,16 +173,23 @@ cache_budget_evicts_closed_tracks_but_protects_active_tracks :: proc(t: ^testing
 	testing.expect(t, err == nil)
 	if err != nil {return}
 	defer {_ = os.remove_all(dir); delete(dir)}
+	cache_dir := dir
+	defer if cache_dir != dir {_ = os.remove(cache_dir); delete(cache_dir)}
+	when ODIN_OS != .Windows {
+		// Directory scans resolve aliases such as macOS /var -> /private/var.
+		cache_dir = strings.concatenate({dir, "-alias"})
+		if !testing.expect(t, os.symlink(dir, cache_dir) == nil) {return}
+	}
 	budget := i64(512 + cache_payload_offset(512))
 	id: [20]u8
 	id[0] = 3
-	first := open_disk_cache(id, dir, budget)
+	first := open_disk_cache(id, cache_dir, budget)
 	bytes: [512]u8 = 4
 	write_disk_range(&first, 0, len(bytes), bytes[:])
 	old_path := strings.clone(first.path)
 	defer delete(old_path)
 	id[0] = 4
-	second := open_disk_cache(id, dir, budget)
+	second := open_disk_cache(id, cache_dir, budget)
 	defer close_disk_cache(&second)
 	write_disk_range(&second, 0, len(bytes), bytes[:])
 	testing.expect(t, second.file == nil, "active tracks must not be evicted")
