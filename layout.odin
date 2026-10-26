@@ -406,13 +406,25 @@ round_play_button :: proc(
 	}
 }
 
-player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
+player_bar :: proc(
+	view: View,
+	textures: ^Textures,
+	fx: ^Button_Fx_Ctx,
+	ui_state: ^ui.State,
+	width, d: f32,
+) {
+	padding, gap, cover_gap := u16(14 * d), u16(20 * d), u16(12 * d)
+	// Share space beyond the seek bar's cap between both sides so controls
+	// stay in place while the title and artist can use the empty left area.
+	extra := max(f32(0), (width - 2 * f32(padding + gap) - (320 + 220 + SEEK_MAX_WIDTH) * d) / 2)
+	left_width := 320 * d + extra
+	text_width := left_width - 64 * d - f32(cover_gap)
 	if clay.UI()(
 	{
 		layout = {
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(92 * d)},
-			padding = clay.PaddingAll(u16(14 * d)),
-			childGap = u16(20 * d),
+			padding = clay.PaddingAll(padding),
+			childGap = gap,
 			childAlignment = {y = .Center},
 		},
 		backgroundColor = theme.player,
@@ -421,8 +433,8 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 		if clay.UI()(
 		{
 			layout = {
-				sizing = {width = clay.SizingFixed(320 * d), height = clay.SizingGrow({})},
-				childGap = u16(12 * d),
+				sizing = {width = clay.SizingFixed(left_width), height = clay.SizingGrow({})},
+				childGap = cover_gap,
 				childAlignment = {y = .Center},
 			},
 		},
@@ -449,7 +461,6 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 					sizing = {width = clay.SizingGrow({})},
 					childGap = u16(3 * d),
 				},
-				clip = {horizontal = true},
 			},
 			) {
 				// Hug boxes so exactly the text is clickable. The title is
@@ -458,8 +469,10 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 				if clay.UI_WithId(clay.ID("footer_title"))(
 				{layout = {sizing = {width = clay.SizingFit({})}}},
 				) {
-					clay.Text(
+					fitted_text(
+						ui_state,
 						view.title,
+						text_width,
 						{fontSize = 15, textColor = theme.text, wrapMode = .None},
 					)
 				}
@@ -467,8 +480,10 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 				if clay.UI_WithId(clay.ID("footer_artist"))(
 				{layout = {sizing = {width = clay.SizingFit({})}}},
 				) {
-					clay.Text(
+					fitted_text(
+						ui_state,
 						view.status,
+						text_width,
 						{
 							fontSize = 12,
 							textColor = artist_over ? theme.text : theme.muted,
@@ -591,7 +606,7 @@ player_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) 
 		if clay.UI()(
 		{
 			layout = {
-				sizing = {width = clay.SizingFixed(220 * d), height = clay.SizingGrow({})},
+				sizing = {width = clay.SizingFixed(220 * d + extra), height = clay.SizingGrow({})},
 				childGap = u16(10 * d),
 				childAlignment = {x = .Right, y = .Center},
 			},
@@ -1118,7 +1133,7 @@ layout :: proc(
 		if clay.UI()(
 		{layout = {sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(8 * d)}}},
 		) {}
-		player_bar(view, textures, fx, d)
+		player_bar(view, textures, fx, ui_state, viewport_width, d)
 		scrollbar("library_grid", "library_scrollbar", d)
 		scrollbar("detail_rows", "detail_scrollbar", d)
 		if view.queue_open {scrollbar("queue_rows", "queue_scrollbar", d)}

@@ -1,14 +1,16 @@
 package main
 
 import "core:fmt"
+import "core:strings"
 import "core:testing"
 import "core:unicode/utf8"
 import ui "ui"
+import clay "vendor/clay"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
 @(test)
-card_title_truncation_keeps_complete_unicode_characters :: proc(t: ^testing.T) {
+text_fitting_preserves_graphemes_and_available_player_space :: proc(t: ^testing.T) {
 	// Real font metrics, but no video subsystem or desktop interaction.
 	if !testing.expect(t, sdl.Init({})) {return}
 	if !testing.expect(t, ttf.Init()) {sdl.Quit(); return}
@@ -18,7 +20,7 @@ card_title_truncation_keeps_complete_unicode_characters :: proc(t: ^testing.T) {
 	}
 	defer ui.close(&state)
 	ok: bool
-	for role in ([]ui.Font_Role{.Regular, .Bold}) {
+	for role in ([]ui.Font_Role{.Regular, .Numeric, .Bold}) {
 		source := &state.font_sources[role]
 		source.path, source.index, ok = ui.resolve_role(role)
 		if !testing.expect(t, ok) {return}
@@ -54,4 +56,43 @@ card_title_truncation_keeps_complete_unicode_characters :: proc(t: ^testing.T) {
 		delete(expected)
 		delete(probe)
 	}
+	// The footer must use spare width, not clip labels at its old fixed slot.
+	errors := 0
+	memory := layout_test_init(&state.density, &errors, {2000, 92})
+	defer {clay.SetCurrentContext(nil); delete(memory)}
+	clay.SetMeasureTextFunction(measure_text, &state)
+	textures: Textures
+	anims := make(map[u32]Button_Fx)
+	defer delete(anims)
+	fx := Button_Fx_Ctx {
+		anims = &anims,
+	}
+	view := View {
+		title   = "Rio's Interlude - feat. Rio Da Yung Og",
+		status  = "Joyce Wrice, Rio Da Yung Og, Another Artist, Someone Else",
+		elapsed = "0:16",
+		total   = "2:11",
+	}
+	for width in ([]f32{960, 2000}) {
+		clay.SetLayoutDimensions({width, 92})
+		clay.BeginLayout()
+		player_bar(view, &textures, &fx, &state, width, 1)
+		commands := clay.EndLayout(0)
+		play := clay.GetElementData(clay.ID("footer_play")).boundingBox
+		testing.expect_value(t, play.x + play.width / 2, width / 2 + 50)
+		labels := 0
+		for command in commands.internalArray[:commands.length] {
+			if command.commandType != .Text || command.renderData.text.fontId != 0 {continue}
+			text := command.renderData.text
+			value := string(text.stringContents.chars[:text.stringContents.length])
+			if width == 2000 {
+				testing.expect_value(t, value, text.fontSize == 15 ? view.title : view.status)
+			} else {
+				testing.expect(t, strings.has_suffix(value, "…"))
+			}
+			labels += 1
+		}
+		testing.expect_value(t, labels, 2)
+	}
+	testing.expect_value(t, errors, 0)
 }
