@@ -250,8 +250,11 @@ fill :: proc(state: ^State, rect: sdl.FRect, color: sdl.Color) {
 // Apply a small antialiased rounded alpha edge once at the source image's
 // native resolution. This avoids SDL_RenderGeometry's non-antialiased edge and
 // remains smooth at every destination size.
-round_image_pixels :: proc(pixels: []u8, width, height: int) {
-	if len(pixels) < width * height * 4 || width <= 0 || height <= 0 {return}
+round_image_corners :: proc(surface: ^sdl.Surface) {
+	if surface == nil || surface.format != .RGBA32 || !sdl.LockSurface(surface) {return}
+	defer sdl.UnlockSurface(surface)
+	width, height, pitch := int(surface.w), int(surface.h), int(surface.pitch)
+	pixels := ([^]u8)(surface.pixels)[:pitch * height]
 	radius := max(2, int(f32(min(width, height)) * 0.045 + 0.5))
 	samples: int = 4
 	for y in 0 ..< height {
@@ -270,14 +273,19 @@ round_image_pixels :: proc(pixels: []u8, width, height: int) {
 					if dx * dx + dy * dy <= f32(radius * radius) {covered += 1}
 				}
 			}
-			alpha := &pixels[(y * width + x) * 4 + 3]
+			alpha := &pixels[y * pitch + x * 4 + 3]
 			alpha^ = u8(u32(alpha^) * u32(covered) / u32(samples * samples))
 		}
 	}
 }
 
-// Upload straight RGBA pixels (as decoded covers) into a reusable texture.
-create_texture :: proc(state: ^State, pixels: []u8, width, height: int) -> ^sdl.Texture {
+create_texture :: proc {
+	create_texture_pixels,
+	create_texture_surface,
+}
+
+// Procedural masks and emoji already own tightly packed RGBA pixels.
+create_texture_pixels :: proc(state: ^State, pixels: []u8, width, height: int) -> ^sdl.Texture {
 	if len(pixels) < width * height * 4 || width <= 0 || height <= 0 {return nil}
 	texture := sdl.CreateTexture(state.renderer, .RGBA32, .STATIC, c.int(width), c.int(height))
 	if texture == nil {return nil}
@@ -285,6 +293,16 @@ create_texture :: proc(state: ^State, pixels: []u8, width, height: int) -> ^sdl.
 		sdl.DestroyTexture(texture)
 		return nil
 	}
+	_ = sdl.SetTextureScaleMode(texture, .LINEAR)
+	_ = sdl.SetTextureBlendMode(texture, sdl.BLENDMODE_BLEND)
+	return texture
+}
+
+// SDL handles the row pitch and renderer format. The caller retains the
+// surface and can release it after this upload.
+create_texture_surface :: proc(state: ^State, surface: ^sdl.Surface) -> ^sdl.Texture {
+	texture := sdl.CreateTextureFromSurface(state.renderer, surface)
+	if texture == nil {return nil}
 	_ = sdl.SetTextureScaleMode(texture, .LINEAR)
 	_ = sdl.SetTextureBlendMode(texture, sdl.BLENDMODE_BLEND)
 	return texture

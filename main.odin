@@ -12,6 +12,7 @@ import "core:thread"
 import "core:time"
 import "core:unicode"
 import diagnostic "diagnostic"
+import artwork "spotify/artwork"
 import connect "spotify/connect"
 import credential "spotify/credential"
 import http "spotify/http"
@@ -1450,22 +1451,17 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 		request := textures.requested[cover.key]
 		request.pending = false
 		textures.requested[cover.key] = request
-		if len(cover.image.pixels) > 0 {
-			ui.round_image_pixels(cover.image.pixels, cover.image.width, cover.image.height)
-			texture := ui.create_texture(
-				&state,
-				cover.image.pixels,
-				cover.image.width,
-				cover.image.height,
-			)
+		if cover.image != nil {
+			ui.round_image_corners(cover.image)
+			texture := ui.create_texture(&state, cover.image)
 			if texture != nil {
 				textures.by_key[cover.key] = texture
-				request.bytes = cover.image.width * cover.image.height * 4
+				request.bytes = int(cover.image.w) * int(cover.image.h) * 4
 				request.used = textures.cover_frame + 1
 				textures.requested[cover.key] = request
 				textures.cover_bytes += request.bytes
 			}
-			delete(cover.image.pixels)
+			artwork.free_image(&cover.image)
 		}
 	}
 	if restore_pending && library_client.state == .Ready {

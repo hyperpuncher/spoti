@@ -5,6 +5,7 @@ import "core:strings"
 import "core:testing"
 import artwork "spotify/artwork"
 import ui "ui"
+import sdl "vendor:sdl3"
 
 @(test)
 app_icon_has_transparent_edges_and_resolves_outside_the_checkout_cwd :: proc(t: ^testing.T) {
@@ -17,11 +18,13 @@ app_icon_has_transparent_edges_and_resolves_outside_the_checkout_cwd :: proc(t: 
 	image, decoded := artwork.decode(encoded)
 	if !testing.expect(t, decoded) {return}
 	defer artwork.free_image(&image)
-	testing.expect_value(t, image.width, 1024)
-	testing.expect_value(t, image.height, 1024)
-	testing.expect_value(t, image.pixels[3], u8(0))
-	center := (512 * image.width + 512) * 4
-	testing.expect_value(t, image.pixels[center + 3], u8(255))
+	testing.expect_value(t, int(image.w), 1024)
+	testing.expect_value(t, int(image.h), 1024)
+	alpha: u8
+	testing.expect(t, sdl.ReadSurfacePixel(image, 0, 0, nil, nil, nil, &alpha))
+	testing.expect_value(t, alpha, u8(0))
+	testing.expect(t, sdl.ReadSurfacePixel(image, 512, 512, nil, nil, nil, &alpha))
+	testing.expect_value(t, alpha, u8(255))
 
 	// The root test runner has one thread. No SDL window is created.
 	cwd, cwd_err := os.get_working_directory(context.allocator)

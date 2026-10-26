@@ -17,16 +17,17 @@ emoji, such as Noto Color Emoji on Linux. see
 | fontconfig | system package | `brew install fontconfig` | vcpkg `fontconfig` |
 | libcurl | system package | `brew install curl` | included with Odin |
 | Vorbis decoder | included with Odin | included with Odin | included with Odin |
-| libwebp | system package | `brew install webp` | vcpkg `libwebp` |
+| SDL3_image | system package | `brew install sdl3_image` | official SDL dev bundle |
 | credential store | libsecret | system Keychain | system Credential Manager |
 | MPRIS | libsystemd | not used | not used |
 
 macOS also needs the Xcode command line tools.
 
-on Windows, install Odin and `just` with winget and the C libraries with
-vcpkg: `fontconfig` and `libwebp` for `x64-windows`. SDL3 and SDL3_ttf
-come from SDL's official pinned `-VC` dev bundles, fetched automatically
-by `scripts/prepare-windows.ps1`. no MSYS2 is needed. point
+on Windows, install Odin and `just` with winget and `fontconfig` with vcpkg
+for `x64-windows`. SDL3, SDL3_image, and SDL3_ttf come from SDL's official
+pinned `-VC` dev bundles, fetched by `scripts/prepare-windows.ps1`.
+SDL_image's WebP codec DLLs are copied beside the exe during packaging.
+no MSYS2 is needed. point
 `FONTCONFIG_FILE` and `FONTCONFIG_PATH` at vcpkg's font configuration,
 and extend `SPOTI_LINKER_FLAGS` with `/LIBPATH:<vcpkg>/installed/x64-windows/lib`.
 
@@ -128,17 +129,6 @@ not vcpkg curl. an offline HTTP test checks that the linked library supports
 `SPOTI_LINKER_FLAGS` is the single knob for native library paths: empty on
 Linux, Homebrew paths on macOS, `/LIBPATH:` on Windows.
 
-## Vorbis decoder
-
-playback uses Odin's `vendor:stb/vorbis` push API. no project C bridge or
-system libvorbis library is needed. Linux and macOS CI build Odin's bundled
-stb archives for the native target; Windows uses Odin's included archive.
-all four native CI builds run the audio tests.
-
-see [playback architecture](architecture.md#playback-and-connect) for buffer
-and seek behavior, and [audio fixtures](../spotify/audio/testdata/README.md)
-for the mono seek regression.
-
 ## keyboard input
 
 text entry uses SDL UTF-8 text-input events. shortcuts use logical keycodes,
@@ -176,9 +166,7 @@ shortcut. `space` toggles playback only when the text field is not active.
 - credentials use Secret Service, Keychain, or Credential Manager.
 - state, cache, and logs use the operating system's application directories.
 
-icon PNGs in `assets/icons` are committed and loaded directly. the Lucide
-SVG sources sit beside them; `scripts/build-icons.sh` regenerates the PNGs
-when an icon changes.
+UI icons are SVGs in `assets/icons`. optimize edits with `svgo --multipass`.
 
 ## app icon and Linux desktop entry
 

@@ -1,44 +1,42 @@
-// Decode album and playlist covers to RGBA for SDL3 textures.
+// Decode covers and local icons to owned SDL surfaces.
 package artwork
 
 import "core:c"
-import stb "vendor:stb/image"
+import sdl "vendor:sdl3"
+import img "vendor:sdl3/image"
 
 // Artist header images are 2660 pixels wide; retain a bounded 4096 limit.
 MAX_DIMENSION :: 4096
 
-Image :: struct {
-	pixels: []u8,
-	width:  int,
-	height: int,
-}
+// One owner transfers this surface from the cover worker to the UI.
+// RGBA32/sRGB keeps alpha available for rounded covers and direct upload.
+// Rows use the SDL pitch.
+Image :: ^sdl.Surface
 
 free_image :: proc(image: ^Image) {
-	delete(image.pixels)
-	image^ = {}
+	sdl.DestroySurface(image^)
+	image^ = nil
 }
 
-decode :: proc(encoded: []u8) -> (image: Image, ok: bool) {
-	if len(encoded) == 0 {return}
-	if len(encoded) >= 12 && string(encoded[:4]) == "RIFF" && string(encoded[8:12]) == "WEBP" {
-		return decode_webp(encoded)
+// A positive svg_size fits a local SVG within that width and height.
+decode :: proc(encoded: []u8, svg_size: int = 0) -> (image: Image, ok: bool) {
+	if len(encoded) == 0 || svg_size < 0 || svg_size > MAX_DIMENSION {return}
+	stream := sdl.IOFromConstMem(raw_data(encoded), uint(len(encoded)))
+	if stream == nil {return}
+	defer _ = sdl.CloseIO(stream)
+	surface :=
+		svg_size > 0 ? img.LoadSizedSVG_IO(stream, c.int(svg_size), c.int(svg_size)) : img.Load_IO(stream, false)
+	if surface == nil {return}
+	if surface.w <= 0 || surface.h <= 0 || surface.w > MAX_DIMENSION || surface.h > MAX_DIMENSION {
+		sdl.DestroySurface(surface)
+		return
 	}
-	width, height, channels: c.int
-	data := stb.load_from_memory(
-		raw_data(encoded),
-		c.int(len(encoded)),
-		&width,
-		&height,
-		&channels,
-		4,
-	)
-	if data == nil {return}
-	defer stb.image_free(data)
-	if width <= 0 || height <= 0 || width > MAX_DIMENSION || height > MAX_DIMENSION {return}
-	size := int(width) * int(height) * 4
-	pixels := make([]u8, size)
-	copy(pixels, data[:size])
-	return Image{pixels = pixels, width = int(width), height = int(height)}, true
+	if surface.format != .RGBA32 || sdl.GetSurfaceColorspace(surface) != .SRGB {
+		rgba := sdl.ConvertSurfaceAndColorspace(surface, .RGBA32, nil, .SRGB, 0)
+		sdl.DestroySurface(surface)
+		surface = rgba
+	}
+	return surface, surface != nil
 }
 
 // A cover URL is a plain https address from Spotify's image hosts, which

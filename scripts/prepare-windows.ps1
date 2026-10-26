@@ -2,11 +2,12 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 
 # SDL's official MSVC dev bundles. Pinned; vcpkg only supplies the ports
-# with no upstream Windows bundle (fontconfig, webp).
+# with no upstream Windows bundle (fontconfig).
 # Curl and Vorbis use the static libraries included with Odin.
 $deps = @{
 	'SDL3-3.4.18'     = 'https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-devel-3.4.18-VC.zip'
 	'SDL3_ttf-3.2.2' = 'https://github.com/libsdl-org/SDL_ttf/releases/download/release-3.2.2/SDL3_ttf-devel-3.2.2-VC.zip'
+	'SDL3_image-3.4.8' = 'https://github.com/libsdl-org/SDL_image/releases/download/release-3.4.8/SDL3_image-devel-3.4.8-VC.zip'
 }
 New-Item -ItemType Directory -Force build/deps | Out-Null
 foreach ($dir in $deps.Keys) {

@@ -1,12 +1,12 @@
 #!/bin/sh
 set -eu
 # Linux test archive: binary plus only the files the binary reads at runtime
-# and the files the license texts require. SVGs, ICO/ICNS, and markdown docs
-# stay in the repo and are never shipped.
+# and the files the license texts require. UI SVGs are runtime assets;
+# app icon sources, ICO/ICNS, and markdown docs stay in the repo.
 out=${1:?output .tar.zst path required}
 tar --zstd -cf "$out" \
 	build/spoti \
-	assets/icons/*.png \
+	assets/icons/*.svg \
 	assets/icons/LICENSE \
 	assets/fonts/*.ttf \
 	assets/fonts/OFL.txt \
@@ -16,5 +16,4 @@ tar --zstd -cf "$out" \
 	LICENSE \
 	spotify/shannon/LICENSE \
 	vendor/clay/LICENSE.md \
-	docs/licenses/unicode.txt \
-	docs/licenses/stb_vorbis.txt
+	docs/licenses/*.txt

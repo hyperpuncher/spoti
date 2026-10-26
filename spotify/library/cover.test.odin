@@ -23,13 +23,13 @@ failed_covers_are_delivered_to_release_pending_markers :: proc(t: ^testing.T) {
 	testing.expect_value(t, client.covers_pending, 0)
 	testing.expect_value(t, len(client.cover_queue), 2)
 	first, ok := take_cover(&client)
-	testing.expect(t, ok && (first.key == 1 || first.key == 2) && len(first.image.pixels) == 0)
+	testing.expect(t, ok && (first.key == 1 || first.key == 2) && first.image == nil)
 	second, received := take_cover(&client)
 	testing.expect(
 		t,
 		received &&
 		second.key != first.key &&
 		(second.key == 1 || second.key == 2) &&
-		len(second.image.pixels) == 0,
+		second.image == nil,
 	)
 }

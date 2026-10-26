@@ -1,7 +1,6 @@
-// Each Lucide PNG has one texture. Clay carries its tint on each image draw.
+// Each Lucide SVG is rasterized once. Clay carries its tint on each draw.
 package main
 
-import c "core:c"
 import "core:fmt"
 import "core:os"
 import artwork "spotify/artwork"
@@ -17,6 +16,8 @@ Icon_Tint :: enum {
 	Disabled,
 	Hover,
 }
+
+ICON_SIZE :: 48 // Twice the largest logical icon size, as before.
 
 ICON_NAMES :: []string {
 	"house",
@@ -104,17 +105,8 @@ load_app_icon :: proc(state: ^ui.State) {
 	image, decoded := artwork.decode(encoded)
 	if !decoded {return}
 	defer artwork.free_image(&image)
-	surface := sdl.CreateSurfaceFrom(
-		c.int(image.width),
-		c.int(image.height),
-		.RGBA32,
-		raw_data(image.pixels),
-		c.int(image.width * 4),
-	)
-	if surface == nil {return}
-	defer sdl.DestroySurface(surface)
 	// Wayland compositors without the icon protocol use the desktop entry.
-	_ = sdl.SetWindowIcon(state.window, surface)
+	_ = sdl.SetWindowIcon(state.window, image)
 }
 
 // The artwork package is the only image decoder in the tree, so icons go
@@ -123,17 +115,17 @@ load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 	load_app_icon(state)
 	retint_icons(textures, dark)
 	for name in ICON_NAMES {
-		relative := fmt.aprintf("icons/%s.png", name, allocator = context.temp_allocator)
+		relative := fmt.aprintf("icons/%s.svg", name, allocator = context.temp_allocator)
 		path, found := ui.asset_path(relative)
 		if !found {continue}
 		bytes, read_error := os.read_entire_file_from_path(path, context.allocator)
 		delete(path)
 		if read_error != nil {continue}
-		image, decoded := artwork.decode(bytes)
+		image, decoded := artwork.decode(bytes, svg_size = ICON_SIZE)
 		delete(bytes)
 		if !decoded {continue}
-		texture := ui.create_texture(state, image.pixels, image.width, image.height)
+		texture := ui.create_texture(state, image)
 		if texture != nil {textures.by_key[icon_key(name)] = texture}
-		delete(image.pixels)
+		artwork.free_image(&image)
 	}
 }

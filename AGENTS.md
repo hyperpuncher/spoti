@@ -4,7 +4,7 @@
 
 - run `just fmt`, `just check`, and `just test` after code changes
 - keep the README short; put setup, architecture, and decisions in tracked `docs/` files
-- read the relevant doc or schema in full before writing code; never grep for one operation name and take the first match
+- check Odin core/vendor packages before adding native bindings
 - never open UI probes or manipulate the desktop without permission
 - native Wayland only, with direct SDL3 and Clay
 - use arenas from `core:mem/virtual` for grouped library response lifetimes
@@ -14,7 +14,7 @@
 - acknowledge Connect requests only after the UI accepts them; reject unknown commands
 - never log Dealer addresses, connection keys, device IDs or command bodies
 - do not log credentials, tokens, redirect URLs, audio keys, or signed CDN URLs
-- keep Lucide SVG sources beside their committed PNGs in `assets/icons/`; `scripts/build-icons.sh` regenerates PNGs only when an icon changes
+- keep UI icons as optimized white SVGs; do not add generated PNG copies
 
 ## local references
 
@@ -25,29 +25,12 @@
 - Clay SDL3 renderer reference: `~/docs/clay/renderers/SDL3/clay_renderer_SDL3.c`
 - SDL3 API: `~/docs/sdlwiki/SDL3/`
 - SDL_ttf: `~/docs/SDL_ttf/`
+- SDL_image: `~/docs/SDL_image/`
 - Spotify Web API schema: `~/docs/spotify-web-api/open-api-schema.yaml`
 - Spotify policy: `~/docs/spotify-web-api/policies.yaml`
 - librespot protocol and playback reference: `~/docs/librespot/`
 - Spotifast behavior reference: `~/projects/spotifast/`
 - Lucide sources: `~/docs/lucide/`
-
-## implementation map
-
-- `main.odin`: SDL event loop, input, playback transitions, texture upload
-- `layout.odin`: toolbar, player bar, root layout and theme
-- `library_view.odin`: virtualized library grids, detail pages and track rows
-- `renderer.odin`: Clay text measurement, SDL render commands and image elements
-- `playback.odin`: owned play queue and login/decode worker
-- `connect.odin`: UI-thread playback snapshots for the Connect worker
-- `spotify/connect/`: native Dealer worker, Connect state encoding and incoming commands
-- `diagnostic/`: privacy-safe crash breadcrumbs in `~/.local/state/spoti/spoti.log`
-- `ui/sdl.odin`: Wayland SDL setup and rendering
-- `ui/font.odin`: fontconfig and per-size SDL_ttf cache
-- `spotify/library/`: Web API auth, native playlist discovery, pagination, detail pages, cache, cover worker
-- `spotify/player/stream.odin`: bounded decode worker
-- `spotify/session/connection.odin`: shared AP connection, serialized requests, idle ping handling and reconnect
-- `ui/text.odin`: SDL_ttf text pool bounded by the visible frame
-- `spotify/ap/`, `spotify/audio/`, `spotify/track/`: Spotify protocol and streaming
 
 ## product rules
 

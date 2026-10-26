@@ -442,10 +442,10 @@ run_covers :: proc(pointer: rawptr) {
 			defer delete(bytes)
 			if fetched && status == 200 {
 				image, _ = artwork.decode(bytes[:])
-				if len(image.pixels) == 0 {cache_remove("cover", request.url)}
+				if image == nil {cache_remove("cover", request.url)}
 			}
 		}
-		diagnostic.cover_decode_result(len(image.pixels) > 0)
+		diagnostic.cover_decode_result(image != nil)
 		result := Cover_Result {
 			key   = request.key,
 			image = image,
@@ -1394,7 +1394,10 @@ stop_workers :: proc(client: ^Client) {
 	for request in chan.try_recv(client.requests) {free_request(request)}
 	for result in chan.try_recv(client.results) {free_result(result)}
 	for request in chan.try_recv(client.cover_requests) {delete(request.url)}
-	for result in chan.try_recv(client.cover_results) {delete(result.image.pixels)}
+	for result in chan.try_recv(client.cover_results) {
+		image := result.image
+		artwork.free_image(&image)
+	}
 	chan.destroy(client.requests)
 	chan.destroy(client.results)
 	chan.destroy(client.cover_requests)

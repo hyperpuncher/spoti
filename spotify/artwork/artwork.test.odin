@@ -1,6 +1,7 @@
 package artwork
 
 import "core:testing"
+import sdl "vendor:sdl3"
 
 @(test)
 webp_cover_preserves_dimensions_pixels_and_alpha :: proc(t: ^testing.T) {
@@ -65,19 +66,34 @@ webp_cover_preserves_dimensions_pixels_and_alpha :: proc(t: ^testing.T) {
 	}
 	image, ok := decode(encoded)
 	defer free_image(&image)
-	testing.expect(t, ok)
-	testing.expect_value(t, image.width, 2)
-	testing.expect_value(t, image.height, 2)
-	expected := []u8{255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 127}
-	testing.expect_value(t, len(image.pixels), len(expected))
-	for pixel, i in image.pixels {testing.expect_value(t, pixel, expected[i])}
+	if !testing.expect(t, ok) {return}
+	testing.expect_value(t, int(image.w), 2)
+	testing.expect_value(t, int(image.h), 2)
+	expected := [4][4]u8 {
+		{255, 0, 0, 255},
+		{0, 255, 0, 255},
+		{0, 0, 255, 255},
+		{255, 255, 255, 127},
+	}
+	for pixel, index in expected {
+		rgba: [4]u8
+		testing.expect(
+			t,
+			sdl.ReadSurfacePixel(
+				image,
+				i32(index % 2),
+				i32(index / 2),
+				&rgba[0],
+				&rgba[1],
+				&rgba[2],
+				&rgba[3],
+			),
+		)
+		testing.expect_value(t, rgba, pixel)
+	}
 	for length in ([]int{0, 12, 24, len(encoded) - 4}) {
 		invalid, valid := decode(encoded[:length])
 		defer free_image(&invalid)
-		testing.expect(
-			t,
-			!valid && len(invalid.pixels) == 0,
-			"truncated WebP must not leak partial images",
-		)
+		testing.expect(t, !valid && invalid == nil, "truncated WebP must not leak partial images")
 	}
 }
