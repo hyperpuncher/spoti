@@ -15,17 +15,19 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ODIN_RELEASE: dev-2026-10
+
 jobs:
   linux:
     name: linux (${{ matrix.arch }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x64
-            odin_arch: amd64
             runner: ubuntu-26.04
           - arch: arm64
-            odin_arch: arm64
             runner: ubuntu-26.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
@@ -33,17 +35,19 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: install dependencies
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: install system packages
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y clang just pkg-config libsdl3-dev libsdl3-image-dev libsdl3-ttf-dev libfontconfig-dev libcurl4-openssl-dev libsecret-1-dev libsystemd-dev fonts-noto-core fonts-noto-cjk fonts-noto-extra fonts-noto-color-emoji
-          mkdir -p "$RUNNER_TEMP/odin"
-          gh release download --repo odin-lang/Odin --pattern 'odin-linux-${{ matrix.odin_arch }}-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
-          tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
-          "$RUNNER_TEMP/odin/vendor/stb/src/build_stb.sh"
-          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends clang just pkg-config libsdl3-dev libsdl3-image-dev libsdl3-ttf-dev libfontconfig-dev libcurl4-openssl-dev libsecret-1-dev libsystemd-dev fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji
+      - name: setup Odin
+        timeout-minutes: 10
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ github.token }}
+          release: ${{ env.ODIN_RELEASE }}
+      - name: build vendor stb
+        run: '"$(odin root)/vendor/stb/src/build_stb.sh"'
       - name: check and test
         run: |
           just check
@@ -62,7 +66,6 @@ jobs:
           if-no-files-found: error
 
   macos:
-    needs: linux
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-26
     timeout-minutes: 30
@@ -70,16 +73,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: install dependencies
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          brew install just pkg-config sdl3 sdl3_image sdl3_ttf fontconfig curl
-          mkdir -p "$RUNNER_TEMP/odin"
-          gh release download --repo odin-lang/Odin --pattern 'odin-macos-arm64-*.tar.gz' --output "$RUNNER_TEMP/odin.tar.gz"
-          tar -xzf "$RUNNER_TEMP/odin.tar.gz" -C "$RUNNER_TEMP/odin" --strip-components=1
-          "$RUNNER_TEMP/odin/vendor/stb/src/build_stb.sh"
-          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+      - name: install Homebrew packages
+        timeout-minutes: 10
+        run: brew install just pkg-config sdl3 sdl3_image sdl3_ttf fontconfig curl
+      - name: setup Odin
+        timeout-minutes: 10
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ github.token }}
+          release: ${{ env.ODIN_RELEASE }}
+      - name: build vendor stb
+        run: '"$(odin root)/vendor/stb/src/build_stb.sh"'
       - name: test native credentials, audio, and image codecs
         run: |
           odin test spotify/credential
@@ -96,32 +100,56 @@ jobs:
           if-no-files-found: error
 
   windows:
-    needs: linux
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     timeout-minutes: 60
-    env:
-      VCPKG_BINARY_SOURCES: clear;x-gha,readwrite
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: install dependencies
+      - name: setup Odin
+        timeout-minutes: 10
+        uses: laytan/setup-odin@v2
+        with:
+          token: ${{ github.token }}
+          release: ${{ env.ODIN_RELEASE }}
+      - name: install just
+        timeout-minutes: 5
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          winget install --id odin-lang.Odin --exact --silent --accept-package-agreements --accept-source-agreements
           winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements
+          "$env:LOCALAPPDATA/Microsoft/WinGet/Links" >> $env:GITHUB_PATH
+      - name: identify vcpkg cache
+        id: vcpkg
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $revision = git -C $env:VCPKG_INSTALLATION_ROOT rev-parse HEAD
+          "key=vcpkg-${env:ImageVersion}-$revision-x64-windows-fontconfig" >> $env:GITHUB_OUTPUT
+          "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP/vcpkg-cache,readwrite" >> $env:GITHUB_ENV
+      - uses: actions/cache/restore@v6
+        id: vcpkg-cache
+        timeout-minutes: 5
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: ${{ steps.vcpkg.outputs.key }}
+      - name: install fontconfig
+        timeout-minutes: 15
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           vcpkg install --triplet x64-windows fontconfig
+      - uses: actions/cache/save@v6
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+        with:
+          path: ${{ runner.temp }}/vcpkg-cache
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
+      - name: configure native paths
+        run: |
           $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
-          $odin = Get-ChildItem "$env:LOCALAPPDATA/Microsoft/WinGet/Packages" -Filter odin.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($odin) {
-            $odin.DirectoryName >> $env:GITHUB_PATH
-            $env:PATH = "$($odin.DirectoryName);$env:PATH"
-          }
-          "$env:LOCALAPPDATA/Microsoft/WinGet/Links", "$root/bin" >> $env:GITHUB_PATH
-          $env:PATH = "$env:LOCALAPPDATA/Microsoft/WinGet/Links;$root/bin;$env:PATH"
-          odin version
+          "$root/bin" >> $env:GITHUB_PATH
           just --version
           "SPOTI_LINKER_FLAGS=/LIBPATH:$PWD/build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:$PWD/build/deps/SDL3_ttf-3.2.2/lib/x64 /LIBPATH:$PWD/build/deps/SDL3_image-3.4.8/lib/x64 /LIBPATH:$root/lib" >> $env:GITHUB_ENV
           "FONTCONFIG_FILE=$root/etc/fonts/fonts.conf" >> $env:GITHUB_ENV

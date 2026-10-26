@@ -84,14 +84,6 @@ llvm-ar rcsD vendor/clay/linux-arm64/clay.a /tmp/spoti-clay-linux-arm64.o
 
 ## CI
 
-GitHub Actions runs four native builds: Ubuntu 26.04 x64 and arm64,
-macOS arm64, and Windows x64. Linux and macOS use official Odin release
-archives. both Linux jobs run `just check` and `just test` on pushes to
-`main` and pull requests. release builds run on manual dispatch and version
-tags; macOS and Windows wait for both Linux jobs. actions use major-version
-tags. no Spotify credentials are needed. macOS checks credential queries
-without Keychain access.
-
 download the `.tar.zst` artifact from a successful manual run. Linux and
 Windows include the binary and assets. Windows also includes DLLs and a
 fontconfig directory beside the exe; point `FONTCONFIG_FILE` and
