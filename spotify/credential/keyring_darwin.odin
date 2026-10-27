@@ -1,7 +1,9 @@
 // Native Keychain access. Refresh tokens never enter process arguments.
 package credential
 
+import "core:crypto"
 import "core:strings"
+import "core:sync"
 import cf "core:sys/darwin/CoreFoundation"
 import security "core:sys/darwin/Security"
 
@@ -40,6 +42,25 @@ foreign keychain {
 	SecItemDelete :: proc(query: cf.TypeRef) -> security.OSStatus ---
 }
 
+// Startup authorizes playback and library work on separate workers. Without
+// this cache every worker read opens another Keychain permission dialog.
+KEYCHAIN_OK :: security.OSStatus(security.errSec.Success)
+KEYCHAIN_MISSING :: security.OSStatus(security.errSec.ItemNotFound)
+
+keychain_cache: [Slot]string // owned; empty means no cached credential
+keychain_mutex: sync.Mutex
+
+keychain_clear_entry :: proc(entry: ^string) {
+	crypto.zero_explicit(raw_data(entry^), len(entry^))
+	delete(entry^)
+	entry^ = ""
+}
+
+keychain_set_entry :: proc(entry: ^string, token: string) {
+	keychain_clear_entry(entry)
+	entry^ = strings.clone(token)
+}
+
 keychain_query :: proc(slot: Slot) -> cf.TypeRef {
 	service := CFStringCreateWithCString(nil, SERVICE, u32(cf.StringBuiltInEncodings.UTF8))
 	if service == nil {return nil}
@@ -65,23 +86,29 @@ keychain_query :: proc(slot: Slot) -> cf.TypeRef {
 }
 
 load :: proc(slot: Slot = .Playback) -> (token: string, found: bool) {
+	sync.mutex_lock(&keychain_mutex)
+	defer sync.mutex_unlock(&keychain_mutex)
+	entry := &keychain_cache[slot]
+	if len(entry^) > 0 {return strings.clone(entry^), true}
 	query := keychain_query(slot)
 	if query == nil {return}
 	defer cf.Release(query)
 	CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue)
 	data: cf.TypeRef
-	if SecItemCopyMatching(query, &data) != security.OSStatus(security.errSec.Success) ||
-	   data == nil {return}
+	if SecItemCopyMatching(query, &data) != KEYCHAIN_OK || data == nil {return}
 	defer cf.Release(data)
 	length := CFDataGetLength(data)
-	if length <= 0 {return}
-	bytes := CFDataGetBytePtr(data)
+	bytes := length > 0 ? CFDataGetBytePtr(data) : nil
 	if bytes == nil {return}
-	return strings.clone(string(bytes[:length])), true
+	keychain_set_entry(entry, string(bytes[:length]))
+	return strings.clone(entry^), true
 }
 
 save :: proc(token: string, slot: Slot = .Playback) -> bool {
 	if len(token) == 0 || strings.contains(token, "\x00") {return false}
+	sync.mutex_lock(&keychain_mutex)
+	defer sync.mutex_unlock(&keychain_mutex)
+	entry := &keychain_cache[slot]
 	query := keychain_query(slot)
 	if query == nil {return false}
 	defer cf.Release(query)
@@ -104,18 +131,25 @@ save :: proc(token: string, slot: Slot = .Playback) -> bool {
 	CFDictionarySetValue(attributes, kSecValueData, data)
 	CFDictionarySetValue(attributes, kSecAttrLabel, label)
 	status := SecItemUpdate(query, attributes)
-	if status !=
-	   security.OSStatus(
-		   security.errSec.ItemNotFound,
-	   ) {return status == security.OSStatus(security.errSec.Success)}
-	CFDictionarySetValue(query, kSecValueData, data)
-	CFDictionarySetValue(query, kSecAttrLabel, label)
-	return SecItemAdd(query, nil) == security.OSStatus(security.errSec.Success)
+	if status == KEYCHAIN_MISSING {
+		CFDictionarySetValue(query, kSecValueData, data)
+		CFDictionarySetValue(query, kSecAttrLabel, label)
+		status = SecItemAdd(query, nil)
+	}
+	if status != KEYCHAIN_OK {return false}
+	keychain_set_entry(entry, token)
+	return true
 }
 
 clear :: proc(slot: Slot = .Playback) -> bool {
+	sync.mutex_lock(&keychain_mutex)
+	defer sync.mutex_unlock(&keychain_mutex)
+	entry := &keychain_cache[slot]
 	query := keychain_query(slot)
 	if query == nil {return false}
 	defer cf.Release(query)
-	return SecItemDelete(query) == security.OSStatus(security.errSec.Success)
+	status := SecItemDelete(query)
+	if status != KEYCHAIN_OK && status != KEYCHAIN_MISSING {return false}
+	keychain_clear_entry(entry)
+	return true
 }
