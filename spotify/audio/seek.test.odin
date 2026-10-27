@@ -156,3 +156,48 @@ corrupt_or_truncated_final_ogg_page_does_not_open :: proc(t: ^testing.T) {
 		testing.expect(t, !open_seek_stream(&s))
 	}
 }
+
+@(test)
+trailing_bytes_after_final_page_use_metadata_duration :: proc(t: ^testing.T) {
+	ogg, err := os.read_entire_file("spotify/audio/testdata/tone.ogg", context.allocator)
+	testing.expect(t, err == nil)
+	if err != nil {return}
+	defer delete(ogg)
+	// Some catalogue files carry bytes after the final Ogg page. The exact
+	// granule total is still usable, and metadata confirms its duration.
+	ciphertext := make([]u8, SPOTIFY_OGG_OFFSET + len(ogg) + 4096)
+	defer delete(ciphertext)
+	copy(ciphertext[SPOTIFY_OGG_OFFSET:], ogg)
+	key: [16]u8
+	key[0] = 23
+	cipher := init(key)
+	process(&cipher, ciphertext)
+	reset(&cipher)
+	id: [20]u8
+	id[0] = 24
+	dir, dir_err := os.make_directory_temp("", "spoti-audio-tail-*", context.allocator)
+	if !testing.expect(t, dir_err == nil) {return}
+	defer {_ = os.remove_all(dir); delete(dir)}
+	disk := open_disk_cache(id, dir)
+	for start := 0; start < len(ciphertext); start += RANGE_SIZE {
+		write_disk_range(
+			&disk,
+			start,
+			len(ciphertext),
+			ciphertext[start:min(start + RANGE_SIZE, len(ciphertext))],
+		)
+	}
+	close_disk_cache(&disk)
+	s := Seek_Stream {
+		key         = key,
+		disk        = open_disk_cache(id, dir),
+		duration_ms = 300,
+	}
+	defer close_seek_stream(&s)
+	if !testing.expect(t, open_seek_stream(&s)) {return}
+	testing.expect_value(t, s.total_frames, 13230)
+	pcm := make([]i16, s.total_frames * 2)
+	defer delete(pcm)
+	frames, ok := read_seek_pcm(&s, pcm)
+	testing.expect(t, ok && frames == s.total_frames)
+}

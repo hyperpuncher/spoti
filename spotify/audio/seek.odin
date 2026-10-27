@@ -1,5 +1,6 @@
 package audio
 
+import diagnostic "../../diagnostic"
 import http "../http"
 import "core:c"
 import "core:crypto"
@@ -21,6 +22,7 @@ Seek_Stream :: struct {
 	cancel:                                ^bool,
 	handle:                                ^stb.vorbis,
 	sample_rate, channels:                 int,
+	duration_ms:                           int,
 	size, position, cache_offset:          int,
 	cache:                                 [dynamic]u8,
 	input:                                 []u8,
@@ -239,7 +241,24 @@ open_seek_stream :: proc(s: ^Seek_Stream) -> bool {
 		s.total_frames = position
 		last_end = s.position - s.input_count
 	}
-	if s.failed || s.total_frames < 0 || last_end != s.size - SPOTIFY_OGG_OFFSET {return false}
+	end := s.size - SPOTIFY_OGG_OFFSET
+	if s.failed {return false}
+	if s.total_frames < 0 || last_end != end {
+		if s.duration_ms <= 0 || s.sample_rate <= 0 {return false}
+		expected := s.duration_ms * s.sample_rate / 1000
+		if s.total_frames < 0 {
+			s.total_frames = expected
+		} else if abs(s.total_frames - expected) > 2 * s.sample_rate {
+			return false
+		}
+		diagnostic.writef(
+			"audio tail fallback frames=%d last_end=%d end=%d duration_ms=%d",
+			s.total_frames,
+			last_end,
+			end,
+			s.duration_ms,
+		)
+	}
 	return restart_seek_decoder(s)
 }
 

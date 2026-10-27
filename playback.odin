@@ -377,10 +377,11 @@ preload_track :: proc(pointer: rawptr) {
 	work.source = source
 	if sync.atomic_load(&work.cancel) {return}
 	media := audio.Seek_Stream {
-		url     = source.url,
-		key     = source.key,
-		file_id = source.file_id,
-		cancel  = &work.cancel,
+		url         = source.url,
+		key         = source.key,
+		file_id     = source.file_id,
+		duration_ms = source.duration_ms,
+		cancel      = &work.cancel,
 	}
 	defer audio.close_seek_stream(&media)
 	if !audio.open_seek_stream(&media) {return}
@@ -438,7 +439,7 @@ login_and_decode :: proc(pointer: rawptr) {
 	}
 	media := &work.source.media
 	media.url, media.key, media.file_id = source.url, source.key, source.file_id
-	media.cancel = work.cancel
+	media.duration_ms, media.cancel = source.duration_ms, work.cancel
 	decode := player.Work {
 		media    = media,
 		queue    = work.queue,
