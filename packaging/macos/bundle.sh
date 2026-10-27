@@ -11,7 +11,17 @@ cp assets/icons/*.svg "$app/Resources/icons/"
 cp assets/icons/LICENSE "$app/Resources/icons/"
 cp assets/fonts/*.ttf assets/fonts/OFL.txt "$app/Resources/fonts/"
 cp assets/app/icon.png "$app/Resources/app/"
-cp assets/app/icon.icns "$app/Resources/AppIcon.icns"
+# iconutil only runs on macOS and produces the ICNS format its UI expects.
+iconset=build/spoti.iconset
+rm -rf "$iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+	sips -z "$size" "$size" assets/app/icon.png --out "$iconset/icon_${size}x${size}.png" >/dev/null
+	double=$((size * 2))
+	sips -z "$double" "$double" assets/app/icon.png --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
+done
+iconutil -c icns "$iconset" -o "$app/Resources/AppIcon.icns"
+rm -rf "$iconset"
 cp packaging/macos/Info.plist "$app/"
 case "${GITHUB_REF:-}" in
 	refs/tags/v*)
