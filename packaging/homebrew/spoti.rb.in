@@ -15,5 +15,5 @@ cask "spoti" do
   depends_on formula: "sdl3_image"
   depends_on formula: "sdl3_ttf"
 
-  app "Spoti.app"
+  app "spoti.app"
 end

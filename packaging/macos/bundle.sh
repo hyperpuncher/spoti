@@ -3,8 +3,8 @@ set -eu
 # macOS .app bundle: binary and runtime assets. The cask installs libraries.
 # UI SVGs are runtime assets; app icon sources and markdown stay in the repo.
 out=${1:?output .tar.zst path required}
-app=build/Spoti.app/Contents
-rm -rf build/Spoti.app
+app=build/spoti.app/Contents
+rm -rf build/spoti.app
 mkdir -p "$app/MacOS" "$app/Resources/app" "$app/Resources/icons" "$app/Resources/fonts"
 cp build/spoti "$app/MacOS/"
 cp assets/icons/*.svg "$app/Resources/icons/"
@@ -27,6 +27,6 @@ cp vendor/clay/LICENSE.md "$app/Resources/licenses/clay.txt"
 cp docs/licenses/*.txt "$app/Resources/licenses/"
 
 otool -L "$app/MacOS/spoti"
-codesign --force --sign - build/Spoti.app
-codesign --verify --strict build/Spoti.app
-tar --zstd -cf "$out" -C build Spoti.app
+codesign --force --sign - build/spoti.app
+codesign --verify --strict build/spoti.app
+tar --zstd -cf "$out" -C build spoti.app

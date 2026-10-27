@@ -88,14 +88,14 @@ download the `.tar.zst` artifact from a successful manual run. Linux and
 Windows include the binary and assets. Windows also includes DLLs and a
 fontconfig directory beside the exe; point `FONTCONFIG_FILE` and
 `FONTCONFIG_PATH` at it before running. macOS includes an ad-hoc signed
-`Spoti.app` with icons and fonts, but no library copies. the Homebrew cask
+`spoti.app` with icons and fonts, but no library copies. the Homebrew cask
 installs its library dependencies. for a manual archive, first run
 `brew install curl fontconfig sdl3 sdl3_image sdl3_ttf`.
 the app is not notarized.
 
 ## homebrew
 
-the cask installs `Spoti.app` on Apple Silicon with macOS 26 or newer.
+the cask installs `spoti.app` on Apple Silicon with macOS 26 or newer.
 the macOS CI runner stays on version 26 to match that minimum.
 tagged releases generate the cask from the macOS archive checksum and push
 it to `hyperpuncher/homebrew-tap`. this needs a `GH_PAT` repository secret
