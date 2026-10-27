@@ -109,6 +109,8 @@ save :: proc(token: string, slot: Slot = .Playback) -> bool {
 	sync.mutex_lock(&keychain_mutex)
 	defer sync.mutex_unlock(&keychain_mutex)
 	entry := &keychain_cache[slot]
+	// A refresh can return the same token; do not ask for write access again.
+	if entry^ == token {return true}
 	query := keychain_query(slot)
 	if query == nil {return false}
 	defer cf.Release(query)
