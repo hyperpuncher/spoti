@@ -158,7 +158,7 @@ open_track_menu :: proc(
 // without a network lookup.
 open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 	open_context_menu(menu, point, uri)
-	if strings.has_prefix(uri, "spotify:track:") {
+	if strings.has_prefix(uri, "spotify:track:") || strings.has_prefix(uri, "spotify:album:") {
 		set_menu(
 			menu,
 			[]Menu_Entry {
@@ -491,7 +491,33 @@ open_menu_at :: proc(
 		for index in visible.feed.first ..< visible.feed.last {
 			if !hit_clipped("feed_row", "detail_rows", point, u32(index)) {continue}
 			release := &client.release_feed.items[index]
+			if link := artist_link_at(
+				release.artist_links,
+				"feed_artist_link",
+				artist_link_id(u32(index), 0),
+				point,
+			); link != nil {
+				open_card_menu(menu, point, link.uri, state_is_pinned(app_state, link.uri))
+				return
+			}
 			open_release_menu(menu, point, release.entry.uri, release_feed_saved(client, release))
+			return
+		}
+	}
+	if !client.release_feed.open && client.detail.source == .Artist {
+		for section, group in ([]Visible_Items{visible.releases, visible.singles}) {
+			items := group == 0 ? client.detail.albums.items[:] : client.detail.singles.items[:]
+			id := group == 0 ? "release_card" : "single_card"
+			for index in section.first ..< min(section.last, len(items)) {
+				if !hit_clipped(id, "detail_rows", point, u32(index)) {continue}
+				entry := items[index]
+				open_link_menu(menu, point, entry.uri)
+				return
+			}
+		}
+		if hit("hero_banner", point) {
+			uri := detail_card_uri(client.detail)
+			open_card_menu(menu, point, uri, state_is_pinned(app_state, uri))
 			return
 		}
 	}

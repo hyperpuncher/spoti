@@ -78,6 +78,25 @@ text_fitting_preserves_graphemes_and_available_player_space :: proc(t: ^testing.
 		clay.BeginLayout()
 		player_bar(view, &textures, &fx, &state, width, 1)
 		commands := clay.EndLayout(0)
+		app := App {
+			selected = "spotify:track:AAAAAAAAAAAAAAAAAAAAAA",
+		}
+		app_frame := Frame {
+			right_clicked  = true,
+			foot_first_uri = "spotify:artist:CCCCCCCCCCCCCCCCCCCCCC",
+		}
+		for id in ([]string{"footer_title", "footer_artist", "footer_metadata"}) {
+			box := clay.GetElementData(clay.ID(id)).boundingBox
+			app_frame.mouse_right = {box.x + 1, box.y + 1}
+			app_click(&app, &app_frame, {})
+			testing.expect(t, app.menu.open)
+			testing.expect_value(
+				t,
+				app.menu.uri,
+				id == "footer_artist" ? app_frame.foot_first_uri : app.selected,
+			)
+			free_context_menu(&app.menu)
+		}
 		play := clay.GetElementData(clay.ID("footer_play")).boundingBox
 		testing.expect_value(t, play.x + play.width / 2, width / 2 + 50)
 		labels := 0

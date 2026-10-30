@@ -311,6 +311,7 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 	defer delete(client.detail.albums.items)
 	for &entry in client.detail.albums.items {
 		entry.name = "Release with a fairly long name"
+		entry.uri = "spotify:album:AAAAAAAAAAAAAAAAAAAAAA"
 		entry.subtitle = "2026"
 	}
 	client.detail.albums.total = 2000
@@ -319,6 +320,7 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 	defer delete(client.detail.singles.items)
 	for &entry in client.detail.singles.items {
 		entry.name = "Single title"
+		entry.uri = "spotify:album:BBBBBBBBBBBBBBBBBBBBBB"
 		entry.subtitle = "2026"
 	}
 	client.detail.singles.total = 2000
@@ -387,6 +389,34 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 				testing.expect(t, card.found)
 				testing.expect(t, card.boundingBox.x >= rows.x - 1)
 				right = max(right, card.boundingBox.x + card.boundingBox.width)
+			}
+			for section, group in ([]Visible_Items{visible.releases, visible.singles}) {
+				id := group == 0 ? "release_card" : "single_card"
+				for index in section.first ..< section.last {
+					box := clay.GetElementData(clay.ID(id, u32(index))).boundingBox
+					point := sdl.FPoint{box.x + 1, max(box.y, rows.y) + 1}
+					if point.y >= min(box.y + box.height, rows.y + rows.height) {continue}
+					menu: Context_Menu
+					open_menu_at(
+						&menu,
+						&client,
+						&client.pages[.Albums],
+						.Albums,
+						visible,
+						point,
+						&app_state,
+					)
+					testing.expect_value(t, menu.count, 4)
+					testing.expect_value(t, menu.entries[0].action, .Add_To_Queue)
+					testing.expect_value(t, menu.entries[1].action, .Add_To_Playlist)
+					testing.expect_value(
+						t,
+						menu.uri,
+						group == 0 ? client.detail.albums.items[index].uri : client.detail.singles.items[index].uri,
+					)
+					free_context_menu(&menu)
+					break
+				}
 			}
 			if right > 0 {testing.expect(t, right <= edge + 1)}
 			// Clay prunes its 100-entry scroll container array each frame, so a

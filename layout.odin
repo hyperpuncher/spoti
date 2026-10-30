@@ -430,7 +430,7 @@ player_bar :: proc(
 		backgroundColor = theme.player,
 	},
 	) {
-		if clay.UI()(
+		if clay.UI_WithId(clay.ID("footer_metadata"))(
 		{
 			layout = {
 				sizing = {width = clay.SizingFixed(left_width), height = clay.SizingGrow({})},

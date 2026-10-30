@@ -2076,6 +2076,21 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		   index >= 0 && index < len(play_queue) {
 			open_link_menu(&menu, mouse_right, play_queue[index].uri)
 		} else {menu.open = false}
+	} else if right_clicked && hit("footer_artist", mouse_right) && foot_first_uri != "" {
+		open_card_menu(
+			&menu,
+			mouse_right,
+			foot_first_uri,
+			state_is_pinned(&app_state, foot_first_uri),
+		)
+	} else if right_clicked && hit("footer_metadata", mouse_right) {
+		uri := selected
+		if play_index >= 0 && play_index < len(play_queue) {
+			uri = play_queue[play_index].uri
+		} else if uri == "" {
+			uri = app_state.last_played.track
+		}
+		if uri != "" {open_link_menu(&menu, mouse_right, uri)} else {menu.open = false}
 	} else if right_clicked {
 		open_menu_at(
 			&menu,
@@ -2145,10 +2160,10 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 						track_selected = app_queue_detail(app, menu.track)
 					}
 				case .Add_To_Queue:
-					if release := release_feed_find(&library_client, menu.uri);
-					   menu.track < 0 && release != nil {
+					if entry := release_menu_entry(&library_client, menu.uri);
+					   menu.track < 0 && entry != nil {
 						replace_string(&release_play_uri, "")
-						if release_feed_open_album(&library_client, release.entry) {
+						if release_feed_open_album(&library_client, entry^) {
 							replace_string(&release_queue_uri, menu.uri)
 						}
 					} else if !app_enqueue_uri(app, menu.uri) {
