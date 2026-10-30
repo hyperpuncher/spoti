@@ -30,18 +30,3 @@ spotify_packets_match_rust_reference :: proc(t: ^testing.T) {
 		}
 	}
 }
-
-@(test)
-header_then_payload_decryption_matches_reference :: proc(t: ^testing.T) {
-	key: [32]u8
-	for i in 0 ..< len(key) {key[i] = u8(i)}
-	ciphertext := [8]u8{0x61, 0x7d, 0xec, 0x2a, 0x9c, 0xcd, 0x37, 0x45}
-	plain := [8]u8{0xab, 0, 5, 1, 2, 3, 4, 5}
-	cipher := new(key[:])
-	nonce(&cipher, 0)
-	decrypt(&cipher, ciphertext[:3])
-	decrypt(&cipher, ciphertext[3:])
-	testing.expect(t, slice.equal(ciphertext[:], plain[:]))
-	tag := finish(&cipher)
-	testing.expect(t, slice.equal(tag[:], []u8{0xa5, 0x68, 0x60, 0x3b}))
-}

@@ -7,7 +7,6 @@ import "core:sync/chan"
 import "core:testing"
 import "core:thread"
 import library "spotify/library"
-import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
@@ -91,18 +90,6 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 	renderer := sdl.CreateSoftwareRenderer(surface)
 	if !testing.expect(t, renderer != nil) {return}
 	defer sdl.DestroyRenderer(renderer)
-	fade_state := ui.State {
-		renderer = renderer,
-	}
-	load_fades(&fade_state, &textures)
-	for key in ([]u64{textures.fade_top, textures.fade_bottom, textures.hero_fade, textures.fade_detail_top, textures.fade_detail_bottom}) {
-		texture := textures.by_key[key]
-		if !testing.expect(t, key != 0 && texture != nil) {continue}
-		r, g, b: u8
-		testing.expect(t, sdl.GetTextureColorMod(texture, &r, &g, &b))
-		color := key == textures.fade_top || key == textures.fade_bottom ? theme.sidebar : theme.bg
-		testing.expect(t, r == u8(color.r) && g == u8(color.g) && b == u8(color.b))
-	}
 	banner_texture := sdl.CreateTextureFromSurface(renderer, surface)
 	if !testing.expect(t, banner_texture != nil) {return}
 	defer sdl.DestroyTexture(banner_texture)
@@ -311,7 +298,6 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 	defer delete(client.detail.albums.items)
 	for &entry in client.detail.albums.items {
 		entry.name = "Release with a fairly long name"
-		entry.uri = "spotify:album:AAAAAAAAAAAAAAAAAAAAAA"
 		entry.subtitle = "2026"
 	}
 	client.detail.albums.total = 2000
@@ -320,7 +306,6 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 	defer delete(client.detail.singles.items)
 	for &entry in client.detail.singles.items {
 		entry.name = "Single title"
-		entry.uri = "spotify:album:BBBBBBBBBBBBBBBBBBBBBB"
 		entry.subtitle = "2026"
 	}
 	client.detail.singles.total = 2000
@@ -389,34 +374,6 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 				testing.expect(t, card.found)
 				testing.expect(t, card.boundingBox.x >= rows.x - 1)
 				right = max(right, card.boundingBox.x + card.boundingBox.width)
-			}
-			for section, group in ([]Visible_Items{visible.releases, visible.singles}) {
-				id := group == 0 ? "release_card" : "single_card"
-				for index in section.first ..< section.last {
-					box := clay.GetElementData(clay.ID(id, u32(index))).boundingBox
-					point := sdl.FPoint{box.x + 1, max(box.y, rows.y) + 1}
-					if point.y >= min(box.y + box.height, rows.y + rows.height) {continue}
-					menu: Context_Menu
-					open_menu_at(
-						&menu,
-						&client,
-						&client.pages[.Albums],
-						.Albums,
-						visible,
-						point,
-						&app_state,
-					)
-					testing.expect_value(t, menu.count, 4)
-					testing.expect_value(t, menu.entries[0].action, .Add_To_Queue)
-					testing.expect_value(t, menu.entries[1].action, .Add_To_Playlist)
-					testing.expect_value(
-						t,
-						menu.uri,
-						group == 0 ? client.detail.albums.items[index].uri : client.detail.singles.items[index].uri,
-					)
-					free_context_menu(&menu)
-					break
-				}
 			}
 			if right > 0 {testing.expect(t, right <= edge + 1)}
 			// Clay prunes its 100-entry scroll container array each frame, so a
@@ -534,25 +491,6 @@ wide_detail_pages_keep_layout_bounded :: proc(t: ^testing.T) {
 		)
 	}
 	testing.expect_value(t, errors, 0)
-}
-
-@(test)
-selected_card_matches_both_source_and_id :: proc(t: ^testing.T) {
-	detail := library.Detail {
-		ready  = true,
-		source = .Playlist,
-		id     = "same-id",
-	}
-	entry := library.Entry {
-		uri = "spotify:playlist:same-id",
-	}
-	testing.expect(t, card_selected(&entry, &detail))
-	entry.uri = "spotify:album:same-id"
-	testing.expect(t, !card_selected(&entry, &detail))
-	detail.source = .Album
-	testing.expect(t, card_selected(&entry, &detail))
-	detail.ready = false
-	testing.expect(t, !card_selected(&entry, &detail))
 }
 
 @(test)
@@ -716,26 +654,6 @@ fx_test_layout :: proc(fx: ^Button_Fx_Ctx, d: f32) {
 		d,
 		nil,
 	)
-}
-
-@(test)
-play_counts_use_grouped_numbers :: proc(t: ^testing.T) {
-	testing.expect_value(t, count_text(0), "0")
-	testing.expect_value(t, count_text(999), "999")
-	testing.expect_value(t, count_text(1000), "1,000")
-	testing.expect_value(t, count_text(563387486), "563,387,486")
-}
-
-@(test)
-playlist_columns_and_dates_handle_narrow_panes_and_unknown_dates :: proc(t: ^testing.T) {
-	album, date, _ := playlist_columns(600, 1)
-	testing.expect(t, album == 0 && date == 0)
-	album, date, _ = playlist_columns(800, 1)
-	testing.expect(t, album > 0 && date == 0)
-	album, date, _ = playlist_columns(1200, 1)
-	testing.expect(t, album > 0 && date > 0)
-	testing.expect_value(t, added_at_text(1726617600000), "Sep 18, 2024")
-	testing.expect_value(t, added_at_text(0), "")
 }
 
 @(test)

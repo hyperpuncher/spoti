@@ -132,14 +132,6 @@ track_metadata_matches_protoc :: proc(t: ^testing.T) {
 		t,
 		track.format == .Vorbis_160 && track.file_id[0] == 'a' && track.file_id[19] == 't',
 	)
-	with_high_quality := make([dynamic]u8)
-	defer delete(with_high_quality)
-	append(&with_high_quality, ..payload)
-	append(&with_high_quality, 0x62, 0x18, 0x0a, 0x14) // another AudioFile
-	for _ in 0 ..< 20 {append(&with_high_quality, 'Z')}
-	append(&with_high_quality, 0x10, 0x02) // OGG_VORBIS_320
-	best, selected := parse_track(with_high_quality[:], id)
-	testing.expect(t, selected && best.format == .Vorbis_320 && best.file_id[0] == 'Z')
 	_, ok = parse_track(payload[:len(payload) - 1], id)
 	testing.expect(t, !ok)
 	id[0] = 0

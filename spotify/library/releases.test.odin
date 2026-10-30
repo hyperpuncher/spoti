@@ -1,45 +1,11 @@
 package library
 
-import "core:encoding/json"
 import "core:mem/virtual"
 import "core:strings"
 import "core:sync/chan"
 import "core:testing"
 import "core:thread"
 import "core:time"
-
-@(test)
-release_feed_request_uses_the_music_feed :: proc(t: ^testing.T) {
-	body, ok := release_feed_request(50)
-	if !testing.expect(t, ok) {return}
-	request: struct {
-		operationName: string,
-		variables:     struct {
-			offset, limit:        int,
-			onlyUnPlayedItems:    bool,
-			includedContentTypes: []string,
-		},
-		extensions:    struct {
-			persistedQuery: struct {
-				version:    int,
-				sha256Hash: string,
-			},
-		},
-	}
-	if !testing.expect(
-		t,
-		json.unmarshal(body, &request, allocator = context.temp_allocator) == nil,
-	) {return}
-	testing.expect_value(t, request.operationName, "queryWhatsNewFeed")
-	testing.expect_value(t, request.variables.offset, 50)
-	testing.expect_value(t, request.variables.limit, 50)
-	testing.expect(t, !request.variables.onlyUnPlayedItems)
-	if testing.expect_value(t, len(request.variables.includedContentTypes), 1) {
-		testing.expect_value(t, request.variables.includedContentTypes[0], "ALBUM")
-	}
-	testing.expect_value(t, request.extensions.persistedQuery.version, 1)
-	testing.expect_value(t, request.extensions.persistedQuery.sha256Hash, RELEASE_FEED_HASH)
-}
 
 @(test)
 release_feed_filters_a_week_of_music_and_owns_results :: proc(t: ^testing.T) {

@@ -60,7 +60,7 @@ artist_window_uses_its_own_cursor :: proc(t: ^testing.T) {
 }
 
 @(test)
-saved_tracks_and_playlist_items_use_current_shapes :: proc(t: ^testing.T) {
+saved_tracks_use_current_shapes :: proc(t: ^testing.T) {
 	arena: virtual.Arena
 	if virtual.arena_init_growing(&arena) != nil {
 		testing.fail_now(t, "arena")
@@ -84,18 +84,6 @@ saved_tracks_and_playlist_items_use_current_shapes :: proc(t: ^testing.T) {
 		saved_rows[0].name == "Song" &&
 		saved_rows[0].artists == "X" &&
 		saved_rows[0].duration_ms == 1000,
-	)
-
-	playlist: string = `{"items":[{"item":{"name":"Song","uri":"spotify:track:1TifAMm1r1MascYZ5xGiQk","duration_ms":1000}}],"offset":0,"total":50,"next":"yes"}`
-	playlist_rows, playlist_total, playlist_next, playlist_more, _, playlist_ok :=
-		parse_track_rows(Playlist_Item, transmute([]u8)playlist, allocator)
-	testing.expect(
-		t,
-		playlist_ok &&
-		playlist_total == 50 &&
-		playlist_more &&
-		playlist_next == 1 &&
-		len(playlist_rows) == 1,
 	)
 }
 

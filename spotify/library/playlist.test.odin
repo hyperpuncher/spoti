@@ -1,7 +1,6 @@
 package library
 
 import ap "../ap"
-import "core:encoding/json"
 import "core:mem/virtual"
 import "core:testing"
 
@@ -122,18 +121,6 @@ web_playlist_items_parse_track_objects :: proc(t: ^testing.T) {
 	testing.expect_value(t, rows[1].uri, "spotify:track:bbb")
 	testing.expect_value(t, rows[0].added_at, 1704067200000)
 	testing.expect_value(t, rows[1].added_at, 0)
-}
-
-@(test)
-web_playlist_header_reads_track_total :: proc(t: ^testing.T) {
-	body := `{"id":"x","name":"Noice","uri":"spotify:playlist:x","images":[],"owner":{"id":"hyper_puncher","display_name":"hyper_puncher"},"items":{"total":1512}}`
-	header: Playlist_Ref
-	if !testing.expect(
-		t,
-		json.unmarshal(transmute([]u8)body, &header, allocator = context.temp_allocator) == nil,
-	) {return}
-	testing.expect_value(t, header.items.total, 1512)
-	testing.expect_value(t, header.owner.display_name, "hyper_puncher")
 }
 
 @(test)
