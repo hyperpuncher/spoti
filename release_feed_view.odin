@@ -41,15 +41,6 @@ release_feed_open_album :: proc(client: ^library.Client, entry: library.Entry) -
 	return library.open_detail(client, source, id, entry)
 }
 
-release_menu_entry :: proc(client: ^library.Client, uri: string) -> ^library.Entry {
-	if release := release_feed_find(client, uri); release != nil {return &release.entry}
-	if client.detail.source == .Artist {
-		for &entry in client.detail.albums.items {if entry.uri == uri {return &entry}}
-		for &entry in client.detail.singles.items {if entry.uri == uri {return &entry}}
-	}
-	return nil
-}
-
 release_feed_find :: proc(client: ^library.Client, uri: string) -> ^library.New_Release {
 	for &release in client.release_feed.items {
 		if release.entry.uri == uri {return &release}

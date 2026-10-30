@@ -175,9 +175,23 @@ app_enqueue_detail_rows :: proc(app: ^App, detail: ^library.Detail) {
 	app_enqueue_items(app, items[:])
 }
 
+app_library_result :: proc(result: ^library.Result, user_data: rawptr) {
+	if result.kind != .Queue_Album {return}
+	app := (^App)(user_data)
+	if result.ok && len(result.detail.rows) > 0 {
+		app_enqueue_detail_rows(app, &result.detail)
+	} else {
+		show_toast(app, "Couldn't add to queue")
+	}
+}
+
 // Menus retain only a URI. Resolve against current owned data at activation,
 // so navigation or a page replacement cannot leave a borrowed track dangling.
 app_enqueue_uri :: proc(app: ^App, uri: string) -> bool {
+	if strings.has_prefix(
+		uri,
+		"spotify:album:",
+	) {return library.queue_album(&app.library_client, uri)}
 	for source_row in app.library_client.detail.rows {
 		if source_row.uri != uri {continue}
 		row := source_row

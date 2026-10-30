@@ -1,9 +1,11 @@
 package main
 
+import "core:mem/virtual"
 import "core:strings"
 import "core:sync"
 import "core:sync/chan"
 import "core:testing"
+import "core:thread"
 import library "spotify/library"
 import player "spotify/player"
 
@@ -157,29 +159,65 @@ manual_queue_additions_keep_fifo_priority_and_collection_paging :: proc(t: ^test
 }
 
 @(test)
-queue_batch_additions_keep_fifo_order :: proc(t: ^testing.T) {
+queued_album_keeps_artist_page_and_fifo_order :: proc(t: ^testing.T) {
+	worker: thread.Thread
 	app := App {
 		play_index = 0,
 		stage      = .Playing,
-		selected   = strings.clone("first"),
+		selected   = strings.clone("current"),
 	}
-	build_play_queue(&app.play_queue, []library.Track_Row{{uri = "first"}, {uri = "second"}})
+	client := &app.library_client
+	client.state, client.worker = .Ready, &worker
+	client.detail = {
+		ready      = true,
+		source     = .Artist,
+		id         = "artist",
+		generation = 7,
+	}
+	client.requests, _ = chan.create_buffered(chan.Chan(library.Request), 1, context.allocator)
+	client.results, _ = chan.create_buffered(chan.Chan(library.Result), 1, context.allocator)
 	defer {
+		client.worker = nil
+		library.stop(client)
 		free_play_queue(&app.play_queue)
 		delete(app.selected)
 		delete(app.toast)
 	}
-	app_enqueue_items(
-		&app,
-		[]Play_Item {
-			clone_play_item(library.Track_Row{uri = "a"}, 0),
-			clone_play_item(library.Track_Row{uri = "b"}, 0),
-		},
+	build_play_queue(&app.play_queue, []library.Track_Row{{uri = "current"}, {uri = "next"}})
+	if !testing.expect(t, app_enqueue_uri(&app, "spotify:album:album")) {return}
+	request, received := chan.try_recv(client.requests)
+	if !testing.expect(t, received && request.kind == .Queue_Album) {return}
+	result := library.Result {
+		request = request,
+		ok      = true,
+	}
+	if !testing.expect(
+		t,
+		virtual.arena_init_growing(&result.detail.arena) == nil,
+	) {library.free_request(request); return}
+	allocator := virtual.arena_allocator(&result.detail.arena)
+	result.detail.source, result.detail.id, result.detail.name = .Album, "album", "Album"
+	result.detail.rows = make([dynamic]library.Track_Row, 2, allocator)
+	for &row, index in result.detail.rows {row = library.clone_row(library.Track_Row{uri = index == 0 ? "a" : "b", name = "Added track"}, allocator)}
+	_ = chan.send(client.results, result)
+	_ = library.poll(client, app_library_result, &app)
+	testing.expect(
+		t,
+		client.detail.source == .Artist &&
+		client.detail.id == "artist" &&
+		client.detail.generation == 7,
 	)
+	if testing.expect_value(t, len(app.play_queue), 4) {
+		testing.expect_value(t, app.play_queue[1].uri, "a")
+		testing.expect_value(t, app.play_queue[1].name, "Added track")
+		testing.expect_value(t, app.play_queue[1].album_uri, "spotify:album:album")
+		testing.expect_value(t, app.play_queue[2].uri, "b")
+		testing.expect_value(t, app.play_queue[3].uri, "next")
+	}
+	_ = chan.send(client.results, library.Result{kind = .Queue_Album, status = 403})
+	_ = library.poll(client, app_library_result, &app)
 	testing.expect_value(t, len(app.play_queue), 4)
-	testing.expect_value(t, app.play_queue[1].uri, "a")
-	testing.expect_value(t, app.play_queue[2].uri, "b")
-	testing.expect(t, app.play_queue[1].queued && app.play_queue[2].queued)
+	testing.expect_value(t, app.toast, "Couldn't add to queue")
 }
 
 @(test)

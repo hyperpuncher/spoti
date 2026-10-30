@@ -43,6 +43,7 @@ Request_Kind :: enum {
 	Player_State,
 	Auth, // result-only: the worker could not sign in
 	Release_Feed,
+	Queue_Album,
 }
 
 Request :: struct {
@@ -328,6 +329,34 @@ handle :: proc(
 					client.saved_at = time.time_add(time.now(), SAVED_CHECK_BACKOFF)
 				}
 			}
+		}
+	case .Queue_Album:
+		result.detail, result.status, result.ok = fetch_detail(
+			tokens.access,
+			.Album,
+			request.id,
+			reuse = reuse,
+		)
+		detail := &result.detail
+		allocator := virtual.arena_allocator(&detail.arena)
+		detail.rows.allocator = allocator
+		for result.ok && detail.has_more {
+			if sync.atomic_load(&client.cancel) {result.ok = false; result.status = -1; break}
+			rows, _, next, more, status, ok := fetch_track_page(
+				tokens.access,
+				.Album,
+				request.id,
+				detail.next_offset,
+				allocator,
+				reuse = reuse,
+			)
+			if !ok || more && next <= detail.next_offset {
+				result.ok = false
+				result.status = status != 0 ? status : PLAYLIST_INVALID_RESPONSE
+				break
+			}
+			append(&detail.rows, ..rows[:])
+			detail.next_offset, detail.has_more = next, more
 		}
 	case .Like:
 		uri := library_uri(request.source, request.id)
@@ -798,6 +827,18 @@ send_player_command :: proc(
 	return true
 }
 
+queue_album :: proc(client: ^Client, uri: string) -> bool {
+	if !strings.has_prefix(uri, "spotify:album:") {return false}
+	id := uri[len("spotify:album:"):]
+	if !safe_id(id) {return false}
+	request := Request {
+		kind   = .Queue_Album,
+		source = .Album,
+		id     = strings.clone(id),
+	}
+	return queue_request(client, &request)
+}
+
 like_pending :: proc(client: ^Client, source: Source, id: string) -> bool {
 	for pending in client.likes_pending {
 		if pending.source == source && pending.id == id {return true}
@@ -1066,11 +1107,18 @@ take_cover :: proc(client: ^Client) -> (cover: Cover_Result, ok: bool) {
 	return cover, true
 }
 
-poll :: proc(client: ^Client) -> bool {
+// on_result borrows each response before apply updates the client and frees it.
+poll :: proc(
+	client: ^Client,
+	on_result: proc(result: ^Result, user_data: rawptr) = nil,
+	user_data: rawptr = nil,
+) -> bool {
 	changed := false
 	for result in chan.try_recv(client.results) {
 		changed = true
-		apply(client, result)
+		local := result
+		if on_result != nil {on_result(&local, user_data)}
+		apply(client, local)
 	}
 	for result in chan.try_recv(client.cover_results) {
 		changed = true
@@ -1174,6 +1222,7 @@ apply :: proc(client: ^Client, result: Result) {
 		client.state = client.failed ? .Failed : client.remaining_initial > 0 ? .Loading : .Ready
 	case .Release_Feed:
 		apply_releases(client, &local)
+	case .Queue_Album: // Consumed by the UI without replacing the visible detail.
 	case .Auth:
 		client.state = local.auth == .Missing_Client_ID ? .Missing_Client_ID : .Sign_In_Failed
 	case .Detail:
