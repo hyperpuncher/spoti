@@ -29,6 +29,9 @@ release_feed_layout_keeps_big_covers_and_bounded_rows :: proc(t: ^testing.T) {
 	testing.expect(t, !detail_needs_more(&client, {}))
 	client.release_feed.items = make([dynamic]library.New_Release, 3000)
 	defer delete(client.release_feed.items)
+	artists := [1]library.Artist_Link {
+		{name = "Artist", uri = "spotify:artist:CCCCCCCCCCCCCCCCCCCCCC"},
+	}
 	for &release in client.release_feed.items {
 		release.entry = {
 			name     = "Release",
@@ -36,6 +39,7 @@ release_feed_layout_keeps_big_covers_and_bounded_rows :: proc(t: ^testing.T) {
 			subtitle = "Artist",
 			image    = "https://i.scdn.co/image/test",
 		}
+		release.artist_links = artists[:]
 		release.kind = "Single"
 		release.released_at = time.time_add(time.now(), -2 * 24 * time.Hour)
 	}
@@ -122,6 +126,20 @@ release_feed_layout_keeps_big_covers_and_bounded_rows :: proc(t: ^testing.T) {
 				row := clay.GetElementData(clay.ID("feed_row", u32(index))).boundingBox
 				point := sdl.FPoint{row.x + 10 * scale, row.y + row.height / 2}
 				if point.y < clip.y || point.y >= clip.y + clip.height {continue}
+				artist := clay.GetElementData(
+					clay.ID("feed_artist_link", artist_link_id(u32(index), 0)),
+				)
+				artist_point := sdl.FPoint{artist.boundingBox.x + 1, artist.boundingBox.y + 1}
+				link := artist_link_at(
+					artists[:],
+					"feed_artist_link",
+					artist_link_id(u32(index), 0),
+					artist_point,
+				)
+				if testing.expect(
+					t,
+					link != nil,
+				) {testing.expect_value(t, link.uri, artists[0].uri)}
 				menu: Context_Menu
 				open_menu_at(
 					&menu,

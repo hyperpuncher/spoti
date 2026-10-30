@@ -159,12 +159,15 @@ release_feed_page :: proc(
 							text_width,
 							{fontId = 2, fontSize = 20, textColor = theme.text, wrapMode = .None},
 						)
-						fitted_text(
-							ui_state,
-							entry.subtitle,
-							text_width,
-							{fontSize = 14, textColor = theme.muted, wrapMode = .None},
-						)
+						if clay.UI()({}) {
+							artist_links_row(
+								ui_state,
+								release.artist_links,
+								text_width,
+								"feed_artist_link",
+								artist_link_id(u32(index), 0),
+							)
+						}
 						if clay.UI()(
 						{layout = {childGap = u16(6 * d), childAlignment = {y = .Center}}},
 						) {

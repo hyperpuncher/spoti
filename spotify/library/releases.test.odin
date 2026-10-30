@@ -47,7 +47,7 @@ release_feed_filters_a_week_of_music_and_owns_results :: proc(t: ^testing.T) {
 	if !testing.expect(t, virtual.arena_init_growing(&arena) == nil) {return}
 	defer virtual.arena_destroy(&arena)
 	body := `{"data":{"whatsNewFeedItems":{"totalCount":6,"pagingInfo":{"offset":0,"limit":50},"items":[
-		{"content":{"__typename":"AlbumResponseWrapper","data":{"__typename":"Album","uri":"spotify:album:AAAAAAAAAAAAAAAAAAAAAA","name":"Single","albumType":"SINGLE","date":{"isoString":"2026-10-14T02:00:00+02:00"},"artists":{"items":[{"profile":{"name":"Artist"}}]}}}},
+		{"content":{"__typename":"AlbumResponseWrapper","data":{"__typename":"Album","uri":"spotify:album:AAAAAAAAAAAAAAAAAAAAAA","name":"Single","albumType":"SINGLE","date":{"isoString":"2026-10-14T02:00:00+02:00"},"artists":{"items":[{"uri":"spotify:artist:CCCCCCCCCCCCCCCCCCCCCC","profile":{"name":"Artist"}}]}}}},
 		{"content":{"__typename":"AlbumResponseWrapper","data":{"__typename":"Album","uri":"spotify:album:BBBBBBBBBBBBBBBBBBBBBB","name":"EP","albumType":"EP","date":{"isoString":"2026-10-07T00:00:00Z"}}}},
 		{"content":{"__typename":"AlbumResponseWrapper","data":{"__typename":"Album","uri":"spotify:album:CCCCCCCCCCCCCCCCCCCCCC","name":"Old","date":{"isoString":"2026-10-06T00:00:00Z"}}}},
 		{"content":{"__typename":"AlbumResponseWrapper","data":{"__typename":"Album","uri":"spotify:album:DDDDDDDDDDDDDDDDDDDDDD","name":"Future","date":{"isoString":"2026-10-15T00:00:00Z"}}}},
@@ -75,6 +75,14 @@ release_feed_filters_a_week_of_music_and_owns_results :: proc(t: ^testing.T) {
 	virtual.arena_destroy(&arena)
 	arena = {}
 	testing.expect_value(t, feed.items[0].entry.name, "Single")
+	if testing.expect_value(t, len(feed.items[0].artist_links), 1) {
+		testing.expect_value(t, feed.items[0].artist_links[0].name, "Artist")
+		testing.expect_value(
+			t,
+			feed.items[0].artist_links[0].uri,
+			"spotify:artist:CCCCCCCCCCCCCCCCCCCCCC",
+		)
+	}
 	testing.expect_value(t, feed.items[1].released_at, time.unix(1791331200, 0))
 	for invalid in ([]string{"{\"errors\":[{\"message\":\"PersistedQueryNotFound\"}]}", "{\"data\":{\"whatsNewFeedItems\":null}}", "{\"data\":{\"whatsNewFeedItems\":{\"totalCount\":1,\"pagingInfo\":{\"offset\":0,\"limit\":50},\"items\":[]}}}"}) {
 		_, _, _, parsed := parse_new_releases(transmute([]u8)invalid, 0, time.now())

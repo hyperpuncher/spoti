@@ -162,6 +162,19 @@ artist_links_hovered :: proc(links: []library.Artist_Link, id: string, base: u32
 	return false
 }
 
+// The caller checks the containing row or clip before looking for a link.
+artist_link_at :: proc(
+	links: []library.Artist_Link,
+	id: string,
+	base: u32,
+	point: sdl.FPoint,
+) -> ^library.Artist_Link {
+	for index in 0 ..< min(len(links), 64) {
+		if links[index].uri != "" && hit_index(id, point, base + u32(index)) {return &links[index]}
+	}
+	return nil
+}
+
 // Follows the desktop theme through SDL; unknown means dark, and
 // SPOTI_THEME forces light or dark for testing and user control.
 system_dark :: proc() -> bool {
@@ -2204,7 +2217,19 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 						replace_string(&release_play_uri, release.entry.uri)
 					}
 				} else {
-					_ = open_entry_page(&nav_ctx, release.entry)
+					entry := release.entry
+					if link := artist_link_at(
+						release.artist_links,
+						"feed_artist_link",
+						artist_link_id(u32(index), 0),
+						mouse_click,
+					); link != nil {
+						entry = {
+							name = link.name,
+							uri  = link.uri,
+						}
+					}
+					_ = open_entry_page(&nav_ctx, entry)
 				}
 				break
 			}
@@ -2315,16 +2340,16 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				}
 			}
 			if !handled && library_client.detail.ready {
-				for ai in 0 ..< min(len(library_client.detail.artist_links), 64) {
-					link := library_client.detail.artist_links[ai]
-					if len(link.uri) == 0 {continue}
-					if !hit_index("hero_artist_link", mouse_click, u32(ai)) {continue}
-					preview := library.Entry {
-						name = link.name,
-						uri  = link.uri,
-					}
-					handled = open_entry_page(&nav_ctx, preview)
-					break
+				if link := artist_link_at(
+					library_client.detail.artist_links,
+					"hero_artist_link",
+					0,
+					mouse_click,
+				); link != nil {
+					handled = open_entry_page(
+						&nav_ctx,
+						library.Entry{name = link.name, uri = link.uri},
+					)
 				}
 			}
 			if !handled && library_client.detail.ready {
@@ -2385,21 +2410,16 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 						if index < len(library_client.detail.rows) {
 							row := library_client.detail.rows[index]
 							slot := u32(index - visible.tracks.first)
-							for ai in 0 ..< min(len(row.artist_links), 64) {
-								link := row.artist_links[ai]
-								if len(link.uri) == 0 {continue}
-								if !hit_clipped(
-									"artist_link",
-									"detail_rows",
-									mouse_click,
-									artist_link_id(slot, ai),
-								) {continue}
-								preview := library.Entry {
-									name = link.name,
-									uri  = link.uri,
-								}
-								handled = open_entry_page(&nav_ctx, preview)
-								break
+							if link := artist_link_at(
+								row.artist_links,
+								"artist_link",
+								artist_link_id(slot, 0),
+								mouse_click,
+							); link != nil {
+								handled = open_entry_page(
+									&nav_ctx,
+									library.Entry{name = link.name, uri = link.uri},
+								)
 							}
 							if !handled &&
 							   row.album_uri != "" &&

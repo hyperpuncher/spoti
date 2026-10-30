@@ -16,9 +16,10 @@ RELEASE_INVALID_RESPONSE :: -4
 RELEASE_FEED_HASH :: "3b53dede3c6054e8b7c962dd280eb6761c5d1c82b06b039f4110d76a62b4966b"
 
 New_Release :: struct {
-	entry:       Entry,
-	released_at: time.Time,
-	kind:        string, // static catalog label
+	entry:        Entry,
+	released_at:  time.Time,
+	kind:         string, // static catalog label
+	artist_links: []Artist_Link,
 }
 
 Release_Feed :: struct {
@@ -117,6 +118,7 @@ parse_new_releases :: proc(
 		} `json:"coverArt"`,
 		artists:    struct {
 			items: []struct {
+				uri:     string,
 				profile: struct {
 					name: string,
 				},
@@ -167,7 +169,10 @@ parse_new_releases :: proc(
 		date := release_day(released_at)
 		if date < cutoff || date > today {continue}
 		artists := make([]Artist, len(album.artists.items), context.temp_allocator)
-		for artist, index in album.artists.items {artists[index].name = artist.profile.name}
+		for artist, index in album.artists.items {artists[index] = Artist {
+				name = artist.profile.name,
+				uri  = artist.uri,
+			}}
 		kind :=
 			album.album_type == "EP" ? "EP" : release_kind(strings.to_lower(album.album_type, context.temp_allocator), album.tracks.total)
 		append(
@@ -181,6 +186,7 @@ parse_new_releases :: proc(
 					year = release_year(date, allocator),
 					total = album.tracks.total,
 				},
+				artist_links = artist_links_from(artists, allocator),
 				released_at = released_at,
 				kind = kind,
 			},
@@ -275,7 +281,12 @@ merge_new_releases :: proc(feed: ^Release_Feed, incoming: []New_Release) {
 		if duplicate {continue}
 		append(
 			&feed.items,
-			New_Release{clone_entry(release.entry, allocator), release.released_at, release.kind},
+			New_Release {
+				clone_entry(release.entry, allocator),
+				release.released_at,
+				release.kind,
+				clone_artist_links(release.artist_links, allocator),
+			},
 		)
 	}
 	slice.sort_by(feed.items[:], newer_release)
