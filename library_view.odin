@@ -1917,7 +1917,9 @@ detail_page :: proc(
 				)
 			}
 			if client.detail.source != .Liked {
-				like_disabled := library.detail_loading_visible(client) || client.like_pending
+				like_disabled :=
+					library.detail_loading_visible(client) ||
+					library.like_pending(client, detail.source, detail.id)
 				icon_button(
 					"hero_like",
 					client.detail.liked ? "circle-check" : "circle-plus",

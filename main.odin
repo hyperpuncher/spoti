@@ -2113,8 +2113,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				case .Open_In_Spotify:
 					open_spotify_uri(menu.uri)
 				case .Save_Album:
-					if release := release_feed_find(&library_client, menu.uri);
-					   release != nil && !library_client.like_pending {
+					if release := release_feed_find(&library_client, menu.uri); release != nil {
 						_ = library.toggle_like(
 							&library_client,
 							.Album,
@@ -2193,14 +2192,12 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				if !hit_clipped("feed_row", "detail_rows", mouse_click, u32(index)) {continue}
 				release := &library_client.release_feed.items[index]
 				if hit(release_feed_action("save", index), mouse_click) {
-					if !library_client.like_pending {
-						_ = library.toggle_like(
-							&library_client,
-							.Album,
-							release.entry.uri[len("spotify:album:"):],
-							!release_feed_saved(&library_client, release),
-						)
-					}
+					_ = library.toggle_like(
+						&library_client,
+						.Album,
+						release.entry.uri[len("spotify:album:"):],
+						!release_feed_saved(&library_client, release),
+					)
 				} else if hit(release_feed_action("play", index), mouse_click) {
 					replace_string(&release_queue_uri, "")
 					if release_feed_open_album(&library_client, release.entry) {
@@ -2335,7 +2332,6 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 					detail := library_client.detail
 					if detail.source != .Liked &&
 					   !library_client.detail_loading &&
-					   !library_client.like_pending &&
 					   library.toggle_like(
 						   &library_client,
 						   detail.source,

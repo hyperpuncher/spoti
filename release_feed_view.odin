@@ -193,7 +193,7 @@ release_feed_page :: proc(
 							icon_button(
 								release_feed_action("save", index),
 								saved ? "circle-check" : "circle-plus",
-								client.like_pending ? .Disabled : saved ? .Green : .Muted,
+								library.like_pending(client, .Album, entry.uri[len("spotify:album:"):]) ? .Disabled : saved ? .Green : .Muted,
 								textures,
 								fx,
 								d,

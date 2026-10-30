@@ -154,7 +154,25 @@ release_feed_stops_on_rate_limit_and_resumes_only_when_opened :: proc(t: ^testin
 
 @(test)
 release_feed_save_updates_only_after_confirmation :: proc(t: ^testing.T) {
-	client: Client
+	fake_worker: thread.Thread
+	client := Client {
+		state  = .Ready,
+		worker = &fake_worker,
+	}
+	client.requests, _ = chan.create_buffered(chan.Chan(Request), 4, context.allocator)
+	defer {
+		for request in chan.try_recv(client.requests) {free_request(request)}
+		chan.destroy(client.requests)
+		for pending in client.likes_pending {delete(pending.id)}
+		delete(client.likes_pending)
+	}
+	first :: "AAAAAAAAAAAAAAAAAAAAAA"
+	second :: "BBBBBBBBBBBBBBBBBBBBBB"
+	testing.expect(t, toggle_like(&client, .Album, first, true))
+	testing.expect(t, like_pending(&client, .Album, first))
+	testing.expect(t, !like_pending(&client, .Album, second))
+	testing.expect(t, !toggle_like(&client, .Album, first, true))
+	testing.expect(t, toggle_like(&client, .Album, second, true))
 	defer free_release_feed(&client.release_feed)
 	page := &client.pages[.Albums]
 	if !testing.expect(t, virtual.arena_init_growing(&page.arena) == nil) {return}
@@ -182,6 +200,9 @@ release_feed_save_updates_only_after_confirmation :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, !client.release_feed.items[0].entry.saved)
 	testing.expect_value(t, len(page.items), 0)
+	testing.expect(t, !like_pending(&client, .Album, first))
+	testing.expect(t, like_pending(&client, .Album, second))
+	testing.expect(t, toggle_like(&client, .Album, first, true))
 	apply(
 		&client,
 		Result {
@@ -194,6 +215,8 @@ release_feed_save_updates_only_after_confirmation :: proc(t: ^testing.T) {
 		},
 	)
 	testing.expect(t, client.release_feed.items[0].entry.saved)
+	testing.expect(t, !like_pending(&client, .Album, first))
+	testing.expect(t, like_pending(&client, .Album, second))
 	if !testing.expect_value(t, len(page.items), 1) {return}
 	testing.expect_value(t, page.items[0].name, "Release")
 	apply(

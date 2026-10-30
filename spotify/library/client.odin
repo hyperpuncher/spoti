@@ -133,7 +133,10 @@ Client :: struct {
 	search_loading:        bool,
 	search_error:          int,
 	search_pages:          [Kind]Page,
-	like_pending:          bool, // hero heart toggle in flight
+	likes_pending:         [dynamic]struct {
+		source: Source,
+		id:     string,
+	},
 	me_id:                 string, // owned; the signed-in account id
 	devices:               [dynamic]Device, // owned; Connect devices
 	devices_pending:       bool,
@@ -795,9 +798,16 @@ send_player_command :: proc(
 	return true
 }
 
-// with a Like result that flips the detail and syncs the sidebar grids.
+like_pending :: proc(client: ^Client, source: Source, id: string) -> bool {
+	for pending in client.likes_pending {
+		if pending.source == source && pending.id == id {return true}
+	}
+	return false
+}
+
+// A Like result updates the detail and library after confirmation.
 toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) -> bool {
-	if len(id) == 0 {return false}
+	if len(id) == 0 || like_pending(client, source, id) {return false}
 	request := Request {
 		kind   = .Like,
 		source = source,
@@ -805,7 +815,7 @@ toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) ->
 		liked  = liked,
 	}
 	queue_request(client, &request) or_return
-	client.like_pending = true
+	append(&client.likes_pending, {source, strings.clone(id)})
 	return true
 }
 
@@ -1200,14 +1210,18 @@ apply :: proc(client: ^Client, result: Result) {
 			client.stale_playlist = ""
 		}
 	case .Like:
+		for pending, index in client.likes_pending {
+			if pending.source != local.source || pending.id != local.id {continue}
+			delete(pending.id)
+			unordered_remove(&client.likes_pending, index)
+			break
+		}
 		if !local.ok {
-			client.like_pending = false
 			client.last_http_status = local.status
 			diagnostic.result("like", false, local.status, 0, 0, false)
 			return
 		}
 		diagnostic.result("like", true, local.status, 0, 0, false)
-		client.like_pending = false
 		if local.source == client.detail.source && local.id == client.detail.id {
 			client.detail.liked = local.liked
 		}
@@ -1433,6 +1447,8 @@ stop :: proc(client: ^Client) {
 	delete(client.remote_device)
 	delete(client.write_name)
 	delete(client.stale_playlist)
+	for pending in client.likes_pending {delete(pending.id)}
+	delete(client.likes_pending)
 	for i in 0 ..< len(client.cover_queue) {artwork.free_image(&client.cover_queue[i].image)}
 	delete(client.cover_queue)
 	client^ = {}
