@@ -25,6 +25,16 @@ text_fallbacks_cover_scripts_and_symbols_without_replacing_geist :: proc(t: ^tes
 		for role in ([]Font_Role{.Regular, .Numeric, .Bold, .Medium}) {
 			font := font_for_size(&state, size, u16(role))
 			if !testing.expect(t, font != nil) {continue}
+			advance: c.int
+			for digit in '0' ..= '9' {
+				width: c.int
+				if !testing.expect(
+					t,
+					ttf.GetGlyphMetrics(font, u32(digit), nil, nil, nil, nil, &width),
+				) {continue}
+				if digit == '0' {advance = width}
+				testing.expect_value(t, width, advance)
+			}
 			latin := "Rally House"
 			before, after: c.int
 			testing.expect(

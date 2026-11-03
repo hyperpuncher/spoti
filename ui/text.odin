@@ -108,8 +108,7 @@ glyph_bounds :: proc(font: ^ttf.Font, value: string) -> sdl.Rect {
 	return {min_x, ttf.GetFontAscent(font) - max_y, max_x - min_x, max_y - min_y}
 }
 
-// Short monospace labels need no shaping or kerning. Include every glyph
-// so "ctrl" uses the tall l, not only the first letter's x-height.
+// Include every glyph so "ctrl" uses the tall l, not only the first letter.
 label_bounds :: proc(font: ^ttf.Font, value: string) -> (bounds: sdl.Rect) {
 	if font == nil {return}
 	pen: c.int

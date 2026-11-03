@@ -151,7 +151,6 @@ keep offscreen rows out of layout and clip pointer hits to their visible area.
 card and track text is shortened to fit before layout. grids and track tables
 own clipping instead of allocating clip containers per card or track row. image decoding accepts dimensions up
 to 4096 pixels so Spotify's 2660-pixel artist headers can be displayed.
-numeric fields use the monospace face; titles use proportional faces.
 square cover artwork is not cropped or otherwise materially changed;
 dedicated banners may be cropped to fit their bounded header.
 

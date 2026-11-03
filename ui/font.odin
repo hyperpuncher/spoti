@@ -10,9 +10,8 @@ import fontconfig "fontconfig"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
-// Product typography is the vendored Geist pair in assets/fonts, so every
-// platform renders the same faces. The variable font carries the weights
-// as named instances; the ids below are properties of that file.
+// The bundled variable font carries the weights as named instances; the ids
+// below are properties of that file.
 Font_Role :: enum {
 	Regular,
 	Numeric,
@@ -21,7 +20,6 @@ Font_Role :: enum {
 }
 
 GEIST_VAR :: "Geist[wght].ttf"
-GEIST_MONO :: "GeistMono-Regular.ttf"
 GEIST_FACE_REGULAR :: 0
 GEIST_FACE_MEDIUM :: (5 << 16)
 GEIST_FACE_EXTRA_BOLD :: (8 << 16)
@@ -80,28 +78,24 @@ resolve_bundled :: proc(file: string) -> (path: string, ok: bool) {
 // ships without them. Other platforms have no system fallback: without
 // the bundle there is nothing legible to fall back to.
 resolve_role :: proc(role: Font_Role) -> (path: string, index: int, ok: bool) {
-	file := GEIST_VAR
 	face := GEIST_FACE_REGULAR
-	family: cstring = "sans-serif"
 	weight := fontconfig.WEIGHT_REGULAR
 	switch role {
-	case .Regular:
-	case .Numeric:
-		file, face, family = GEIST_MONO, 0, "monospace"
+	case .Regular, .Numeric:
 	case .Bold:
 		face, weight = GEIST_FACE_EXTRA_BOLD, fontconfig.WEIGHT_EXTRABOLD
 	case .Medium:
 		face, weight = GEIST_FACE_MEDIUM, fontconfig.WEIGHT_MEDIUM
 	}
-	if bundled, found := resolve_bundled(file); found {return bundled, face, true}
+	if bundled, found := resolve_bundled(GEIST_VAR); found {return bundled, face, true}
 	when ODIN_OS == .Linux {
 		config := fontconfig.InitLoadConfigAndFonts()
 		if config == nil {return}
 		defer fontconfig.ConfigDestroy(config)
-		path, index = fontconfig.match(config, 0, weight, family = family)
+		path, index = fontconfig.match(config, 0, weight, family = "sans-serif")
 		return path, index, path != ""
 	} else {
-		fmt.eprintln("missing bundled font:", file)
+		fmt.eprintln("missing bundled font:", GEIST_VAR)
 		return "", 0, false
 	}
 }

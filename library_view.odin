@@ -1449,7 +1449,6 @@ detail_rows_ready :: proc(client: ^library.Client) -> bool {
 	return client.detail.ready && client.detail.rows_error == 0 && len(client.detail.rows) > 0
 }
 
-// Counts share one grouped format; numeric rows use the monospace face.
 count_text :: proc(value: i64) -> string {
 	buffer: [20]u8
 	digits := fmt.bprintf(buffer[:], "%d", max(0, value))

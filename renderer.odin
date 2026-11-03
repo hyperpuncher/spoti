@@ -153,7 +153,6 @@ clay_error :: proc "c" (data: clay.ErrorData) {
 }
 
 // Text userData is passed through Clay's measurement and render commands.
-// Only short monospace labels use this marker.
 @(rodata)
 LABEL_INK_BOUNDS := true
 

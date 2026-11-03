@@ -3,9 +3,8 @@
 Geist is the primary face on Linux, macOS, and Windows.
 
 - `Geist[wght].ttf`: regular by default, Medium for track titles, and
-  ExtraBold for hero titles and headings.
-- `GeistMono-Regular.ttf`: numeric fields.
-- `OFL.txt`: the SIL Open Font License for both files.
+  ExtraBold for hero titles and headings. numeric fields use regular.
+- `OFL.txt`: the SIL Open Font License for the bundled font.
 
 Source: https://github.com/vercel/geist-font
 
@@ -22,8 +21,8 @@ not just CJK. SDL_ttf verifies glyph coverage and attaches the selected
 face to the primary font. Font sources and character matches are cached;
 faces are opened only for sizes used by the interface.
 
-Measurement and drawing use the same prepared font. Existing Geist glyphs
-keep their original appearance and advances. Truncation and its measurement
+Measurement and drawing use the same prepared font. Fallbacks do not replace
+glyphs already supplied by the bundled font. Truncation and its measurement
 probes stop only at complete Unicode grapheme clusters.
 
 Fontconfig is required on all three targets. Its configuration must include
