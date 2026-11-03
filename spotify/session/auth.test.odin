@@ -44,7 +44,6 @@ streaming_grant_is_reused_with_independent_owned_copies :: proc(t: ^testing.T) {
 	for !sync.atomic_load(&waiting.started) {time.sleep(time.Millisecond)}
 	time.sleep(30 * time.Millisecond)
 	sync.unlock(&authorization_mutex)
-	thread.join(worker)
 	thread.destroy(worker)
 	testing.expect(t, waiting.accepted)
 

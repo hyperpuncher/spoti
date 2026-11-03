@@ -19,7 +19,7 @@ independent_cache_handles_read_and_write_concurrently :: proc(t: ^testing.T) {
 	works: [2]Work
 	workers: [2]^thread.Thread
 	defer {
-		for worker in workers {if worker != nil {thread.join(worker); thread.destroy(worker)}}
+		for worker in workers {if worker != nil {thread.destroy(worker)}}
 		for &work in works {close_disk_cache(&work.cache)}
 	}
 	for &work, index in works {
@@ -46,7 +46,6 @@ independent_cache_handles_read_and_write_concurrently :: proc(t: ^testing.T) {
 		if !testing.expect(t, workers[index] != nil) {return}
 	}
 	for &worker, index in workers {
-		thread.join(worker)
 		thread.destroy(worker)
 		worker = nil
 		testing.expect(t, works[index].ok)

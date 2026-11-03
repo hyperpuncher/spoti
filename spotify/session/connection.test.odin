@@ -168,7 +168,7 @@ ap_packet_reads_resume_after_timeout_and_cancel_mid_packet :: proc(t: ^testing.T
 			if work.cancel_read {sync.atomic_store(&work.cancel, true)} else {_ = ap.send_full(work.socket, work.bytes)}
 		})
 		if !testing.expect(t, worker != nil) {return}
-		defer {thread.join(worker); thread.destroy(worker)}
+		defer {thread.destroy(worker)}
 		command, payload, received := ap.read_packet(c.socket, &c.receiver, &work.cancel)
 		defer {crypto.zero_explicit(raw_data(payload), len(payload)); delete(payload)}
 		if cancel_read {
@@ -226,7 +226,7 @@ broken_or_unauthenticated_packets_reconnect_once_and_retry_the_track :: proc(t: 
 			_ = received
 		})
 		if !testing.expect(t, worker != nil) {return}
-		defer {thread.join(worker); thread.destroy(worker)}
+		defer {thread.destroy(worker)}
 		id: [16]u8 = 1
 		file_id: [20]u8 = 2
 		audio_key, ok := fetch_audio_key(
