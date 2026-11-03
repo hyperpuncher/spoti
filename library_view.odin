@@ -692,7 +692,12 @@ track_list_row :: proc(
 	// Boundary-fitted segments: whole artists that fit, then an
 	// ellipsis. A first artist that alone overflows truncates with
 	// one like before. Sources that omit URIs render plain text.
-	count_width := row.play_count > 0 && row_text >= 380 * d ? 100 * d : 0
+	count: string
+	count_width: f32
+	if row.play_count > 0 && row_text >= 380 * d {
+		count = count_text(row.play_count)
+		count_width = max(100 * d, hero_text_width(ui_state, count, 14, 1))
+	}
 	extra := album_width + date_width + count_width
 	for width in ([]f32{album_width, date_width, count_width}) {if width > 0 {extra += ROW_GAP * d}}
 	artist_box := max(0, row_text - title_box - extra)
@@ -808,7 +813,7 @@ track_list_row :: proc(
 			},
 			) {
 				clay.Text(
-					count_text(row.play_count),
+					count,
 					{fontId = 1, fontSize = 14, textColor = theme.muted, wrapMode = .None},
 				)
 			}
