@@ -828,7 +828,9 @@ main :: proc() {
 	theme_dark = system_dark()
 	apply_theme(theme_dark)
 	when ODIN_OS == .Windows {ui.windows_frame_theme(state.window, theme_dark)}
-	load_icons(&state, &textures, theme_dark)
+	load_app_icon(&state)
+	retint_icons(&textures, theme_dark)
+	load_icons(&state, &textures)
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
 	_ = ui.start_emoji(&state, WAKE_EVENT != 0 ? wake_app : nil)
@@ -1682,7 +1684,10 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	clay.SetPointerState({mouse.x, mouse.y}, .LEFT in buttons)
 	previous_density := ui.scale(&state)
 	density = ui.update_scale(&state)
-	if density != previous_density {clay.ResetMeasureTextCache()}
+	if density != previous_density {
+		clay.ResetMeasureTextCache()
+		load_icons(&state, &textures)
+	}
 	progress := f32(0)
 	if duration_ms > 0 {
 		// Kept times hold the bar steady across worker swaps; live audio

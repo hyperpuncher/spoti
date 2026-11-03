@@ -1,7 +1,8 @@
-// Each Lucide SVG is rasterized once. Clay carries its tint on each draw.
+// Lucide SVGs are rasterized for the display scale. Clay carries each draw's tint.
 package main
 
 import "core:fmt"
+import "core:math"
 import "core:os"
 import artwork "spotify/artwork"
 import library "spotify/library"
@@ -17,7 +18,8 @@ Icon_Tint :: enum {
 	Hover,
 }
 
-ICON_SIZE :: 48 // Twice the largest logical icon size, as before.
+ICON_SIZE :: 48 // Keep the existing resolution through 2x display scale.
+ICON_MAX_LOGICAL_SIZE :: 24
 
 ICON_NAMES :: []string {
 	"house",
@@ -111,9 +113,10 @@ load_app_icon :: proc(state: ^ui.State) {
 
 // The artwork package is the only image decoder in the tree, so icons go
 // through the same decode path as covers.
-load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
-	load_app_icon(state)
-	retint_icons(textures, dark)
+load_icons :: proc(state: ^ui.State, textures: ^Textures) {
+	size := max(ICON_SIZE, int(math.ceil(ICON_MAX_LOGICAL_SIZE * ui.scale(state))))
+	if textures.icon_size == size {return}
+	textures.icon_size = size
 	for name in ICON_NAMES {
 		relative := fmt.aprintf("icons/%s.svg", name, allocator = context.temp_allocator)
 		path, found := ui.asset_path(relative)
@@ -121,11 +124,15 @@ load_icons :: proc(state: ^ui.State, textures: ^Textures, dark: bool) {
 		bytes, read_error := os.read_entire_file_from_path(path, context.allocator)
 		delete(path)
 		if read_error != nil {continue}
-		image, decoded := artwork.decode(bytes, svg_size = ICON_SIZE)
+		image, decoded := artwork.decode(bytes, svg_size = size)
 		delete(bytes)
 		if !decoded {continue}
 		texture := ui.create_texture(state, image)
-		if texture != nil {textures.by_key[icon_key(name)] = texture}
+		if texture != nil {
+			key := icon_key(name)
+			if old := textures.by_key[key]; old != nil {sdl.DestroyTexture(old)}
+			textures.by_key[key] = texture
+		}
 		artwork.free_image(&image)
 	}
 }

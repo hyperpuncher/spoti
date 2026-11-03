@@ -24,6 +24,7 @@ Textures :: struct {
 	by_key:                   map[u64]^sdl.Texture,
 	requested:                map[u64]Cover_Request_State,
 	icon_colors:              [Icon_Tint]sdl.Color,
+	icon_size:                int,
 	cover_bytes:              int,
 	cover_frame:              u64,
 	fade_top:                 u64,

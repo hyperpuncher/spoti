@@ -4,10 +4,41 @@ import "core:fmt"
 import "core:os"
 import "core:testing"
 import artwork "spotify/artwork"
+import ui "ui"
 import sdl "vendor:sdl3"
 
 @(test)
 svg_icons_decode_to_white_tint_masks :: proc(t: ^testing.T) {
+	surface := sdl.CreateSurface(1, 1, .RGBA32)
+	if !testing.expect(t, surface != nil) {return}
+	defer sdl.DestroySurface(surface)
+	renderer := sdl.CreateSoftwareRenderer(surface)
+	if !testing.expect(t, renderer != nil) {return}
+	defer sdl.DestroyRenderer(renderer)
+	state := ui.State {
+		renderer = renderer,
+	}
+	textures := Textures {
+		by_key = make(map[u64]^sdl.Texture),
+	}
+	defer {
+		for _, texture in textures.by_key {sdl.DestroyTexture(texture)}
+		delete(textures.by_key)
+	}
+	for density in ([]f32{1, 3, 1}) {
+		state.density = density
+		load_icons(&state, &textures)
+		for name in ICON_NAMES {
+			width, height: f32
+			if !testing.expect(
+				t,
+				sdl.GetTextureSize(textures.by_key[icon_key(name)], &width, &height),
+				name,
+			) {return}
+			testing.expect_value(t, width, density == 3 ? f32(72) : f32(48))
+			testing.expect_value(t, height, width)
+		}
+	}
 	for name in ICON_NAMES {
 		path := fmt.aprintf("assets/icons/%s.svg", name)
 		defer delete(path)
