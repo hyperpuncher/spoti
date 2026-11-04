@@ -88,7 +88,7 @@ View :: struct {
 	setup_error:    string, // borrowed; setup screen error line
 	caption_width:  f32, // native Windows controls, render pixels
 	album_linked:   bool, // footer title opens the playing album
-	artist_linked:  bool, // footer artist opens the playing artist
+	artist_links:   []library.Artist_Link, // borrowed; each footer artist opens its own page
 	pinned:         bool,
 	sign_in:        bool, // a library browser approval is waiting for a click
 	can_back:       bool,
@@ -476,20 +476,24 @@ player_bar :: proc(
 						{fontSize = 15, textColor = theme.text, wrapMode = .None},
 					)
 				}
-				artist_over := view.artist_linked && clay.PointerOver(clay.ID("footer_artist"))
-				if clay.UI_WithId(clay.ID("footer_artist"))(
-				{layout = {sizing = {width = clay.SizingFit({})}}},
-				) {
-					fitted_text(
-						ui_state,
-						view.status,
-						text_width,
-						{
-							fontSize = 12,
-							textColor = artist_over ? theme.text : theme.muted,
-							wrapMode = .None,
-						},
-					)
+				if clay.UI()({}) {
+					if len(view.artist_links) > 0 {
+						artist_links_row(
+							ui_state,
+							view.artist_links,
+							text_width,
+							"footer_artist",
+							0,
+							size = 12,
+						)
+					} else {
+						fitted_text(
+							ui_state,
+							view.status,
+							text_width,
+							{fontSize = 12, textColor = theme.muted, wrapMode = .None},
+						)
+					}
 				}
 			}
 		}

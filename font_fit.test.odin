@@ -4,6 +4,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "core:unicode/utf8"
+import library "spotify/library"
 import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
@@ -93,6 +94,28 @@ text_fitting_preserves_graphemes_and_available_player_space :: proc(t: ^testing.
 			labels += 1
 		}
 		testing.expect_value(t, labels, 2)
+	}
+	view.artist_links = []library.Artist_Link {
+		{name = "Big Boi", uri = "spotify:artist:first"},
+		{name = "Sleepy Brown", uri = "spotify:artist:second"},
+	}
+	clay.BeginLayout()
+	player_bar(view, &textures, &fx, &state, 2000, 1)
+	_ = clay.EndLayout(0)
+	app: App
+	frame := Frame {
+		right_clicked = true,
+		foot_artists  = view.artist_links,
+	}
+	defer free_context_menu(&app.menu)
+	for link, index in view.artist_links {
+		artist := clay.GetElementData(clay.ID("footer_artist", u32(index)))
+		if !testing.expect(t, artist.found) {continue}
+		box := artist.boundingBox
+		frame.mouse_right = {box.x + box.width / 2, box.y + box.height / 2}
+		app_click(&app, &frame, {})
+		testing.expect(t, app.menu.open)
+		testing.expect_value(t, app.menu.uri, link.uri)
 	}
 	testing.expect_value(t, errors, 0)
 }

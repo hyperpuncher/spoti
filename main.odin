@@ -192,7 +192,7 @@ update_cursor :: proc(
 	seek_enabled: bool,
 	search_mode: bool,
 	link_album: bool,
-	link_artist: bool,
+	artist_links: []library.Artist_Link,
 ) {
 	if pointer_over("footer_devices") ||
 	   pointer_over("footer_queue") ||
@@ -253,7 +253,7 @@ update_cursor :: proc(
 		ui.set_cursor(state, .Pointer)
 		return
 	}
-	if link_artist && pointer_over("footer_artist") {
+	if artist_links_hovered(artist_links, "footer_artist", 0) {
 		ui.set_cursor(state, .Pointer)
 		return
 	}
@@ -772,12 +772,10 @@ Frame :: struct {
 	density:          f32,
 	seek_enabled:     bool,
 	link_album:       bool,
-	link_artist:      bool,
 	queue_at:         bool,
 	foot_album:       string,
 	foot_album_uri:   string,
-	foot_first:       string,
-	foot_first_uri:   string,
+	foot_artists:     []library.Artist_Link,
 	library_prompt:   bool,
 	playback_prompt:  bool,
 	display_page:     ^library.Page,
@@ -1774,26 +1772,29 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	}
 	times: [2][16]u8
 	retain_player_cover(&displayed_cover, player_cover, &textures)
-	// The footer links the playing collection: the title its album, the
-	// artist its artist. Search queues carry no URIs and stay silent.
+	// The footer links the playing album and each known artist.
 	// The live queue is the truth, even when it links nothing; the
 	// persisted record only serves the queue-less resumed footer.
 	queue_at = play_index >= 0 && play_index < len(play_queue)
 	foot_album, foot_album_uri = "", ""
-	foot_first, foot_first_uri = "", ""
+	foot_artists = nil
 	if queue_at {
 		item := play_queue[play_index]
 		foot_album, foot_album_uri = item.album, item.album_uri
-		if len(item.artist_links) > 0 {
-			foot_first, foot_first_uri = item.artist_links[0].name, item.artist_links[0].uri
-		}
+		foot_artists = item.artist_links
 	} else {
 		foot_album, foot_album_uri = app_state.last_played.album, app_state.last_played.album_uri
-		foot_first, foot_first_uri =
-			app_state.last_played.first_artist, app_state.last_played.artist_uri
+		if played := &app_state.last_played;
+		   played.artist_uri != "" && artist == played.first_artist {
+			foot_artists = make([]library.Artist_Link, 1, context.temp_allocator)
+			foot_artists[0] = {
+				name = played.first_artist,
+				uri  = played.artist_uri,
+			}
+		}
 	}
 	link_album = len(foot_album_uri) > 0
-	link_artist = len(foot_first_uri) > 0
+	if shown_status != artist || artist == "" {foot_artists = nil}
 	devices_active := false
 	for device in library_client.devices {
 		if device.active {devices_active = true; break}
@@ -1836,7 +1837,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		title          = shown_title,
 		status         = shown_status,
 		album_linked   = link_album,
-		artist_linked  = link_artist,
+		artist_links   = foot_artists,
 		button         = button,
 		progress       = progress,
 		elapsed        = duration_text(shown_ms, times[0][:]),
@@ -2000,7 +2001,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		seek_enabled,
 		search_mode,
 		link_album,
-		link_artist,
+		foot_artists,
 	)
 	_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
 	_ = sdl.RenderClear(state.renderer)
@@ -2055,13 +2056,9 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		   index >= 0 && index < len(play_queue) {
 			open_link_menu(&menu, mouse_right, play_queue[index].uri)
 		} else {menu.open = false}
-	} else if right_clicked && hit("footer_artist", mouse_right) && foot_first_uri != "" {
-		open_card_menu(
-			&menu,
-			mouse_right,
-			foot_first_uri,
-			state_is_pinned(&app_state, foot_first_uri),
-		)
+	} else if link := artist_link_at(foot_artists, "footer_artist", 0, mouse_right);
+	   right_clicked && link != nil {
+		open_card_menu(&menu, mouse_right, link.uri, state_is_pinned(&app_state, link.uri))
 	} else if right_clicked && hit("footer_metadata", mouse_right) {
 		uri := selected
 		if play_index >= 0 && play_index < len(play_queue) {
@@ -2740,15 +2737,9 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			_ = open_entry_page(&nav_ctx, preview)
 		}
 	}
-	if clicked && hit("footer_artist", mouse_click) {
-		if !link_artist {
-			diagnostic.writef("footer artist dead queue=%v items=%d", queue_at, len(play_queue))
-		} else {
-			preview := library.Entry {
-				name = foot_first,
-				uri  = foot_first_uri,
-			}
-			_ = open_entry_page(&nav_ctx, preview)
+	if clicked && hit("footer_metadata", mouse_click) {
+		if link := artist_link_at(foot_artists, "footer_artist", 0, mouse_click); link != nil {
+			_ = open_entry_page(&nav_ctx, library.Entry{name = link.name, uri = link.uri})
 		}
 	}
 	if track_delta > 0 && play_index >= 0 && play_index + track_delta >= len(play_queue) {

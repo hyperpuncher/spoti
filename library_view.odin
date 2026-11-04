@@ -1390,8 +1390,7 @@ metadata_link :: proc(
 }
 
 // Whole artist links that fit the box, then an ellipsis. A lone overlong
-// first artist is shortened to fit. Shared by track rows and the detail hero,
-// which owns the text that follows.
+// first artist is shortened to fit.
 artist_links_row :: proc(
 	ui_state: ^ui.State,
 	links: []library.Artist_Link,
@@ -1399,21 +1398,22 @@ artist_links_row :: proc(
 	id: string,
 	base: u32,
 	emphasized: bool = false,
+	size: u16 = 14,
 ) {
 	style := clay.TextElementConfig {
 		fontId    = emphasized ? u16(ui.Font_Role.Medium) : 0,
-		fontSize  = 14,
+		fontSize  = size,
 		textColor = emphasized ? theme.text : theme.muted,
 		wrapMode  = .None,
 	}
 	comma_w: f32
-	if len(links) > 1 {comma_w = hero_text_width(ui_state, ", ", 14, style.fontId)}
+	if len(links) > 1 {comma_w = hero_text_width(ui_state, ", ", size, style.fontId)}
 	used := f32(0)
 	for ai in 0 ..< min(len(links), 64) {
 		link := links[ai]
 		linked := len(link.uri) > 0
 		separator := ai + 1 < len(links) ? ", " : ""
-		need := hero_text_width(ui_state, link.name, 14, style.fontId)
+		need := hero_text_width(ui_state, link.name, size, style.fontId)
 		if separator != "" {need += comma_w}
 		if used + need > box {
 			if ai == 0 {
@@ -1421,7 +1421,7 @@ artist_links_row :: proc(
 					ui_state,
 					link.name,
 					box,
-					14,
+					size,
 					style.fontId,
 					context.temp_allocator,
 				)
