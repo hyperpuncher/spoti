@@ -119,7 +119,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 		clay.SetLayoutDimensions({1280 * d, 820 * d})
 		for width in ([]f32{SIDEBAR_MIN, SIDEBAR_MAX}) {
 			input_box, player_box: clay.BoundingBox
-			for source in ([]library.Source{.Album, .Artist}) {
+			for source in ([]library.Source{.Album, .Playlist, .Artist}) {
 				client.detail.source = source
 				client.detail.name = source == .Artist ? "Starfoxlaflare" : "Album"
 				client.detail.banner = source == .Artist ? "banner" : ""
@@ -163,6 +163,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						"page changes must not move playback controls",
 					)
 				}
+				header := clay.GetElementData(clay.ID("track_header"))
 				for fraction in ([]f32{0, 0.5, 1}) {
 					clay.UpdateScrollContainers(false, {}, 0)
 					for id in ([]string{"library_grid", "detail_rows"}) {
@@ -191,6 +192,13 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						nil,
 					)
 					testing.expect_value(t, errors, 0)
+					if source != .Artist {
+						current := clay.GetElementData(clay.ID("track_header"))
+						testing.expect(
+							t,
+							current.found && current.boundingBox == header.boundingBox,
+						)
+					}
 					if source == .Album && fraction == 0 {
 						button := clay.GetElementData(clay.ID("footer_next")).boundingBox
 						point := sdl.FPoint {
@@ -253,9 +261,10 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 						math.abs(grid.contentDimensions.height - expected) < 0.5,
 						"spacers must preserve the complete grid height",
 					)
-					if source == .Album {
+					if source != .Artist {
 						rows := clay.GetScrollContainerData(clay.ID("detail_rows"))
-						expected_rows := 36 * d + 3000 * (ROW_HEIGHT * d + f32(u16(2 * d)))
+						expected_rows :=
+							3000 * (ROW_HEIGHT * d + f32(u16(2 * d))) - f32(u16(2 * d))
 						testing.expect(
 							t,
 							math.abs(rows.contentDimensions.height - expected_rows) < 0.5,

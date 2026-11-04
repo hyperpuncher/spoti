@@ -924,19 +924,17 @@ track_table :: proc(
 	album_width, date_width, title_fraction := f32(0), f32(0), f32(0.5)
 	if detail.source ==
 	   .Playlist {album_width, date_width, title_fraction = playlist_columns(row_text, d)}
-	if clay.UI_WithId(clay.ID("detail_rows"))(
+	if clay.UI()(
 	{
 		layout = {
 			layoutDirection = .TopToBottom,
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 			childGap = u16(2 * d),
 		},
-		clip = {horizontal = true, vertical = true, childOffset = clay.GetScrollOffset()},
 	},
 	) {
-		// Header labels sit over the number and duration slots, and over the
-		// artist column on wide rows; narrow rows flow instead.
-		if clay.UI()(
+		// Keep the shared column header outside the scrolling track list.
+		if clay.UI_WithId(clay.ID("track_header"))(
 		{
 			layout = {
 				sizing = {width = clay.SizingGrow({}), height = clay.SizingFixed(36 * d)},
@@ -997,42 +995,49 @@ track_table :: proc(
 				icon_element(textures, "clock", .Muted, 15 * d)
 			}
 		}
-		// Row padding (12/92), the number slot and the gaps come off the top.
-		// Wide rows columnate under the header labels; narrow rows flow with
-		// the title taking most of what is left and the artist the rest.
-		visible = scroll_items(
-			"detail_rows",
-			detail_item_count(len(detail.rows), detail.total, detail.has_more),
-			1,
-			ROW_HEIGHT * d + gap,
-			viewport_height,
-			36 * d + gap,
-		)
-		track_row_list(
-			detail,
-			view,
-			textures,
-			ui_state,
-			visible,
-			columns,
-			row_text,
-			title_max,
-			column_box,
-			gap,
-			d,
-		)
-		scroll_fades(
-			"detail_rows",
-			textures,
-			textures.fade_detail_top,
-			textures.fade_detail_bottom,
-			&textures.fade_detail_top_alpha,
-			&textures.fade_detail_bottom_alpha,
-			0,
-			available_width - SCROLLBAR_OUTSET * d,
-			dt,
-			d,
-		)
+		if clay.UI_WithId(clay.ID("detail_rows"))(
+		{
+			layout = {
+				layoutDirection = .TopToBottom,
+				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
+				childGap = u16(2 * d),
+			},
+			clip = {horizontal = true, vertical = true, childOffset = clay.GetScrollOffset()},
+		},
+		) {
+			visible = scroll_items(
+				"detail_rows",
+				detail_item_count(len(detail.rows), detail.total, detail.has_more),
+				1,
+				ROW_HEIGHT * d + gap,
+				viewport_height,
+			)
+			track_row_list(
+				detail,
+				view,
+				textures,
+				ui_state,
+				visible,
+				columns,
+				row_text,
+				title_max,
+				column_box,
+				gap,
+				d,
+			)
+			scroll_fades(
+				"detail_rows",
+				textures,
+				textures.fade_detail_top,
+				textures.fade_detail_bottom,
+				&textures.fade_detail_top_alpha,
+				&textures.fade_detail_bottom_alpha,
+				0,
+				available_width - SCROLLBAR_OUTSET * d,
+				dt,
+				d,
+			)
+		}
 	}
 	return
 }
