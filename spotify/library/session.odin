@@ -97,6 +97,28 @@ read_artist_overview :: proc(
 	if ok {detail.rows = rows}
 }
 
+read_album_counts :: proc(
+	client: ^Client,
+	tokens: ^oauth.Tokens,
+	id: string,
+	offset: int,
+	rows: []Track_Row,
+	reuse: rawptr,
+) {
+	if len(rows) == 0 || fetch_album_counts("", id, offset, rows, nil, nil) {return}
+	access := ""
+	if authorize_session(client, tokens, interactive = false) {access = tokens.access}
+	_ = fetch_album_counts(
+		access,
+		id,
+		offset,
+		rows,
+		reuse,
+		&client.cancel,
+		cache_only = access == "",
+	)
+}
+
 // Called only after the official playlist-items endpoint returns 403. Renew
 // once on 401; other errors remain visible rather than triggering more logins.
 read_session_playlist :: proc(

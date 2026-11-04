@@ -734,15 +734,12 @@ track_list_row :: proc(
 				)
 			}
 		}
-		// Wide rows give the title a fixed column under the header;
-		// narrow rows hug the text so the artist follows at exactly
-		// one gap, with the cap keeping a runaway title from eating
-		// the artist. Text fits its column; the table owns clipping.
+		// Wide rows share the header's title width. Narrow rows hug the text.
 		if clay.UI()(
 		{
 			layout = {
 				sizing = {
-					width = columns ? clay.SizingPercent(title_fraction) : clay.SizingFit({max = title_max}),
+					width = columns ? clay.SizingFixed(title_box) : clay.SizingFit({max = title_max}),
 				},
 				childAlignment = {y = .Center},
 				childGap = u16(EXPLICIT_BADGE_GAP * d),
@@ -955,14 +952,13 @@ track_table :: proc(
 			) {
 				clay.Text("#", {fontSize = 13, textColor = theme.muted})
 			}
-			// Same percent column as the rows below, so the artist label
-			// sits exactly over the artist column: Grow pairs would split
-			// their joint share instead of the whole base.
-			if clay.UI()({layout = {sizing = {width = clay.SizingPercent(title_fraction)}}}) {
-				clay.Text("TITLE", {fontSize = 13, textColor = theme.muted})
+			if clay.UI()(
+			{layout = {sizing = {width = clay.SizingFixed(column_box * title_fraction / 0.5)}}},
+			) {
+				clay.Text("Title", {fontSize = 13, textColor = theme.muted})
 			}
 			if clay.UI()({layout = {sizing = {width = clay.SizingGrow({})}}}) {
-				clay.Text("ARTIST", {fontSize = 13, textColor = theme.muted})
+				clay.Text("Artist", {fontSize = 13, textColor = theme.muted})
 			}
 			for width, i in ([]f32{album_width, date_width}) {
 				if width <= 0 {continue}
@@ -971,9 +967,21 @@ track_table :: proc(
 				{layout = {sizing = {width = clay.SizingFixed(width)}}},
 				) {
 					clay.Text(
-						i == 0 ? "ALBUM" : "DATE ADDED",
+						i == 0 ? "Album" : "Date added",
 						{fontSize = 13, textColor = theme.muted},
 					)
+				}
+			}
+			if detail.source == .Album && row_text >= 380 * d {
+				if clay.UI()(
+				{
+					layout = {
+						sizing = {width = clay.SizingFixed(100 * d)},
+						childAlignment = {x = .Right},
+					},
+				},
+				) {
+					clay.Text("Plays", {fontSize = 13, textColor = theme.muted})
 				}
 			}
 			if clay.UI()(

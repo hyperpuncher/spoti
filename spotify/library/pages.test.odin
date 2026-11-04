@@ -137,6 +137,24 @@ album_tracks_decode_without_album_art :: proc(t: ^testing.T) {
 }
 
 @(test)
+album_counts_match_track_identity :: proc(t: ^testing.T) {
+	rows := []Track_Row {
+		{uri = "spotify:track:b"},
+		{uri = "spotify:track:a"},
+		{uri = "spotify:track:c"},
+	}
+	body := `{"data":{"albumUnion":{"uri":"spotify:album:album","tracksV2":{"totalCount":54,"items":[{"track":{"uri":"spotify:track:a","playcount":"2544883479"}},{"track":{"uri":"spotify:track:unrelated","playcount":"999"}},{"track":{"uri":"spotify:track:b","playcount":"-1"}},{"track":{"uri":"spotify:track:c"}}]}}}}`
+	if !testing.expect(t, parse_album_counts(transmute([]u8)body, "album", 50, rows)) {return}
+	testing.expect_value(t, rows[0].play_count, 0)
+	testing.expect_value(t, rows[1].play_count, 2544883479)
+	testing.expect_value(t, rows[2].play_count, 0)
+	testing.expect(t, !parse_album_counts(transmute([]u8)body, "different", 50, rows))
+	partial := `{"errors":[{}],"data":{"albumUnion":{"uri":"spotify:album:album","tracksV2":{"totalCount":54,"items":[{"track":{"uri":"spotify:track:a","playcount":"1"}}]}}}}`
+	testing.expect(t, !parse_album_counts(transmute([]u8)partial, "album", 50, rows))
+	testing.expect_value(t, rows[1].play_count, 2544883479)
+}
+
+@(test)
 malformed_and_unsafe_responses_are_rejected :: proc(t: ^testing.T) {
 	too_large: string = `{"items":[],"total":1000001}`
 	_, ok := parse_index(transmute([]u8)too_large, .Tracks)

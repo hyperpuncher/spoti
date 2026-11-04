@@ -313,10 +313,11 @@ handle :: proc(
 				detail.rows_error = status != 0 ? status : -1
 			}
 		}
-		// Popular and playback share the rows from this open.
-		if result.ok &&
-		   request.source == .Artist {read_artist_overview(client, streaming, detail, reuse)}
 		if result.ok {
+			if request.source == .Artist {read_artist_overview(client, streaming, detail, reuse)}
+			if request.source == .Album {
+				read_album_counts(client, streaming, request.id, 0, detail.rows[:], reuse)
+			}
 			detail.liked = request.saved
 			if !request.saved && time.since(client.saved_at) >= 0 {
 				liked, known := false, false
@@ -413,6 +414,9 @@ handle :: proc(
 					allocator,
 					reuse,
 				)
+		}
+		if result.ok && request.source == .Album {
+			read_album_counts(client, streaming, request.id, request.offset, result.rows[:], reuse)
 		}
 	case .Search:
 		result.search_pages, result.status, result.ok = fetch_search(
@@ -639,6 +643,9 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	if warm_ok && warm.rows_error == 0 {
 		// The page is already on disk, so it opens with its rows in place.
 		// The queued request above still revalidates it in the background.
+		if source == .Album {
+			_ = fetch_album_counts("", id, 0, warm.rows[:], nil, nil, cache_only = true)
+		}
 		if source == .Artist {
 			code := session.cached_country()
 			country := ""

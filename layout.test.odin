@@ -59,11 +59,14 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 	client.detail.has_more = true
 	client.detail.rows = make([dynamic]library.Track_Row, 3000)
 	defer delete(client.detail.rows)
+	artists := []library.Artist_Link{{name = "Track artist"}}
 	for &row in client.detail.rows {
 		row.name = "Track title"
 		row.artists = "Artist"
+		row.artist_links = artists
 		row.duration_ms = 180_000
 	}
+	client.detail.rows[0].play_count = 1_455_124
 	client.detail.albums.items = make([dynamic]library.Entry, 3000)
 	defer delete(client.detail.albums.items)
 	for &release in client.detail.albums.items {
@@ -219,7 +222,22 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 					}
 					if source == .Album && fraction == 0 {
 						found_selected, hero_play, footer_pause := false, false, false
+						artist_header_x: f32 = -1
+						artist_rows := 0
 						for command in commands.internalArray[:commands.length] {
+							if command.commandType == .Text {
+								text := command.renderData.text.stringContents
+								value := string(text.chars[:text.length])
+								if value == "Artist" {artist_header_x = command.boundingBox.x}
+								if value == "Track artist" && width == SIDEBAR_MIN {
+									artist_rows += 1
+									testing.expect(
+										t,
+										math.abs(command.boundingBox.x - artist_header_x) < 0.01,
+										"artist header must align with rows with or without counts",
+									)
+								}
+							}
 							if command.commandType == .Image {
 								key := u64(uintptr(command.renderData.image.imageData))
 								if key == icon_key("play-filled") {hero_play = true}
@@ -231,6 +249,7 @@ large_library_grid_layout_is_bounded :: proc(t: ^testing.T) {
 									command.renderData.rectangle.backgroundColor == theme.selected
 							}
 						}
+						if width == SIDEBAR_MIN {testing.expect(t, artist_rows > 1)}
 						testing.expect(
 							t,
 							hero_play && footer_pause,
