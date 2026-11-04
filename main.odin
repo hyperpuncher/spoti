@@ -1075,6 +1075,11 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 					resizing = false
 				}
 			case .KEY_DOWN:
+				if event.key.key == sdl.K_ESCAPE && menu.open {
+					free_context_menu(&menu)
+					pending_redraw = true
+					break
+				}
 				if input_active {
 					key_mod := event.key.mod
 					gui := .LGUI in key_mod || .RGUI in key_mod
