@@ -86,6 +86,15 @@ rounded_controls_have_level_edges_and_symmetric_corners :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect(t, partial, "curves must have antialiased pixels")
+	// Changing a bar's height must not move its fractional bottom edge.
+	for height in ([]f32{6.25, 6.75}) {
+		_ = sdl.SetRenderDrawColor(renderer, 0, 0, 0, 255)
+		_ = sdl.RenderClear(renderer)
+		fill_rounded(&state, {4, 16.25 - height, 4, height}, {2, 2, 2, 2}, {255, 255, 255, 255})
+		_ = sdl.RenderPresent(renderer)
+		testing.expect(t, pixels[15 * int(surface.pitch) + 6 * 4] > 0)
+		testing.expect_value(t, pixels[16 * int(surface.pitch) + 6 * 4], 0)
+	}
 }
 
 @(test)

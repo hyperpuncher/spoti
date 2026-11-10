@@ -442,14 +442,10 @@ mask_top_corners :: proc(state: ^State, rect: sdl.FRect, radius: f32, color: sdl
 
 fill_rounded :: proc(state: ^State, rect: sdl.FRect, radius: [4]f32, color: sdl.Color) {
 	if rect.w <= 0 || rect.h <= 0 {return}
-	// Pixel-aligned destinations keep straight edges level, including at
-	// fractional display scales. The mask's corners are copied at native size.
-	area := sdl.FRect {
-		math.round(rect.x),
-		math.round(rect.y),
-		math.round(rect.w),
-		math.round(rect.h),
-	}
+	// Round edges, not sizes, so changing a bar's height keeps its bottom fixed.
+	// The mask's corners are copied at native size.
+	x, y := math.round(rect.x), math.round(rect.y)
+	area := sdl.FRect{x, y, math.round(rect.x + rect.w) - x, math.round(rect.y + rect.h) - y}
 	corners := int(clamp(radius[0], 0, min(area.w, area.h) / 2))
 	if max(max(radius[0], radius[1]), max(radius[2], radius[3])) <= 0 {
 		fill(state, area, color)
