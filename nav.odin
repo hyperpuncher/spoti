@@ -6,6 +6,7 @@ package main
 
 import "core:strings"
 import library "spotify/library"
+import ui "ui"
 
 NAV_LIMIT :: 64
 
@@ -142,11 +143,10 @@ nav_restore :: proc(
 	filter: ^library.Kind,
 	search_mode: ^bool,
 	search_kind: ^library.Kind,
-	input: ^string,
+	editor: ^ui.Editor,
 	detail_pinned: ^bool,
 ) {
-	delete(input^)
-	input^ = strings.clone(state.input)
+	ui.editor_set_text(editor, state.input)
 	filter^ = state.filter
 	if app_state.tab != state.filter {
 		app_state.tab = state.filter

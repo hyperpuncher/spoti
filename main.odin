@@ -8,6 +8,7 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:sync/chan"
+import edit "core:text/edit"
 import "core:thread"
 import "core:time"
 import "core:unicode"
@@ -357,8 +358,7 @@ submit_setup :: proc(app: ^App) {
 		return
 	}
 	replace_string(&app.setup_error, "")
-	delete(app.input)
-	app.input = ""
+	ui.editor_set_text(&app.editor, "")
 	app.input_active = false
 	_ = sdl.StopTextInput(app.state.window)
 }
@@ -817,6 +817,7 @@ main :: proc() {
 		{handler = clay_error},
 	)
 	clay.SetMeasureTextFunction(measure_text, &state)
+	ui.editor_init(&editor)
 	selected = strings.clone(session.TRACK_URL)
 	play_index = -1
 	textures = Textures {
@@ -889,7 +890,7 @@ main :: proc() {
 		delete(displayed_cover)
 		free_play_queue(&play_queue)
 		delete(queue_detail)
-		delete(input)
+		ui.editor_destroy(&editor)
 		free_state(&app_state)
 		free_context_menu(&menu)
 		nav_free_all(&nav)
@@ -964,6 +965,7 @@ PLAYBACK_FRAME_NS :: u64(1_000_000_000 / 30)
 app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	using app
 	using frame
+	input_limit := library_client.state == .Missing_Client_ID ? 64 : 512
 	event: sdl.Event
 	wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
 	emoji_poll := WAKE_EVENT == 0 && ui.emoji_pending(&state)
@@ -1088,15 +1090,14 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 					cmd := .LCTRL in key_mod || .RCTRL in key_mod || gui
 					switch event.key.key {
 					case sdl.K_ESCAPE:
-						ui.editor_move(&editor, editor.caret)
+						ui.editor_move(&editor, editor.editing.selection[0])
 						editor.selecting = false
 						input_active = false
 						_ = sdl.StopTextInput(state.window)
 						if len(strings.trim_space(input)) == 0 && search_mode {
 							library.clear_search(&library_client)
 							search_mode, search_pending = false, false
-							delete(input)
-							input = {}
+							ui.editor_set_text(&editor, "")
 							nav_replace(
 								&nav,
 								nav_capture(&library_client, filter, false, search_kind, ""),
@@ -1104,35 +1105,31 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 						}
 					case sdl.K_BACKSPACE, sdl.K_DELETE, sdl.K_W:
 						if event.key.key == sdl.K_W && !cmd {break}
-						low, high := ui.editor_bounds(&editor)
-						if low == high {
-							backward := event.key.key != sdl.K_DELETE
-							at := ui.editor_step(input, editor.caret, backward)
-							if cmd || alt {
-								if gui && !alt {
-									at = backward ? 0 : len(input)
-								} else {at = ui.editor_word_step(input, editor.caret, backward)}
-							}
-							ui.editor_move(&editor, at, true)
+						backward := event.key.key != sdl.K_DELETE
+						direction: edit.Translation = backward ? .Left : .Right
+						if gui && !alt {direction = backward ? .Start : .End} else if cmd || alt {
+							direction = backward ? .Word_Left : .Word_Right
 						}
-						input_changed = ui.editor_insert(&editor, "", 512) || input_changed
+						input_changed = ui.editor_delete(&editor, direction) || input_changed
 					case sdl.K_LEFT, sdl.K_RIGHT, sdl.K_HOME, sdl.K_END:
 						backward := event.key.key == sdl.K_LEFT || event.key.key == sdl.K_HOME
-						low, high := ui.editor_bounds(&editor)
-						at := backward ? low : high
+						direction: edit.Translation = backward ? .Left : .Right
 						if event.key.key == sdl.K_HOME || event.key.key == sdl.K_END || gui {
-							at = backward ? 0 : len(input)
-						} else if cmd || alt {
-							at = ui.editor_word_step(input, editor.caret, backward)
-						} else if shift ||
-						   low == high {at = ui.editor_step(input, editor.caret, backward)}
-						ui.editor_move(&editor, at, shift)
+							direction = backward ? .Start : .End
+						} else if cmd || alt {direction = backward ? .Word_Left : .Word_Right}
+						ui.editor_translate(&editor, direction, shift)
+					case sdl.K_Z, sdl.K_Y:
+						if cmd {
+							redo := event.key.key == sdl.K_Y || shift
+							input_changed =
+								ui.editor_undo(&editor, redo, input_limit) || input_changed
+						}
 					case sdl.K_A:
 						if cmd {ui.editor_select_all(&editor)}
 					case sdl.K_U:
 						if cmd {
 							ui.editor_select_all(&editor)
-							input_changed = ui.editor_insert(&editor, "", 512) || input_changed
+							input_changed = ui.editor_delete(&editor, .Left) || input_changed
 						}
 					case sdl.K_C, sdl.K_X, sdl.K_V, sdl.K_INSERT:
 						inserting := event.key.key == sdl.K_INSERT
@@ -1140,29 +1137,26 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 						cutting := event.key.key == sdl.K_X
 						copying := event.key.key == sdl.K_C || inserting && !shift
 						if copying || cutting {
-							low, high := ui.editor_bounds(&editor)
+							low, high := edit.sorted_selection(&editor.editing)
 							if low != high {
 								c_input := strings.clone_to_cstring(input[low:high])
 								defer delete(c_input)
 								if sdl.SetClipboardText(c_input) && cutting {
 									input_changed =
-										ui.editor_insert(&editor, "", 512) || input_changed
+										ui.editor_delete(&editor, .Left) || input_changed
 								}
 							}
 						} else {
 							clipboard := sdl.GetClipboardText()
 							if clipboard != nil {
 								value := paste_text(string(cstring(clipboard)))
-								limit := library_client.state == .Missing_Client_ID ? 64 : 512
-								if len(value) > 0 {
-									input_changed =
-										ui.editor_insert(&editor, value, limit) || input_changed
-								}
+								input_changed =
+									ui.editor_insert(&editor, value, input_limit) || input_changed
 								sdl.free(rawptr(clipboard))
 							}
 						}
 					case sdl.K_RETURN, sdl.K_KP_ENTER:
-						ui.editor_move(&editor, editor.caret)
+						ui.editor_move(&editor, editor.editing.selection[0])
 						if library_client.state == .Missing_Client_ID {
 							submit_setup(app)
 							break
@@ -1180,8 +1174,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 							queue_detail = ""
 							queue_rows = 0
 							play_index = -1
-							delete(input)
-							input = {}
+							ui.editor_set_text(&editor, "")
 							input_active = false
 							_ = sdl.StopTextInput(state.window)
 							library.clear_search(&library_client)
@@ -1227,11 +1220,9 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 				   .LGUI not_in sdl.GetModState() &&
 				   .RGUI not_in sdl.GetModState() {
 					added := string(event.text.text)
-					// The setup field holds at most a 32-character key;
-					// search keeps its longer limit.
-					limit := library_client.state == .Missing_Client_ID ? 64 : 512
 					if input_text_ok(added) {
-						input_changed = ui.editor_insert(&editor, added, limit) || input_changed
+						input_changed =
+							ui.editor_insert(&editor, added, input_limit) || input_changed
 					}
 				}
 			case .MOUSE_WHEEL:
@@ -1298,10 +1289,9 @@ app_navigate :: proc(app: ^App, frame: ^Frame) {
 				&filter,
 				&search_mode,
 				&search_kind,
-				&input,
+				&editor,
 				&detail_pinned,
 			)
-			ui.editor_move(&editor, len(input))
 			editor.selecting = false
 			if len(nav_state.detail.uri) == 0 {
 				detail_scroll_armed = false
@@ -2272,7 +2262,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				handled = true
 			} else if hit("search_clear", mouse_click) {
 				ui.editor_select_all(&editor)
-				input_changed = ui.editor_insert(&editor, "", 512) || input_changed
+				input_changed = ui.editor_delete(&editor, .Left) || input_changed
 				editor.selecting = false
 				pending_redraw = true
 				handled = true
@@ -2426,8 +2416,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 						// Arm a drag instead of playing: the play only fires
 						// on release without a drag, so a drop onto a
 						// playlist never also starts the track.
-						delete(input)
-						input = {}
+						ui.editor_set_text(&editor, "")
 						drag_candidate = true
 						dragging = false
 						drag_index = index
@@ -2444,7 +2433,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			if !handled && input_active {
 				input_active = false
 				editor.selecting = false
-				ui.editor_move(&editor, editor.caret)
+				ui.editor_move(&editor, editor.editing.selection[0])
 				_ = sdl.StopTextInput(state.window)
 			}
 		}

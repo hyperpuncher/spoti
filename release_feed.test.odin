@@ -6,6 +6,7 @@ import "core:testing"
 import "core:thread"
 import "core:time"
 import library "spotify/library"
+import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
@@ -132,8 +133,9 @@ release_feed_is_a_separate_navigation_entry :: proc(t: ^testing.T) {
 	app_state := default_state()
 	dirty, searching, pinned := false, false, false
 	filter, search_kind := library.Kind.Artists, library.Kind.Artists
-	input: string
-	defer delete(input)
+	input: ui.Editor
+	ui.editor_init(&input)
+	defer ui.editor_destroy(&input)
 	nav_restore(
 		captured,
 		&client,
