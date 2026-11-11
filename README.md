@@ -43,7 +43,7 @@ paru -S spoti-bin
 ### macos
 
 ```sh
-brew install --cask hyperpuncher/tap/spoti
+brew i hyperpuncher/tap/spoti
 ```
 
 ## development
