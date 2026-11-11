@@ -11,7 +11,8 @@ command -v cl.exe >/dev/null || {
 mkdir -p build/deps
 fetch_sdl() (
 	[ ! -d "build/deps/$1" ] || return 0
-	zip=$(mktemp)
+	# Native Windows tools need a relative path when MSYS conversion is disabled.
+	zip=$(mktemp build/deps/sdl.XXXXXXXX)
 	trap 'rm -f "$zip"' EXIT
 	curl -fsSL --retry 3 "$2" -o "$zip"
 	tar -xf "$zip" -C build/deps
