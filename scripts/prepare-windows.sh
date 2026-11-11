@@ -15,7 +15,8 @@ fetch_sdl() (
 	zip=$(mktemp build/deps/sdl.XXXXXXXX)
 	trap 'rm -f "$zip"' EXIT
 	curl -fsSL --retry 3 "$2" -o "$zip"
-	tar -xf "$zip" -C build/deps
+	# Git Bash's GNU tar cannot read ZIP files. Use Windows' libarchive tar.
+	"$(cygpath -u -S)/tar.exe" -xf "$zip" -C build/deps
 )
 fetch_sdl SDL3-3.4.18 https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-devel-3.4.18-VC.zip
 fetch_sdl SDL3_image-3.4.8 https://github.com/libsdl-org/SDL_image/releases/download/release-3.4.8/SDL3_image-devel-3.4.8-VC.zip
