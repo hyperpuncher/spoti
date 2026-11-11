@@ -8,25 +8,16 @@ import library "spotify/library"
 import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
 
 @(test)
 text_fitting_preserves_graphemes_and_available_player_space :: proc(t: ^testing.T) {
 	// Real font metrics, but no video subsystem or desktop interaction.
 	if !testing.expect(t, sdl.Init({})) {return}
-	if !testing.expect(t, ttf.Init()) {sdl.Quit(); return}
 	state := ui.State {
-		fonts   = make(map[int]^ttf.Font),
 		density = 1,
 	}
 	defer ui.close(&state)
-	ok: bool
-	for role in ([]ui.Font_Role{.Regular, .Numeric, .Bold}) {
-		source := &state.font_sources[role]
-		source.path, source.index, ok = ui.resolve_role(role)
-		if !testing.expect(t, ok) {return}
-	}
-	ui.resolve_fallbacks(&state)
+	if !testing.expect(t, ui.init_text(&state)) {return}
 	for name in ([]string{"Release Radar", "Victory Music"}) {
 		_, large := hero_title(&state, name, 900, 96)
 		text, small := hero_title(&state, name, 270, 96)
@@ -56,6 +47,17 @@ text_fitting_preserves_graphemes_and_available_player_space :: proc(t: ^testing.
 		testing.expect_value(t, cut, expected)
 		delete(expected)
 		delete(probe)
+	}
+	for width in ([]f32{0, 1, 4, 8, 20, 40}) {
+		fit := ui.fit_text(
+			&state,
+			"A👨‍👩‍👧 extended title",
+			width,
+			14,
+			allocator = context.temp_allocator,
+		)
+		measured, _ := ui.text_size(&state, fit, 14)
+		testing.expect(t, measured <= width + 0.01, "an ellipsis must not overflow a narrow slot")
 	}
 	// The footer must use spare width, not clip labels at its old fixed slot.
 	errors := 0

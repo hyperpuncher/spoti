@@ -4,12 +4,10 @@ import "core:fmt"
 import "core:math"
 import "core:strings"
 import "core:time"
-import "core:unicode/utf8"
 import library "spotify/library"
 import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
 
 Visible_Items :: struct {
 	first, last:   int,
@@ -327,15 +325,11 @@ explicit_badge :: proc(state: ^ui.State, d: f32) {
 	size := EXPLICIT_BADGE_SIZE * d
 	label: clay.FloatingElementConfig
 	if state != nil {
-		font := ui.font_for_size(state, FONT_SIZE * d, FONT_ID)
-		min_x, max_x, min_y, max_y: i32
-		if font != nil && ttf.GetGlyphMetrics(font, 'E', &min_x, &max_x, &min_y, &max_y, nil) {
+		ink := ui.label_bounds(state, "E", FONT_SIZE * d, FONT_ID)
+		if ink.width > 0 {
 			// Center the visible letter, excluding font bearings and descent space.
 			label = {
-				offset = {
-					(size - f32(max_x - min_x)) / 2,
-					(size - f32(max_y - min_y)) / 2 - f32(ttf.GetFontAscent(font) - max_y),
-				},
+				offset = {(size - ink.width) / 2 - ink.x, (size - ink.height) / 2 - ink.y},
 				attachTo = .Parent,
 				attachment = {element = .LeftTop, parent = .LeftTop},
 				pointerCaptureMode = .Passthrough,
@@ -1337,38 +1331,7 @@ hero_fit_text :: proc(
 	allocator := context.allocator,
 ) -> string {
 	if state == nil || len(text) == 0 {return text}
-	if hero_text_width(state, text, size, font) <= width {return text}
-	scratch := make([]u8, len(text) + len("…"), allocator)
-	// ASCII bytes are grapheme boundaries, except for the CRLF pair.
-	ascii := true
-	for ch in transmute([]u8)text {
-		if ch >= 0x80 || ch == '\r' {ascii = false; break}
-	}
-	boundaries: [dynamic]int
-	lo, hi := 0, len(text)
-	if !ascii {
-		boundaries = make([dynamic]int, 0, len(text) + 1, context.temp_allocator)
-		it := utf8.decode_grapheme_iterator_make(text)
-		for _, grapheme in utf8.decode_grapheme_iterate(&it) {append(&boundaries, grapheme.byte_index)}
-		append(&boundaries, len(text))
-		hi = len(boundaries) - 1
-	}
-	for lo < hi {
-		mid := (lo + hi + 1) / 2
-		end := ascii ? mid : boundaries[mid]
-		copy(scratch, text[:end])
-		copy(scratch[end:], "…")
-		probe := string(scratch[:end + len("…")])
-		if hero_text_width(state, probe, size, font) <= width {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
-	}
-	end := ascii ? lo : boundaries[lo]
-	copy(scratch, text[:end])
-	copy(scratch[end:], "…")
-	return string(scratch[:end + len("…")])
+	return ui.fit_text(state, text, width, f32(size) * ui.scale(state), font, allocator)
 }
 
 // Compound Clay index for one artist segment: the row slot owns the high

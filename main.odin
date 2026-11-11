@@ -26,7 +26,6 @@ import track "spotify/track"
 import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
 
 // MPRIS and Connect workers use this event to wake the idle frame loop.
 WAKE_EVENT: u32
@@ -832,7 +831,6 @@ main :: proc() {
 	load_icons(&state, &textures)
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
-	_ = ui.start_emoji(&state, WAKE_EVENT != 0 ? wake_app : nil)
 	mpris_active = mpris.start(WAKE_EVENT != 0 ? wake_app : nil)
 	oauth.set_prompt_handler(prompt_arrived)
 	app_state = load_state()
@@ -968,7 +966,6 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	input_limit := library_client.state == .Missing_Client_ID ? 64 : 512
 	event: sdl.Event
 	wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
-	emoji_poll := WAKE_EVENT == 0 && ui.emoji_pending(&state)
 	fades_animating :=
 		(textures.fade_top_alpha != 0 && textures.fade_top_alpha != 1) ||
 		(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1) ||
@@ -1024,7 +1021,6 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
 	}
 	if (connect_client.worker != nil && WAKE_EVENT == 0) ||
-	   emoji_poll ||
 	   library_client.devices_pending ||
 	   library_client.transfer_pending ||
 	   remote_control {
@@ -1257,7 +1253,6 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	}
 	// A page backoff must expire without requiring mouse movement to wake it.
 	return has_event ||
-		emoji_poll ||
 		page_wait && time.since(library_client.page_at) >= 0 ||
 		ui.editor_blink_delay(&editor, sdl.GetTicks()) == 0,
 		fades_animating
@@ -1886,9 +1881,9 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	dt := f32(now - last) / 1e9
 	last = now
 	clay.UpdateScrollContainers(false, {}, dt)
-	card_text_height :=
-		f32(ttf.GetFontHeight(ui.font_for_size(&state, 14 * density))) +
-		f32(ttf.GetFontHeight(ui.font_for_size(&state, 12 * density)))
+	_, card_title_height := ui.text_size(&state, "", 14 * density)
+	_, card_subtitle_height := ui.text_size(&state, "", 12 * density)
+	card_text_height := card_title_height + card_subtitle_height
 	t1 := sdl.GetTicksNS()
 	fx := Button_Fx_Ctx {
 		anims      = &button_anims,

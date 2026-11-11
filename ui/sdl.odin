@@ -4,9 +4,8 @@ import c "core:c/libc"
 import "core:fmt"
 import "core:math"
 import "core:os"
-import fontconfig "fontconfig"
+import native "native_text"
 import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
 
 // On-screen fps is a development aid: dev builds define it in, release
 // builds only show it with SPOTI_DEBUG set in the environment.
@@ -25,28 +24,21 @@ Rounded_Mask :: struct {
 }
 
 State :: struct {
-	window:            ^sdl.Window,
-	renderer:          ^sdl.Renderer,
-	font_sources:      [Font_Role]Font_Source,
-	hinting:           ttf.Hinting,
-	font_config:       ^fontconfig.Config,
-	fallback_sources:  [dynamic]Font_Source,
-	fallback_matches:  map[u64]int,
-	fallback_added:    map[Font_Pair]bool,
-	fonts:             map[int]^ttf.Font,
-	using drawn_texts: Text_Pool,
-	measured_texts:    Text_Pool,
-	emoji:             ^Emoji_Cache,
-	density:           f32,
-	masks:             map[u64]Rounded_Mask,
-	cursors:           [Cursor_Kind]^sdl.Cursor,
-	cursor:            Cursor_Kind,
-	vsync:             bool,
-	debug:             bool,
-	fps_started:       u64,
-	fps_frames:        u32,
-	fps:               u32,
-	text_measures:     u64,
+	window:             ^sdl.Window,
+	renderer:           ^sdl.Renderer,
+	text_backend:       ^native.Engine,
+	text_cache:         ^Text_Cache,
+	text_texture_bytes: int,
+	density:            f32,
+	masks:              map[u64]Rounded_Mask,
+	cursors:            [Cursor_Kind]^sdl.Cursor,
+	cursor:             Cursor_Kind,
+	vsync:              bool,
+	debug:              bool,
+	fps_started:        u64,
+	fps_frames:         u32,
+	fps:                u32,
+	text_measures:      u64,
 }
 
 open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
@@ -69,11 +61,6 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 			return
 		}
 	}
-	if !ttf.Init() {
-		fmt.eprintln("could not initialize SDL3_ttf:", sdl.GetError())
-		sdl.Quit()
-		return
-	}
 	if !sdl.CreateWindowAndRenderer(
 		title,
 		c.int(width),
@@ -93,43 +80,18 @@ open :: proc(title: cstring, width, height: int) -> (state: State, ok: bool) {
 	if !state.vsync {fmt.eprintln("SDL3 vsync unavailable; limiting frames to about 60 fps")}
 	state.debug = SPOTI_DEBUG || len(os.get_env("SPOTI_DEBUG", context.temp_allocator)) > 0
 	state.fps_started = sdl.GetTicks()
-	for &source, role in state.font_sources {
-		source.path, source.index, ok = resolve_role(role)
-		if !ok {close(&state); return}
-	}
-	state.hinting = system_hinting()
-	resolve_fallbacks(&state)
-	state.fonts = make(map[int]^ttf.Font)
+	if !init_text(&state) {close(&state); return}
 	state.masks = make(map[u64]Rounded_Mask)
 	state.cursors[.Default] = sdl.GetDefaultCursor()
 	state.cursors[.Pointer] = sdl.CreateSystemCursor(.POINTER)
 	state.cursors[.Text] = sdl.CreateSystemCursor(.TEXT)
 	state.cursors[.Resize] = sdl.CreateSystemCursor(.EW_RESIZE)
-	state.text_engine = ttf.CreateRendererTextEngine(state.renderer)
-	if state.text_engine == nil {
-		fmt.eprintln("could not initialize SDL3 text rendering:", sdl.GetError())
-		close(&state)
-		return
-	}
 	_ = update_scale(&state)
 	return state, true
 }
 
 close :: proc(state: ^State) {
-	stop_emoji(state)
-	for pool in ([]^Text_Pool{&state.drawn_texts, &state.measured_texts}) {
-		for text in pool.texts {ttf.DestroyText(text)}
-		delete(pool.texts)
-	}
-	if state.text_engine != nil {ttf.DestroyRendererTextEngine(state.text_engine)}
-	for _, font in state.fonts {ttf.CloseFont(font)}
-	delete(state.fonts)
-	for source in state.font_sources {delete(source.path)}
-	for source in state.fallback_sources {delete(source.path, state.fallback_sources.allocator)}
-	delete(state.fallback_sources)
-	delete(state.fallback_matches)
-	delete(state.fallback_added)
-	if state.font_config != nil {fontconfig.ConfigDestroy(state.font_config)}
+	destroy_text(state)
 	for _, mask in state.masks {sdl.DestroyTexture(mask.texture)}
 	delete(state.masks)
 	if state.cursors[.Default] != nil {_ = sdl.SetCursor(state.cursors[.Default])}
@@ -138,7 +100,6 @@ close :: proc(state: ^State) {
 	}
 	if state.renderer != nil {sdl.DestroyRenderer(state.renderer)}
 	if state.window != nil {sdl.DestroyWindow(state.window)}
-	ttf.Quit()
 	sdl.Quit()
 }
 
@@ -284,7 +245,7 @@ create_texture :: proc {
 	create_texture_surface,
 }
 
-// Procedural masks and emoji already own tightly packed RGBA pixels.
+// Procedural masks already own tightly packed RGBA pixels.
 create_texture_pixels :: proc(state: ^State, pixels: []u8, width, height: int) -> ^sdl.Texture {
 	if len(pixels) < width * height * 4 || width <= 0 || height <= 0 {return nil}
 	texture := sdl.CreateTexture(state.renderer, .RGBA32, .STATIC, c.int(width), c.int(height))
@@ -491,16 +452,8 @@ frame_done :: proc(state: ^State) {
 		width, _ := size(state)
 		density := scale(state)
 		label := fmt.aprintf("%d", state.fps, allocator = context.temp_allocator)
-		font := font_for_size(state, 14 * density, 1)
-		label_width, label_height: c.int
-		if font != nil &&
-		   ttf.GetStringSize(
-			   font,
-			   raw_data(label),
-			   uint(len(label)),
-			   &label_width,
-			   &label_height,
-		   ) {
+		label_width, _ := text_size(state, label, 14 * density, 1)
+		if label_width > 0 {
 			text(
 				state,
 				label,
@@ -512,8 +465,8 @@ frame_done :: proc(state: ^State) {
 			)
 		}
 	}
-	finish_text_frame(state)
 	_ = sdl.RenderPresent(state.renderer)
+	finish_text_frame(state)
 	trim_masks(state)
 	if !state.vsync {sdl.Delay(16)}
 }

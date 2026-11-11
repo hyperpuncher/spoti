@@ -1,98 +1,50 @@
 package ui
 
-import c "core:c/libc"
 import "core:testing"
-import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
+import native "native_text"
+
+when ODIN_OS == .Linux {
+	foreign import text_test_library "../build/native_text.a"
+	foreign text_test_library {
+		st_missing :: proc(layout: ^native.Layout) -> i32 ---
+		st_color_glyphs :: proc(layout: ^native.Layout) -> i32 ---
+	}
+}
 
 @(test)
-text_fallbacks_cover_scripts_and_symbols_without_replacing_geist :: proc(t: ^testing.T) {
-	// Font operations only: no window or desktop interaction.
-	if !testing.expect(t, sdl.Init({})) {return}
-	if !testing.expect(t, ttf.Init()) {sdl.Quit(); return}
+native_fallbacks_cover_scripts_and_join_color_emoji :: proc(t: ^testing.T) {
 	state := State {
-		fonts = make(map[int]^ttf.Font),
+		density = 1,
 	}
+	if !testing.expect(t, init_text(&state)) {return}
 	defer close(&state)
-	for &source, role in state.font_sources {
-		ok: bool
-		source.path, source.index, ok = resolve_role(role)
-		if !testing.expect(t, ok) {return}
-	}
-	resolve_fallbacks(&state)
-	if !testing.expect(t, state.font_config != nil) {return}
-	for size in ([]f32{14, 28, 84}) {
-		for role in ([]Font_Role{.Regular, .Numeric, .Bold, .Medium}) {
-			font := font_for_size(&state, size, u16(role))
-			if !testing.expect(t, font != nil) {continue}
-			advance: c.int
-			for digit in '0' ..= '9' {
-				width: c.int
-				if !testing.expect(
-					t,
-					ttf.GetGlyphMetrics(font, u32(digit), nil, nil, nil, nil, &width),
-				) {continue}
-				if digit == '0' {advance = width}
-				testing.expect_value(t, width, advance)
-			}
-			latin := "Rally House"
-			before, after: c.int
-			testing.expect(
-				t,
-				ttf.GetStringSize(font, raw_data(latin), uint(len(latin)), &before, nil),
-			)
-			for value in ([]string{"千葉雄喜", "ethereal breaks ⟡ ✧", "ethereal breaks *:･ﾟ✧", "العربية", "עברית", "हिन्दी", "ไทย"}) {
-				font = font_for_text(&state, value, size, u16(role))
-				for character in value {
-					testing.expect(
-						t,
-						ttf.FontHasGlyph(font, u32(character)),
-						"installed script and symbol fonts must be available through fallback",
-					)
-				}
-			}
-			testing.expect(
-				t,
-				ttf.GetStringSize(font, raw_data(latin), uint(len(latin)), &after, nil),
-			)
-			testing.expect_value(t, after, before)
+	for sample in ([]struct {
+			size: f32,
+			role: Font_Role,
+		}{{14, .Regular}, {17.5, .Numeric}, {28, .Medium}, {84, .Bold}}) {
+		size, role := sample.size, sample.role
+		advance: f32
+		for digit in '0' ..= '9' {
+			width, _ := text_size(&state, string([]u8{u8(digit)}), size, u16(role))
+			if digit == '0' {advance = width}
+			testing.expect_value(t, width, advance)
 		}
-	}
-	// The installed fonts must keep a symbol's normal outline even in a
-	// bold title, without removing bold from its Japanese letters.
-	when ODIN_OS == .Linux {
-		for character in ([]rune{'⟡', '千'}) {
-			key := u64(u32(character)) << 16 | u64(Font_Role.Bold)
-			index, found := state.fallback_matches[key]
-			if !testing.expect(t, found && index >= 0) {continue}
-			face := font_for_size(&state, 84, FONT_ROLE_COUNT + u16(index))
-			if !testing.expect(t, face != nil) {continue}
-			if character == '⟡' {
-				testing.expect(t, ttf.GetFontWeight(face) <= ttf.FONT_WEIGHT_NORMAL)
-			} else {
-				testing.expect(t, ttf.GetFontWeight(face) >= ttf.FONT_WEIGHT_BOLD)
-			}
+		for value in ([]string{"千葉雄喜", "⟡ ✧ *:･ﾟ✧", "Українська · Кино", "Ελληνικά", "العربية", "עברית", "हिन्दी", "ไทย"}) {
+			entry := cached_text(&state, value, size, u16(role))
+			if !testing.expect(t, entry != nil) {continue}
+			testing.expect(t, entry.metrics.width > 0 && entry.metrics.height > 0)
+			when ODIN_OS == .Linux {testing.expect_value(t, st_missing(entry.layout), i32(0))}
 		}
+		finish_text_frame(&state)
 	}
-	for _, font in state.fonts {
-		testing.expect(
-			t,
-			ttf.FontIsScalable(font),
-			"fixed-size bitmap emoji must not change ordinary text metrics",
-		)
+	for value in ([]string{"🚘", "💨", "👍🏽", "🇯🇵", "👨‍👩‍👧", "1️⃣", "#️⃣", "*️⃣", "❤️", "©️"}) {
+		entry := cached_text(&state, value, 28)
+		if !testing.expect(t, entry != nil) {continue}
+		when ODIN_OS == .Linux {
+			testing.expect_value(t, st_missing(entry.layout), i32(0))
+			testing.expect_value(t, st_color_glyphs(entry.layout), i32(1))
+		}
+		image := native.render(entry.layout, 255, 255, 255)
+		if testing.expect(t, image.pixels != nil) {native.free_image(image)}
 	}
-	count := len(state.fallback_sources)
-	pairs := len(state.fallback_added)
-	_ = font_for_text(
-		&state,
-		"千葉雄喜 ⟡ ✧ العربية עברית हिन्दी ไทย",
-		14,
-	)
-	testing.expect_value(t, len(state.fallback_sources), count)
-	testing.expect_value(t, len(state.fallback_added), pairs)
-	// A code point with no installed glyph must not repeatedly grow the cache.
-	_ = font_for_text(&state, "\U0010ffff", 14)
-	count = len(state.fallback_sources)
-	_ = font_for_text(&state, "\U0010ffff", 14)
-	testing.expect_value(t, len(state.fallback_sources), count)
 }

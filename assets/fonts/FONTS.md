@@ -1,62 +1,48 @@
 # fonts
 
-Geist is the primary face on Linux, macOS, and Windows.
+Geist is the required primary face on all three platforms.
 
-- `Geist[wght].ttf`: regular by default, Medium for track titles, and
-  ExtraBold for hero titles and headings. numeric fields use regular.
+- `Geist[wght].ttf`: regular (400) for ordinary text and numbers, medium
+  (500) for track titles, and extra bold (800) for headings.
 - `OFL.txt`: the SIL Open Font License for the bundled font.
 
-Source: https://github.com/vercel/geist-font
+source: https://github.com/vercel/geist-font
 
-`SPOTI_FONTS` overrides the primary font search directory. Install layouts
-and the development checkout are also searched. If Geist is absent, Linux
-uses fontconfig for the primary face; other platforms require the bundle.
+`SPOTI_FONTS` overrides the font directory. the app also searches its install
+layout and the development checkout. it does not replace system fonts.
 
-## system glyph fallback
+## native text
 
-Fontconfig selects an installed outline face for each character Geist
-cannot draw. Script letters use the requested weight; missing symbols use
-regular weight to preserve their outline. This includes symbols and scripts,
-not just CJK. SDL_ttf verifies glyph coverage and attaches the selected
-face to the primary font. Font sources and character matches are cached;
-faces are opened only for sizes used by the interface.
+| platform | layout and fallback | rasterization |
+| --- | --- | --- |
+| Linux | pango 1.56 or newer | Cairo |
+| Windows | DirectWrite | Direct2D |
+| macOS | CoreText | CoreGraphics |
 
-Measurement and drawing use the same prepared font. Fallbacks do not replace
-glyphs already supplied by the bundled font. Truncation and its measurement
-probes stop only at complete Unicode grapheme clusters.
+the platform owns complete strings, including script shaping, bidirectional
+runs, installed-font fallback, color emoji, and ellipsis. the editor uses the
+same layout for caret positions, hit testing, and visual selection ranges.
+font-file parsing and a separate emoji renderer are not needed.
 
-Fontconfig is required on all three targets. Its configuration must include
-the system and user font directories. On Windows, package its configuration
-files with its DLL and dependencies, not only the fontconfig DLL.
-On Linux, Noto's script and symbol font packages provide broad coverage.
-No fallback font binaries are included in this repository. Emoji presentation
-uses Unicode 17 data under the [Unicode license](../../docs/licenses/unicode.txt).
+Linux needs installed script and symbol fonts, such as Noto, plus Noto Color
+Emoji. other platforms use their installed fonts. coverage depends on those
+fonts; an unsupported character can still show a missing-glyph box.
 
-## remaining limits
+## ownership and caching
 
-Only installed glyphs can be displayed. A character with no usable installed
-font still uses the missing-glyph box. Font selection is character-based;
-script-run and locale-specific fallback selection need further work.
+native engines and layouts belong to the UI thread. each cached layout owns
+its text. SDK headers define the native types behind a small C interface;
+no generated binding collection or custom COM vtable is required.
 
-## inline emoji
+SDL3 receives premultiplied label textures. text foreground is part of the
+texture key, so color emoji are not tinted with that foreground. opacity
+modulates both RGB and alpha. measurement, drawing, fitting, and editing share
+up to 2,048 layouts in Odin's core LRU cache. each layout also retains the
+native cut for its last fitted width. evicted entries are released after
+presentation. textures use a soft 16 MiB budget; the least recently used
+textures are released first. empty space does not need a texture.
 
-Color emoji are separate from ordinary font fallback. Fontconfig selects the
-system color emoji face. SDL_ttf shapes each complete sequence and renders
-its image on a worker. The UI uploads at most six images per frame and keeps
-a 256-entry texture cache. Worker fonts and surfaces never cross into the
-ordinary text font cache.
-
-Every emoji sequence reserves one cell based on Geist's visible capital
-height. Image availability cannot change measurement, wrapping, or truncation.
-The UI scales the cached image into that cell and centers it vertically
-against the primary font's visible capital ink. A pending,
-missing, or unjoined sequence shows one outlined placeholder, not several
-squeezed pictures. No system font is installed or replaced.
-
-Headless Linux tests cover Noto Color Emoji cars, smoke, flags, skin tones,
-hearts, keycaps, and joined families. macOS and Windows use the same path but
-still require native runtime verification with Apple Color Emoji and Segoe UI
-Emoji. Overlapping glyph layers are accepted when they fit one advancing
-emoji cell; unjoined side-by-side parts are rejected. Full bidirectional
-layout across mixed text and emoji spans is not provided; ordinary spans
-retain SDL_ttf's shaping.
+headless Linux tests cover scripts, symbols, joined color emoji, grapheme
+boundaries, trailing spaces, bidi selection, fitting, texture blending, and
+cache ownership. Windows and macOS also run headless text tests in CI;
+local Linux checks do not establish native behavior on those platforms.

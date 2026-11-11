@@ -2,9 +2,10 @@
 
 ## dependencies
 
-install Odin `dev-2026-10` or newer, `just`, a C compiler, and `pkg-config`.
+install Odin `dev-2026-10` or newer, `just`, and the platform build tools.
+Linux also needs a C compiler and `pkg-config`.
 the primary Geist fonts are included in `assets/fonts`. on Linux, install
-fontconfig and the distribution's Noto script, symbol, and CJK font packages
+pango 1.56 or newer, Cairo, and the Noto script, symbol, and CJK font packages
 for broad Unicode coverage (on Ubuntu: `fonts-noto-core`, `fonts-noto-cjk`,
 `fonts-noto-extra`). install the color emoji font package for inline
 emoji, such as Noto Color Emoji on Linux. see
@@ -13,8 +14,7 @@ emoji, such as Noto Color Emoji on Linux. see
 | library | Linux | macOS | Windows |
 | --- | --- | --- | --- |
 | SDL3 | system package | `brew install sdl3` | official SDL dev bundle |
-| SDL3_ttf | system package | `brew install sdl3_ttf` | official SDL dev bundle |
-| fontconfig | system package | `brew install fontconfig` | vcpkg `fontconfig` |
+| text | pango + Cairo | system CoreText + CoreGraphics | system DirectWrite + Direct2D |
 | libcurl | system package | `brew install curl` | included with Odin |
 | Vorbis decoder | included with Odin | included with Odin | included with Odin |
 | SDL3_image | system package | `brew install sdl3_image` | official SDL dev bundle |
@@ -23,13 +23,15 @@ emoji, such as Noto Color Emoji on Linux. see
 
 macOS also needs the Xcode command line tools.
 
-on Windows, install Odin and `just` with winget and `fontconfig` with vcpkg
-for `x64-windows`. SDL3, SDL3_image, and SDL3_ttf come from SDL's official
-pinned `-VC` dev bundles, fetched by `scripts/prepare-windows.ps1`.
-SDL_image's WebP codec DLLs are copied beside the exe during packaging.
-no MSYS2 is needed. point
-`FONTCONFIG_FILE` and `FONTCONFIG_PATH` at vcpkg's font configuration,
-and extend `SPOTI_LINKER_FLAGS` with `/LIBPATH:<vcpkg>/installed/x64-windows/lib`.
+on Windows, install Git for Windows, Odin, `just`, and Visual Studio Build
+Tools with MSVC and the Windows SDK. the Visual Studio IDE is not needed.
+start Git Bash from an x64 Visual Studio developer terminal, then run the
+same `just` commands. CI loads that environment once with Microsoft's
+installed setup script, then uses bash for builds, tests, and packaging.
+`scripts/prepare-windows.sh` fetches the pinned SDL3 and SDL3_image dev bundles
+and compiles the icon resource. `scripts/build-text.sh` compiles the native
+text backend on each platform. no vcpkg, MSYS2, SDL_ttf, or fontconfig setup
+is needed on Windows. packaging retains SDL_image's WebP codec DLLs.
 
 ## build and check
 
@@ -42,7 +44,7 @@ just check
 just test
 ```
 
-`just test` runs all 14 test suites. root layout tests run on one thread
+`just test` runs all 13 test suites. root layout tests run on one thread
 because Clay stores its current context in a process-global variable.
 Odin memory tracking remains enabled. tests do not contact Spotify or start
 browser approval. run live backend probes separately, with explicit permission.
@@ -53,7 +55,7 @@ for address-sanitizer checks:
 odin test spotify/library -sanitize:address
 odin test spotify/session -sanitize:address
 odin test spotify/connect -sanitize:address
-odin test ui -define:ODIN_TEST_THREADS=1 -sanitize:address
+just test-ui-asan # instruments both the native C backend and Odin on Linux
 odin test . -define:ODIN_TEST_THREADS=1 -sanitize:address
 ```
 
@@ -85,12 +87,11 @@ llvm-ar rcsD vendor/clay/linux-arm64/clay.a /tmp/spoti-clay-linux-arm64.o
 ## CI
 
 download the `.tar.zst` artifact from a successful manual run. Linux and
-Windows include the binary and assets. Windows also includes DLLs and a
-fontconfig directory beside the exe; point `FONTCONFIG_FILE` and
-`FONTCONFIG_PATH` at it before running. macOS includes an ad-hoc signed
-`spoti.app` with icons and fonts, but no library copies. the Homebrew cask
-installs its library dependencies. for a manual archive, first run
-`brew install curl fontconfig sdl3 sdl3_image sdl3_ttf`.
+Windows include the binary and assets. Windows also includes the SDL and
+WebP DLLs, with no separate font configuration. macOS includes an ad-hoc
+signed `spoti.app` with icons and fonts, but no library copies. the Homebrew
+cask installs its library dependencies. for a manual archive, first run
+`brew install curl sdl3 sdl3_image`.
 the app is not notarized.
 
 ## homebrew

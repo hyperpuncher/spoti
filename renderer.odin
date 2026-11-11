@@ -166,9 +166,13 @@ measure_text :: proc "c" (
 	value := string(text.chars[:text.length])
 	state.text_measures += 1
 	if config.userData == &LABEL_INK_BOUNDS {
-		font := ui.font_for_size(state, f32(config.fontSize) * ui.scale(state), config.fontId)
-		bounds := ui.label_bounds(font, value)
-		return {f32(bounds.w), f32(bounds.h)}
+		bounds := ui.label_bounds(
+			state,
+			value,
+			f32(config.fontSize) * ui.scale(state),
+			config.fontId,
+		)
+		return {bounds.width, bounds.height}
 	}
 	width, height := ui.text_size(
 		state,
@@ -184,7 +188,6 @@ render :: proc(
 	state: ^ui.State,
 	textures: ^Textures,
 ) {
-	ui.poll_emoji(state)
 	textures.cover_frame += 1
 	clip_stack: [64]sdl.Rect
 	clip_depth := 0

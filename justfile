@@ -1,22 +1,23 @@
-set windows-shell := ["pwsh", "-NoLogo", "-NoProfile", "-Command"]
+set windows-shell := ["bash", "-euc"]
+# Git Bash must not rewrite native compiler and linker switches as file paths.
+export MSYS_NO_PATHCONV := "1"
 
 vet_flags := "-vet -vet-cast -vet-style -vet-semicolon -vet-tabs"
 # Native library paths. macOS uses Homebrew curl for WebSockets; Windows
-# links SDL's dev bundles from build/deps plus the vcpkg libraries, whose
-# install root varies per machine and arrives via SPOTI_LINKER_FLAGS.
-linker_flags := env_var_or_default("SPOTI_LINKER_FLAGS", if os() == "macos" { "-L$(brew --prefix curl)/lib -L$(brew --prefix)/lib" } else if os() == "windows" { "/LIBPATH:build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:build/deps/SDL3_ttf-3.2.2/lib/x64 /LIBPATH:build/deps/SDL3_image-3.4.8/lib/x64" } else { "" })
+# links SDL's dev bundles from build/deps. SPOTI_LINKER_FLAGS overrides these.
+linker_flags := env_var_or_default("SPOTI_LINKER_FLAGS", if os() == "macos" { "-L$(brew --prefix curl)/lib -L$(brew --prefix)/lib" } else if os() == "windows" { "/LIBPATH:build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:build/deps/SDL3_image-3.4.8/lib/x64" } else { "" })
 curl_flags := if linker_flags == "" { "" } else { '-extra-linker-flags:"' + linker_flags + '"' }
 binary := if os() == "windows" { "build/spoti.exe" } else { "build/spoti" }
 # Dev-only affordances such as the on-screen fps counter. Release builds
 # stay clean unless SPOTI_DEBUG is set in the environment at runtime.
 debug_flags := "-define:SPOTI_DEBUG=true"
 platform_flags := if os() == "windows" { "-linker:msvc -resource:build/app.res" } else { "" }
-project_packages := "main,ap,artwork,audio,connect,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui,fontconfig"
+project_packages := "main,ap,artwork,audio,connect,credential,diagnostic,http,library,mpris,oauth,player,session,shannon,track,ui,native_text"
 
 default: run
 
 _prepare:
-	{{if os() == "windows" { "pwsh -NoProfile -File scripts/prepare-windows.ps1" } else { "mkdir -p build && ./scripts/build-mpris.sh" }}}
+	{{if os() == "windows" { "sh scripts/prepare-windows.sh && " } else { "" }}}sh scripts/build-mpris.sh && sh scripts/build-text.sh
 
 # Fast dev build with default optimization.
 build: _prepare
@@ -56,6 +57,12 @@ test: _prepare
 	# Font tests share SDL initialization and shutdown, so run them serially.
 	odin test ui -define:ODIN_TEST_THREADS=1 {{curl_flags}}
 	odin test diagnostic {{curl_flags}}
+
+# Linux headless check with both the C backend and Odin code instrumented.
+test-ui-asan:
+	CC=clang CFLAGS="-fsanitize=address -fno-omit-frame-pointer" sh scripts/build-text.sh
+	odin test ui -define:ODIN_TEST_THREADS=1 -sanitize:address {{curl_flags}}
+	sh scripts/build-text.sh
 
 # Network diagnostic: connects to a Spotify AP without signing in.
 probe:

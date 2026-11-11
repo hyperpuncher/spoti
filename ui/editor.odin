@@ -4,8 +4,8 @@ import "core:strings"
 import edit "core:text/edit"
 import "core:unicode"
 import "core:unicode/utf8"
+import native "native_text"
 import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
 
 // One single-line input. Byte offsets always lie on grapheme boundaries.
 Editor :: struct {
@@ -214,86 +214,28 @@ editor_undo :: proc(e: ^Editor, redo: bool, limit: int) -> bool {
 	return true
 }
 
-// SDL_ttf supplies shaped glyph positions; emoji uses the same cells as text().
+// Layout, caret geometry, and hit testing use the same complete native line.
 editor_x :: proc(state: ^State, value: string, at: int) -> f32 {
-	font := font_for_size(state, 14 * scale(state))
-	if font == nil {return 0}
-	pen: f32
-	base := 0
-	for piece in text_pieces(value) {
-		if piece.emoji {
-			if at < base + len(piece.value) {return pen}
-			pen += emoji_side(font)
-		} else {
-			content := cached_text(
-				state,
-				&state.measured_texts,
-				piece.value,
-				14 * scale(state),
-				preserve_spaces = true,
-			)
-			if content != nil {
-				if at <= base + len(piece.value) {
-					sub: ttf.SubString
-					if ttf.GetTextSubString(content, i32(at - base), &sub) {
-						bearing := base == 0 ? glyph_left_bearing(font, piece.value) : 0
-						edge := sub.rect.x
-						if sub.flags.direction == u8(ttf.Direction.RTL) {edge += sub.rect.w}
-						return max(0, pen + f32(edge) - bearing)
-					}
-				}
-				width: i32
-				_ = ttf.GetTextSize(content, &width, nil)
-				pen += f32(width)
-			}
-		}
-		base += len(piece.value)
-	}
-	return pen
+	entry := cached_text(state, value, 14 * scale(state))
+	if entry == nil {return 0}
+	return native.cursor(entry.layout, i32(editor_boundary(value, at)))
 }
 
 editor_hit :: proc(state: ^State, e: ^Editor, x: f32, nearest: bool = true) -> int {
-	font := font_for_size(state, 14 * scale(state))
-	if font == nil {return 0}
+	entry := cached_text(state, e.input, 14 * scale(state))
+	if entry == nil {return 0}
 	point := x - e.box.x + e.scroll * scale(state)
-	pen: f32
-	base := 0
-	for piece in text_pieces(e.input) {
-		width: f32
-		if piece.emoji {
-			width = emoji_side(font)
-			if point <
-			   pen +
-				   width {return base + (nearest && point >= pen + width / 2 ? len(piece.value) : 0)}
-		} else {
-			content := cached_text(
-				state,
-				&state.measured_texts,
-				piece.value,
-				14 * scale(state),
-				preserve_spaces = true,
-			)
-			if content != nil {
-				w: i32
-				_ = ttf.GetTextSize(content, &w, nil)
-				width = f32(w)
-				if point < pen + width || base + len(piece.value) == len(e.input) {
-					bearing := base == 0 ? glyph_left_bearing(font, piece.value) : 0
-					sub: ttf.SubString
-					if ttf.GetTextSubStringForPoint(content, i32(point - pen + bearing), 0, &sub) {
-						at := base + int(sub.offset)
-						trailing := point - pen + bearing >= f32(sub.rect.x) + f32(sub.rect.w) / 2
-						if sub.flags.direction == u8(ttf.Direction.RTL) {trailing = !trailing}
-						if nearest && trailing {at += int(sub.length)}
-						return editor_boundary(e.input, at)
-					}
-				}
-			}
-		}
-		pen += width
-		base += len(piece.value)
-	}
-	return len(e.input)
+	return editor_boundary(e.input, int(native.hit(entry.layout, point, nearest ? 1 : 0)))
+}
+
+editor_ranges :: proc(state: ^State, value: string, low, high: int) -> []native.Rect {
+	entry := cached_text(state, value, 14 * scale(state))
+	if entry == nil {return nil}
+	count := native.selection(entry.layout, i32(low), i32(high), nil, 0)
+	if count <= 0 {return nil}
+	rects := make([]native.Rect, count, context.temp_allocator)
+	_ = native.selection(entry.layout, i32(low), i32(high), raw_data(rects), count)
+	return rects
 }
 
 editor_press :: proc(state: ^State, e: ^Editor, x: f32, clicks: u8, extend: bool) {
@@ -333,7 +275,7 @@ editor_draw :: proc(
 	d := scale(state)
 	caret: f32
 	if e.input_active {caret = editor_x(state, e.input, e.editing.selection[0])}
-	width, height := text_size(state, e.input, 14 * d, preserve_spaces = true)
+	width, height := text_size(state, e.input, 14 * d)
 	if e.input_active {
 		e.scroll = clamp(e.scroll, 0, max(0, (width + 2 * d - box.w) / d))
 		if caret < e.scroll * d {e.scroll = caret / d}
@@ -353,19 +295,22 @@ editor_draw :: proc(
 	x := box.x - e.scroll * d
 	y := box.y + (box.h - height) / 2
 	selected := e.input_active && low != high
-	anchor := caret
-	if selected {anchor = editor_x(state, e.input, e.editing.selection[1])}
-	left, right := min(caret, anchor), max(caret, anchor)
-	if selected {fill(state, {x + left, y - 2 * d, right - left, height + 4 * d}, foreground)}
+	ranges: []native.Rect
+	if selected {
+		ranges = editor_ranges(state, e.input, low, high)
+		for rect in ranges {fill(state, {x + rect.x, y + rect.y - 2 * d, rect.width, rect.height + 4 * d}, foreground)}
+	}
 	value := e.input
 	if !e.input_active && value == "" {value = e.placeholder}
-	text(state, value, x, y, 14 * d, e.input_active ? foreground : muted, preserve_spaces = true)
+	text(state, value, x, y, 14 * d, e.input_active ? foreground : muted)
 	e.caret_painted = editor_caret_visible(e, sdl.GetTicks())
 	if selected {
-		selection := sdl.Rect{i32(x + left), clip.y, i32(right - left), clip.h}
-		_ = sdl.GetRectIntersection(clip, selection, &selection)
-		_ = sdl.SetRenderClipRect(state.renderer, &selection)
-		text(state, e.input, x, y, 14 * d, background, preserve_spaces = true)
+		for rect in ranges {
+			selection := sdl.Rect{i32(x + rect.x), clip.y, i32(rect.width + 1), clip.h}
+			_ = sdl.GetRectIntersection(clip, selection, &selection)
+			_ = sdl.SetRenderClipRect(state.renderer, &selection)
+			text(state, e.input, x, y, 14 * d, background)
+		}
 	} else if e.caret_painted {
 		fill(state, {x + caret, y, max(1, d), height}, foreground)
 	}

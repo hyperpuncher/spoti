@@ -24,7 +24,8 @@
 - Clay Odin binding: `~/docs/clay/bindings/odin/`
 - Clay SDL3 renderer reference: `~/docs/clay/renderers/SDL3/clay_renderer_SDL3.c`
 - SDL3 API: `~/docs/sdlwiki/SDL3/`
-- SDL_ttf: `~/docs/SDL_ttf/`
+- pango: `~/docs/pango/`
+- native text ABI and SDK backends: `ui/native_text/`
 - SDL_image: `~/docs/SDL_image/`
 - Spotify Web API schema: `~/docs/spotify-web-api/open-api-schema.yaml`
 - Spotify policy: `~/docs/spotify-web-api/policies.yaml`

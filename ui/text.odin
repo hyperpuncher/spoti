@@ -1,183 +1,192 @@
 package ui
 
-import c "core:c/libc"
+import "core:container/lru"
+import "core:math"
+import "core:mem"
 import "core:strings"
-import "core:unicode/utf8"
+import native "native_text"
 import sdl "vendor:sdl3"
-import ttf "vendor:sdl3/ttf"
 
-// Each pool retains one frame's text objects in call order. SDL_ttf owns the
-// copied strings and updates cached layouts when their font or text changes.
-Text_Pool :: struct {
-	text_engine: ^ttf.TextEngine,
-	texts:       [dynamic]^ttf.Text,
-	text_count:  int,
+TEXT_CACHE_SLOTS :: 2048
+TEXT_TEXTURE_BUDGET :: 16 * 1024 * 1024
+
+Text_Key :: struct {
+	value:   string,
+	size:    f32,
+	font_id: u16,
 }
 
-cached_text :: proc(
-	state: ^State,
-	pool: ^Text_Pool,
-	value: string,
-	size: f32,
-	font_id: u16 = 0,
-	preserve_spaces: bool = false,
-) -> ^ttf.Text {
-	font := font_for_size(state, size, font_id)
-	if font == nil {return nil}
-	content: ^ttf.Text
-	if pool.text_count < len(pool.texts) {
-		content = pool.texts[pool.text_count]
-		if ttf.GetTextFont(content) == font && string(cstring(content.text)) == value {
-			_ = ttf.SetTextWrapWhitespaceVisible(content, preserve_spaces)
-			pool.text_count += 1
-			return content
-		}
-	}
-	// An unchanged slot already has its fallbacks. SDL_ttf updates existing
-	// text objects when another string adds a fallback to the shared font.
-	_ = font_for_text(state, value, size, font_id)
-	if content == nil {
-		content = ttf.CreateText(pool.text_engine, font, raw_data(value), len(value))
-		if content == nil {return nil}
-		append(&pool.texts, content)
-	} else {
-		if ttf.GetTextFont(content) != font && !ttf.SetTextFont(content, font) {return nil}
-		if string(cstring(content.text)) != value &&
-		   !ttf.SetTextString(content, raw_data(value), len(value)) {return nil}
-	}
-	_ = ttf.SetTextWrapWhitespaceVisible(content, preserve_spaces)
-	pool.text_count += 1
-	return content
+// Measurement, drawing, fitting, and editing share complete layouts. The core
+// cache callback needs this owner to stay at a stable address.
+Text_Cache :: struct {
+	layouts:   lru.Cache(Text_Key, ^Text_Entry),
+	retired:   [dynamic]^Text_Entry,
+	allocator: mem.Allocator,
 }
 
-// Emoji contributes one fixed cell to measurement, independent of image
-// availability. Plain spans keep SDL_ttf shaping and their existing advances.
+Text_Entry :: struct {
+	using key:                          Text_Key,
+	layout:                             ^native.Layout,
+	metrics:                            native.Metrics,
+	fit_width:                          f32,
+	fit_cut:                            int,
+	fit_valid:                          bool,
+	texture:                            ^sdl.Texture,
+	color:                              [3]u8,
+	image_x, image_y, image_w, image_h: f32,
+	bytes:                              int,
+}
+
+cached_text :: proc(state: ^State, value: string, size: f32, font_id: u16 = 0) -> ^Text_Entry {
+	if !init_text(state) {return nil}
+	cache := state.text_cache
+	key := Text_Key{value, size, font_id}
+	if entry, ok := lru.get(&cache.layouts, key); ok {return entry}
+	entry := new(Text_Entry, cache.allocator)
+	entry.key = {strings.clone(value, cache.allocator), size, font_id}
+	entry.layout = native.layout(
+		state.text_backend,
+		raw_data(value),
+		i32(len(value)),
+		size,
+		font_weight(font_id),
+	)
+	if entry.layout == nil {destroy_text_entry(state, entry); return nil}
+	entry.metrics = native.metrics(entry.layout)
+	if lru.set(&cache.layouts, entry.key, entry) != nil {
+		destroy_text_entry(state, entry)
+		return nil
+	}
+	return entry
+}
+
+// Entries remain valid until the frame ends, even if a later lookup evicts
+// them. Release textures after SDL has consumed the queued draws.
+retire_text_entry :: proc(_: Text_Key, entry: ^Text_Entry, user_data: rawptr) {
+	cache := cast(^Text_Cache)user_data
+	append(&cache.retired, entry)
+}
+
 text_size :: proc(
 	state: ^State,
 	value: string,
 	size: f32,
 	font_id: u16 = 0,
-	preserve_spaces: bool = false,
 ) -> (
 	width, height: f32,
 ) {
-	font := font_for_size(state, size, font_id)
-	if font == nil {return}
-	height = f32(ttf.GetFontHeight(font))
-	for piece in text_pieces(value) {
-		if piece.emoji {width += emoji_side(font); continue}
-		w, h: c.int
-		measured := false
-		if strings.contains_any(piece.value, "\r\n") {
-			span_font := font_for_text(state, piece.value, size, font_id)
-			if span_font == nil {continue}
-			// Text objects lay out hard line breaks; string sizing does not.
-			measured = ttf.GetStringSize(
-				span_font,
-				raw_data(piece.value),
-				uint(len(piece.value)),
-				&w,
-				&h,
-			)
-		} else {
-			content := cached_text(
-				state,
-				&state.measured_texts,
-				piece.value,
-				size,
-				font_id,
-				preserve_spaces,
-			)
-			measured = content != nil && ttf.GetTextSize(content, &w, &h)
-		}
-		if measured {
-			width += f32(w)
-			height = max(height, f32(h))
-		}
+	if entry := cached_text(state, value, size, font_id); entry != nil {
+		return entry.metrics.width, entry.metrics.height
 	}
 	return
 }
 
-// Single-glyph labels can use visible ink bounds instead of the font's
-// advance and line height. This keeps badge digits centered at every size.
-glyph_bounds :: proc(font: ^ttf.Font, value: string) -> sdl.Rect {
-	if font == nil {return {}}
-	r, _ := utf8.decode_rune_in_string(value)
-	min_x, max_x, min_y, max_y: c.int
-	if !ttf.GetGlyphMetrics(font, u32(r), &min_x, &max_x, &min_y, &max_y, nil) {return {}}
-	return {min_x, ttf.GetFontAscent(font) - max_y, max_x - min_x, max_y - min_y}
+label_bounds :: proc(state: ^State, value: string, size: f32, font_id: u16 = 0) -> native.Rect {
+	if entry := cached_text(state, value, size, font_id); entry != nil {return entry.metrics.ink}
+	return {}
 }
 
-// Include every glyph so "ctrl" uses the tall l, not only the first letter.
-label_bounds :: proc(font: ^ttf.Font, value: string) -> (bounds: sdl.Rect) {
-	if font == nil {return}
-	pen: c.int
-	ascent := ttf.GetFontAscent(font)
-	for r in value {
-		min_x, max_x, min_y, max_y, advance: c.int
-		if !ttf.GetGlyphMetrics(font, u32(r), &min_x, &max_x, &min_y, &max_y, &advance) {return {}}
-		glyph := sdl.Rect{pen + min_x, ascent - max_y, max_x - min_x, max_y - min_y}
-		_ = sdl.GetRectUnion(bounds, glyph, &bounds)
-		pen += advance
+// Returns borrowed text if it fits, otherwise an owned string from the supplied
+// allocator. Cache the native cut for the last width, not an allocator-owned result.
+fit_text :: proc(
+	state: ^State,
+	value: string,
+	width, size: f32,
+	font_id: u16 = 0,
+	allocator := context.allocator,
+) -> string {
+	entry := cached_text(state, value, size, font_id)
+	if entry == nil {return ""}
+	if entry.metrics.width <= width {return value}
+	if !entry.fit_valid || entry.fit_width != width {
+		entry.fit_cut = int(native.fit(entry.layout, width))
+		entry.fit_width, entry.fit_valid = width, true
 	}
-	return
+	cut := entry.fit_cut
+	if cut < 0 {return ""}
+	if cut >= len(value) {return value}
+	return strings.concatenate({value[:editor_boundary(value, cut)], "…"}, allocator)
 }
 
-// Draw text and inline emoji on the renderer thread.
 text :: proc(
 	state: ^State,
 	value: string,
-	x, y, font_size: f32,
+	x, y, size: f32,
 	color: sdl.Color,
 	font_id: u16 = 0,
-	preserve_spaces: bool = false,
 	ink_bounds: bool = false,
 ) {
-	if value == "" {return}
-	font := font_for_size(state, font_size, font_id)
-	if font == nil {return}
-	top := y
-	if ink_bounds {top -= f32(label_bounds(font, value).y)}
-	cursor := x
-	for piece in text_pieces(value) {
-		if piece.emoji {
-			rect := emoji_rect(font, cursor, y)
-			if texture := emoji_texture(state, piece.value); texture != nil {
-				_ = sdl.SetTextureAlphaMod(texture, color.a)
-				draw_texture(state, texture, rect)
-			} else {
-				_ = sdl.SetRenderDrawColor(state.renderer, color.r, color.g, color.b, color.a)
-				_ = sdl.RenderRect(state.renderer, &rect)
-			}
-			cursor += rect.w
-			continue
+	if value == "" || state.renderer == nil {return}
+	entry := cached_text(state, value, size, font_id)
+	if entry == nil {return}
+	rgb := [3]u8{color.r, color.g, color.b}
+	if entry.texture == nil || entry.color != rgb {
+		drop_text_texture(state, entry)
+		image := native.render(entry.layout, color.r, color.g, color.b)
+		defer native.free_image(image)
+		if image.pixels == nil {return}
+		texture := sdl.CreateTexture(state.renderer, .ARGB8888, .STATIC, image.width, image.height)
+		if texture == nil {return}
+		if !sdl.UpdateTexture(texture, nil, image.pixels, image.stride) ||
+		   !sdl.SetTextureBlendMode(texture, sdl.BLENDMODE_BLEND_PREMULTIPLIED) {
+			sdl.DestroyTexture(texture)
+			return
 		}
-		content := cached_text(
-			state,
-			&state.drawn_texts,
-			piece.value,
-			font_size,
-			font_id,
-			preserve_spaces,
-		)
-		if content == nil {continue}
-		_ = ttf.SetTextColor(content, color.r, color.g, color.b, color.a)
-		pen := cursor
-		if cursor == x {pen -= glyph_left_bearing(font, piece.value)}
-		_ = ttf.DrawRendererText(content, f32(int(pen + 0.5)), f32(int(top + 0.5)))
-		width: c.int
-		if ttf.GetTextSize(content, &width, nil) {cursor += f32(width)}
+		entry.texture, entry.color = texture, rgb
+		entry.image_x, entry.image_y = f32(image.x), f32(image.y)
+		entry.image_w, entry.image_h = f32(image.width), f32(image.height)
+		entry.bytes = int(image.stride) * int(image.height)
+		state.text_texture_bytes += entry.bytes
+	}
+	pen_x, pen_y := x, y
+	if ink_bounds {pen_x -= entry.metrics.ink.x; pen_y -= entry.metrics.ink.y}
+	// Premultiplied textures must modulate both RGB and alpha for opacity.
+	// Never tint emoji with the label foreground: its RGB is baked by the backend.
+	_ = sdl.SetTextureColorMod(entry.texture, color.a, color.a, color.a)
+	_ = sdl.SetTextureAlphaMod(entry.texture, color.a)
+	rect := sdl.FRect {
+		math.round(pen_x + entry.image_x),
+		math.round(pen_y + entry.image_y),
+		entry.image_w,
+		entry.image_h,
+	}
+	_ = sdl.RenderTexture(state.renderer, entry.texture, nil, &rect)
+}
+
+drop_text_texture :: proc(state: ^State, entry: ^Text_Entry) {
+	if entry.texture != nil {sdl.DestroyTexture(entry.texture)}
+	state.text_texture_bytes -= entry.bytes
+	entry.texture, entry.bytes = nil, 0
+}
+
+destroy_text_entry :: proc(state: ^State, entry: ^Text_Entry) {
+	drop_text_texture(state, entry)
+	if entry.layout != nil {native.destroy(entry.layout)}
+	delete(entry.value, state.text_cache.allocator)
+	free(entry, state.text_cache.allocator)
+}
+
+// Call after presentation. Remove the least recently used textures first when
+// retained pixel data exceeds its soft budget. Layout count has a fixed bound.
+finish_text_frame :: proc(state: ^State, texture_budget: int = TEXT_TEXTURE_BUDGET) {
+	cache := state.text_cache
+	if cache == nil {return}
+	for entry in cache.retired {destroy_text_entry(state, entry)}
+	clear(&cache.retired)
+	for node := cache.layouts.tail;
+	    node != nil && state.text_texture_bytes > texture_budget;
+	    node = node.prev {
+		drop_text_texture(state, node.value)
 	}
 }
 
-// Offset the first pen position so visible ink starts at the layout edge.
-glyph_left_bearing :: proc(font: ^ttf.Font, value: string) -> f32 {
-	return f32(glyph_bounds(font, value).x)
-}
-
-finish_text_frame :: proc(state: ^State) {
-	for pool in ([]^Text_Pool{&state.drawn_texts, &state.measured_texts}) {
-		for len(pool.texts) > pool.text_count {ttf.DestroyText(pop(&pool.texts))}
-		pool.text_count = 0
+destroy_text :: proc(state: ^State) {
+	if cache := state.text_cache; cache != nil {
+		lru.destroy(&cache.layouts, true)
+		finish_text_frame(state)
+		delete(cache.retired)
+		free(cache, cache.allocator)
+		state.text_cache = nil
 	}
+	if state.text_backend != nil {native.close(state.text_backend); state.text_backend = nil}
 }

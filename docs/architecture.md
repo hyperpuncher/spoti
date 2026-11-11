@@ -12,7 +12,6 @@ runtime dependency. librespot and Spotifast are protocol references.
 | UI thread | events, navigation, layout, texture upload, playback decisions |
 | library worker | account data, native playlist reads, search, confirmed writes |
 | cover worker | artwork requests and image decoding |
-| emoji worker | system color font lookup, sequence shaping, and image rendering |
 | playback and preload workers | authorization, audio resolution and decoding |
 | Connect worker | Dealer connection, registration, incoming commands, state publication |
 | AP keep-alive worker | idle connection maintenance |
@@ -154,12 +153,13 @@ to 4096 pixels so Spotify's 2660-pixel artist headers can be displayed.
 square cover artwork is not cropped or otherwise materially changed;
 dedicated banners may be cropped to fit their bounded header.
 
-ordinary text uses Geist with character-based system outline fallbacks.
-each primary and fallback font pair is attached once; SDL_ttf appends duplicate
-entries otherwise. emoji uses whole grapheme clusters with stable inline cells.
-a worker owns the color font and renders cached images; SDL texture uploads and
-scaled drawing stay on the UI thread. image arrivals wake the event loop and
-never change text measurements. see [font behavior and limits](../assets/fonts/FONTS.md).
+text uses complete native layouts: pango/Cairo on Linux, DirectWrite/Direct2D
+on Windows, and CoreText/CoreGraphics on macOS. each backend owns shaping,
+bidi runs, installed-font fallback, color emoji, and ellipsis. measurement,
+drawing, and editor geometry use the same layout. SDL receives cached label
+textures, with a soft 16 MiB pixel budget and bounded layout slots. all text
+objects and texture operations stay on the UI thread.
+see [font behavior and limits](../assets/fonts/FONTS.md).
 
 hero titles and metadata are cached by detail revision, row count, size and
 viewport width. page growth or header changes invalidate only the matching

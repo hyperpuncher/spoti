@@ -39,7 +39,7 @@ jobs:
         timeout-minutes: 10
         run: |
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends clang just pkg-config libsdl3-dev libsdl3-image-dev libsdl3-ttf-dev libfontconfig-dev libcurl4-openssl-dev libsecret-1-dev libsystemd-dev fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends clang just pkg-config libsdl3-dev libsdl3-image-dev libpango1.0-dev libcairo2-dev libcurl4-openssl-dev libsecret-1-dev libsystemd-dev fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji
       - name: setup Odin
         timeout-minutes: 10
         uses: laytan/setup-odin@v2
@@ -75,7 +75,7 @@ jobs:
           persist-credentials: false
       - name: install Homebrew packages
         timeout-minutes: 10
-        run: brew install just pkg-config sdl3 sdl3_image sdl3_ttf fontconfig curl
+        run: brew install just pkg-config sdl3 sdl3_image curl
       - name: setup Odin
         timeout-minutes: 10
         uses: laytan/setup-odin@v2
@@ -84,8 +84,10 @@ jobs:
           release: ${{ env.ODIN_RELEASE }}
       - name: build vendor stb
         run: '"$(odin root)/vendor/stb/src/build_stb.sh"'
-      - name: test native credentials, audio, and image codecs
+      - name: test native text, credentials, audio, and image codecs
         run: |
+          just _prepare
+          odin test ui -define:ODIN_TEST_THREADS=1 -extra-linker-flags:"-L$(brew --prefix)/lib"
           odin test spotify/credential
           odin test spotify/audio -extra-linker-flags:"-L$(brew --prefix curl)/lib"
           odin test spotify/artwork -extra-linker-flags:"-L$(brew --prefix)/lib"
@@ -102,11 +104,27 @@ jobs:
   windows:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      MSYS_NO_PATHCONV: "1"
+      SPOTI_LINKER_FLAGS: /LIBPATH:build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:build/deps/SDL3_image-3.4.8/lib/x64
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: load Windows compiler environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          & "$vs/Common7/Tools/Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          foreach ($name in @('PATH', 'INCLUDE', 'LIB', 'LIBPATH')) {
+            "$name=$([Environment]::GetEnvironmentVariable($name))" >> $env:GITHUB_ENV
+          }
       - name: setup Odin
         timeout-minutes: 10
         uses: laytan/setup-odin@v2
@@ -116,57 +134,24 @@ jobs:
       - name: install just
         timeout-minutes: 5
         run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
           winget install --id Casey.Just --exact --silent --accept-package-agreements --accept-source-agreements
-          "$env:LOCALAPPDATA/Microsoft/WinGet/Links" >> $env:GITHUB_PATH
-      - name: identify vcpkg cache
-        id: vcpkg
+          cygpath -w "$LOCALAPPDATA/Microsoft/WinGet/Links" >> "$GITHUB_PATH"
+      - name: prepare native dependencies
         run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          $revision = git -C $env:VCPKG_INSTALLATION_ROOT rev-parse HEAD
-          "key=vcpkg-${env:ImageVersion}-$revision-x64-windows-fontconfig" >> $env:GITHUB_OUTPUT
-          "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP/vcpkg-cache,readwrite" >> $env:GITHUB_ENV
-      - uses: actions/cache/restore@v6
-        id: vcpkg-cache
-        timeout-minutes: 5
-        with:
-          path: ${{ runner.temp }}/vcpkg-cache
-          key: ${{ steps.vcpkg.outputs.key }}
-      - name: install fontconfig
-        timeout-minutes: 15
+          just _prepare
+          for directory in build/deps/SDL3-3.4.18/lib/x64 build/deps/SDL3_image-3.4.8/lib/x64 build/deps/SDL3_image-3.4.8/lib/x64/optional; do
+            cygpath -w "$PWD/$directory" >> "$GITHUB_PATH"
+          done
+      - name: test native text, HTTP, audio, and image codecs
         run: |
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          vcpkg install --triplet x64-windows fontconfig
-      - uses: actions/cache/save@v6
-        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
-        timeout-minutes: 5
-        with:
-          path: ${{ runner.temp }}/vcpkg-cache
-          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
-      - name: configure native paths
-        run: |
-          $root = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows"
-          "$root/bin" >> $env:GITHUB_PATH
-          just --version
-          "SPOTI_LINKER_FLAGS=/LIBPATH:$PWD/build/deps/SDL3-3.4.18/lib/x64 /LIBPATH:$PWD/build/deps/SDL3_ttf-3.2.2/lib/x64 /LIBPATH:$PWD/build/deps/SDL3_image-3.4.8/lib/x64 /LIBPATH:$root/lib" >> $env:GITHUB_ENV
-          "FONTCONFIG_FILE=$root/etc/fonts/fonts.conf" >> $env:GITHUB_ENV
-          "FONTCONFIG_PATH=$root/etc/fonts" >> $env:GITHUB_ENV
-      - name: prepare SDL bundles
-        run: |
-          pwsh -NoProfile -File scripts/prepare-windows.ps1
-          "$PWD/build/deps/SDL3-3.4.18/lib/x64", "$PWD/build/deps/SDL3_ttf-3.2.2/lib/x64", "$PWD/build/deps/SDL3_image-3.4.8/lib/x64", "$PWD/build/deps/SDL3_image-3.4.8/lib/x64/optional" >> $env:GITHUB_PATH
-      - name: test HTTP, audio, and image codecs
-        run: |
+          odin test ui -linker:msvc -define:ODIN_TEST_THREADS=1 -extra-linker-flags:"$SPOTI_LINKER_FLAGS"
           odin test spotify/http -linker:msvc
           odin test spotify/audio -linker:msvc
-          odin test spotify/artwork -linker:msvc -extra-linker-flags:"$env:SPOTI_LINKER_FLAGS"
-          odin test . -linker:msvc -define:ODIN_TEST_NAMES=main.svg_icons_decode_to_white_tint_masks -extra-linker-flags:"$env:SPOTI_LINKER_FLAGS"
+          odin test spotify/artwork -linker:msvc -extra-linker-flags:"$SPOTI_LINKER_FLAGS"
+          odin test . -linker:msvc -define:ODIN_TEST_NAMES=main.svg_icons_decode_to_white_tint_masks -extra-linker-flags:"$SPOTI_LINKER_FLAGS"
       - run: just release
       - name: archive
-        run: pwsh -NoProfile -File packaging/windows/bundle.ps1 "build/spoti-windows-x64-$($env:GITHUB_SHA.Substring(0,12)).tar.zst"
+        run: sh packaging/windows/bundle.sh "build/spoti-windows-x64-${GITHUB_SHA:0:12}.tar.zst"
       - uses: actions/upload-artifact@v7
         with:
           path: build/spoti-windows-x64-*.tar.zst
