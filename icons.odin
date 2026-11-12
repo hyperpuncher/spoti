@@ -50,7 +50,7 @@ ICON_NAMES :: []string {
 	"volume-2",
 	"speaker",
 	"music",
-	"chevrons-up-down",
+	"move-vertical",
 	"check",
 	"list-sort-descending",
 	"circle-plus",

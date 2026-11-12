@@ -697,7 +697,7 @@ autoscroll_indicator :: proc(view: View, textures: ^Textures, d: f32) {
 		cornerRadius = clay.CornerRadiusAll(size / 2),
 	},
 	) {
-		icon_element(textures, "chevrons-up-down", .Dark, 20 * d)
+		icon_element(textures, "move-vertical", .Dark, 20 * d)
 	}
 }
 
