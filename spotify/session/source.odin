@@ -256,7 +256,16 @@ request_audio_key :: proc(
 		if command != 0x0d && command != 0x0e {continue}
 		result: ap.Audio_Key_Result
 		key, result = ap.read_audio_key(command, reply[:], sequence)
-		if result != .Granted {fmt.eprintln("audio key refused or invalid"); return}
+		if result != .Granted {
+			diagnostic.writef(
+				"audio key reply result=%v command=0x%02x bytes=%d",
+				result,
+				command,
+				len(reply),
+			)
+			fmt.eprintln("audio key request failed:", result)
+			return
+		}
 		if cancelled(cancel) {return}
 		return key, true
 	}
