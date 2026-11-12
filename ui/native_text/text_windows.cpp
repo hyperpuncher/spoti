@@ -135,15 +135,17 @@ int st_fit(St_Layout *l, float width) {
 	return prefix;
 }
 float st_cursor(St_Layout *l, int index) {
-	FLOAT x, y;
-	DWRITE_HIT_TEST_METRICS hit;
-	l->value->HitTestTextPosition(st_units(l->text, l->length, index), FALSE, &x, &y, &hit);
+	if (!l->length) return 0;
+	FLOAT x = 0, y = 0;
+	DWRITE_HIT_TEST_METRICS hit = {};
+	if (FAILED(l->value->HitTestTextPosition(st_units(l->text, l->length, index), FALSE, &x, &y, &hit))) return 0;
 	return x;
 }
 int st_hit(St_Layout *l, float x, int nearest) {
-	BOOL trailing, inside;
+	if (!l->length) return 0;
+	BOOL trailing = FALSE, inside = FALSE;
 	DWRITE_HIT_TEST_METRICS hit = {};
-	l->value->HitTestPoint(x, l->metrics.baseline / 2, &trailing, &inside, &hit);
+	if (FAILED(l->value->HitTestPoint(x, l->metrics.baseline / 2, &trailing, &inside, &hit))) return 0;
 	return st_bytes(l->text, l->length, hit.textPosition + (nearest && trailing ? hit.length : 0));
 }
 int st_selection(St_Layout *l, int start, int end, St_Rect *rects, int capacity) {

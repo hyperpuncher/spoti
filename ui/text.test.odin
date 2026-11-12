@@ -75,6 +75,11 @@ native_editor_geometry_preserves_clusters_spaces_and_bidi_selection :: proc(t: ^
 	e: Editor
 	editor_init(&e)
 	defer editor_destroy(&e)
+	// Focusing an empty field must not ask DirectWrite for a nonexistent run.
+	testing.expect_value(t, editor_x(&state, "", 0), f32(0))
+	for x in ([]f32{-100, 0, 100}) {
+		testing.expect_value(t, editor_hit(&state, &e, x), 0)
+	}
 	for value in ([]string{"A👨‍👩‍👧B", "A👍🏽B", "AéB", "A🇯🇵B"}) {
 		editor_set_text(&e, value)
 		e.box = {0, 0, 1000, 30}
