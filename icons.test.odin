@@ -8,6 +8,16 @@ import ui "ui"
 import sdl "vendor:sdl3"
 
 @(test)
+pressed_icons_keep_their_center_when_dimensions_round :: proc(t: ^testing.T) {
+	// Cross the even/odd pixel boundary with a fractional center.
+	for size in ([]f32{20.4, 20.6}) {
+		rect := icon_rect({101.25 - size / 2, 81.5 - size / 2, size, size})
+		testing.expect_value(t, rect.x + rect.w / 2, f32(101.25))
+		testing.expect_value(t, rect.y + rect.h / 2, f32(81.5))
+	}
+}
+
+@(test)
 svg_icons_decode_to_white_tint_masks :: proc(t: ^testing.T) {
 	surface := sdl.CreateSurface(1, 1, .RGBA32)
 	if !testing.expect(t, surface != nil) {return}

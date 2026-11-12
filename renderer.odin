@@ -183,6 +183,12 @@ measure_text :: proc "c" (
 	return {width, height}
 }
 
+// Round icon dimensions without moving the center during press feedback.
+icon_rect :: proc(box: clay.BoundingBox) -> sdl.FRect {
+	width, height := math.round(box.width), math.round(box.height)
+	return {box.x + (box.width - width) / 2, box.y + (box.height - height) / 2, width, height}
+}
+
 render :: proc(
 	commands: ^clay.ClayArray(clay.RenderCommand),
 	state: ^ui.State,
@@ -217,14 +223,7 @@ render :: proc(
 				_ = sdl.SetTextureColorMod(texture, color.r, color.g, color.b)
 			}
 			area := sdl.FRect{box.x, box.y, box.width, box.height}
-			if color != nil {
-				area = {
-					math.round(area.x),
-					math.round(area.y),
-					math.round(area.w),
-					math.round(area.h),
-				}
-			}
+			if color != nil {area = icon_rect(box)}
 			ui.draw_texture(state, texture, area, crop = banner)
 			if banner {
 				ui.mask_top_corners(
