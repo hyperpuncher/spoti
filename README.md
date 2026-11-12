@@ -40,6 +40,10 @@ lightweight native desktop client for [spotify](https://www.spotify.com)
 paru -S spoti-bin
 ```
 
+```sh
+paru -S spoti-git
+```
+
 ### macos
 
 ```sh
