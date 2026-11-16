@@ -40,23 +40,31 @@ check: _prepare
 	odin check cmd/ap_login {{vet_flags}}
 	odin check cmd/logout {{vet_flags}}
 
-# Clay keeps its current context in a process-global, so layout tests
-# must not run concurrently with each other. One test thread for all.
+# Packages build and run in parallel; output stays per package. Clay and
+# SDL font state are process-global, so the root and ui packages run their
+# own tests on one thread.
 test: _prepare
-	odin test . -define:ODIN_TEST_THREADS=1 {{curl_flags}}
-	odin test spotify/ap {{curl_flags}}
-	odin test spotify/shannon {{curl_flags}}
-	odin test spotify/oauth {{curl_flags}}
-	odin test spotify/session {{curl_flags}}
-	odin test spotify/connect {{curl_flags}}
-	odin test spotify/library {{curl_flags}}
-	odin test spotify/track {{curl_flags}}
-	odin test spotify/audio {{curl_flags}}
-	odin test spotify/artwork {{curl_flags}}
-	odin test spotify/http {{curl_flags}}
-	# Font tests share SDL initialization and shutdown, so run them serially.
-	odin test ui -define:ODIN_TEST_THREADS=1 {{curl_flags}}
-	odin test diagnostic {{curl_flags}}
+	#!/usr/bin/env bash
+	set -u
+	packages=(. ui spotify/ap spotify/shannon spotify/oauth spotify/session spotify/connect spotify/library spotify/track spotify/audio spotify/artwork spotify/http diagnostic)
+	pids=()
+	for package in "${packages[@]}"; do
+		threads=""
+		if [ "$package" = . ] || [ "$package" = ui ]; then threads="-define:ODIN_TEST_THREADS=1"; fi
+		# Binaries stay in build/ so asset lookup finds ../assets.
+		out=build/test-${package//\//_}
+		odin test "$package" $threads -out:"$out" {{curl_flags}} > "$out.log" 2>&1 &
+		pids+=("$!")
+	done
+	status=0
+	for i in "${!packages[@]}"; do
+		wait "${pids[$i]}" && continue
+		package=${packages[$i]}
+		echo "--- $package failed"
+		cat "build/test-${package//\//_}.log"
+		status=1
+	done
+	exit $status
 
 # Linux headless check with both the C backend and Odin code instrumented.
 test-ui-asan:

@@ -44,8 +44,8 @@ just check
 just test
 ```
 
-`just test` runs all 13 test suites. root layout tests run on one thread
-because Clay stores its current context in a process-global variable.
+`just test` runs all 13 test suites in parallel. root and ui tests use one thread
+because Clay and SDL keep process-global state.
 Odin memory tracking remains enabled. tests do not contact Spotify or start
 browser approval. run live backend probes separately, with explicit permission.
 
