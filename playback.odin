@@ -358,9 +358,11 @@ Play_Source :: struct {
 	track:  string,
 	source: session.Source,
 	media:  audio.Seek_Stream,
+	fetch:  audio.Fetch, // downloads the rest of the track into the disk cache
 }
 
 clear_play_source :: proc(cache: ^Play_Source) {
+	audio.stop_fetch(&cache.fetch)
 	audio.close_seek_stream(&cache.media)
 	session.close_source(&cache.source)
 	delete(cache.track)
@@ -459,11 +461,21 @@ login_and_decode :: proc(pointer: rawptr) {
 		queue    = work.queue,
 		cancel   = work.cancel,
 		start_ms = work.start_ms,
+		on_open  = start_track_fetch,
+		user     = &work.source.fetch,
 	}
 	if !player.decode(&decode) && !sync.atomic_load(work.cancel) {
 		// A failed/expired CDN source must be resolved afresh on the next attempt.
 		clear_play_source(work.source)
 	}
+}
+
+// Runs on the decode worker once the file size is known. One fetcher per
+// source; a seek or replay of the same track keeps the running one.
+start_track_fetch :: proc(media: ^audio.Seek_Stream, user: rawptr) {
+	fetch := (^audio.Fetch)(user)
+	if fetch.thread != nil {return}
+	_ = audio.start_fetch(fetch, media.url, media.file_id, media.size, media.cache_offset)
 }
 
 cancel_worker :: proc(queue: chan.Chan(player.Packet), cancel: ^bool) {

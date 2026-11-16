@@ -30,6 +30,9 @@ Work :: struct {
 	queue:    chan.Chan(Packet),
 	cancel:   ^bool,
 	start_ms: int,
+	// Optional; called once the stream is open and positioned.
+	on_open:  proc(media: ^audio.Seek_Stream, user: rawptr),
+	user:     rawptr,
 }
 
 decode :: proc(pointer: rawptr) -> (ok: bool) {
@@ -42,6 +45,7 @@ decode :: proc(pointer: rawptr) -> (ok: bool) {
 		   !sync.atomic_load(work.cancel) {_ = chan.send(work.queue, Packet{kind = .Failed})}
 		return
 	}
+	if work.on_open != nil {work.on_open(media, work.user)}
 	for {
 		if work.cancel != nil && sync.atomic_load(work.cancel) {return}
 		pcm := make([]i16, BUFFER_FRAMES * 2)

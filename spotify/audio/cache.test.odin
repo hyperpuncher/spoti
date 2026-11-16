@@ -198,3 +198,30 @@ disk_cache_complete_tracks_range_presence :: proc(t: ^testing.T) {
 	write_disk_range(&cache, RANGE_SIZE, total, bytes[:])
 	testing.expect(t, disk_cache_complete(id, dir), "all ranges present is complete")
 }
+
+// The background fetcher and the decoder hold separate handles to one track.
+// Blocks either one stores are visible to the other, whichever created the file.
+@(test)
+shared_track_blocks_are_visible_across_handles :: proc(t: ^testing.T) {
+	dir, err := os.make_directory_temp("", "spoti-audio-shared-*", context.allocator)
+	if !testing.expect(t, err == nil) {return}
+	defer {_ = os.remove_all(dir); delete(dir)}
+	id: [20]u8
+	id[0] = 7
+	total := 3 * RANGE_SIZE
+	decoder := open_disk_cache(id, dir)
+	defer close_disk_cache(&decoder)
+	fetcher := open_disk_cache(id, dir)
+	defer close_disk_cache(&fetcher)
+	block: [RANGE_SIZE]u8 = 9
+	write_disk_range(&fetcher, RANGE_SIZE, total, block[:])
+	write_disk_range(&decoder, 0, total, block[:])
+	testing.expect(t, decoder.file != nil, "the second writer adopts the existing file")
+	for start in ([]int{0, RANGE_SIZE}) {
+		bytes, found := read_disk_range(&decoder, start)
+		defer delete(bytes)
+		testing.expect(t, found && len(bytes) == RANGE_SIZE && bytes[0] == 9)
+	}
+	_, missing := read_disk_range(&decoder, 2 * RANGE_SIZE)
+	testing.expect(t, !missing)
+}

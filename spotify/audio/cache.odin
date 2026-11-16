@@ -27,6 +27,7 @@ Disk_Cache :: struct {
 	total:           int,
 	blocks:          []u8,
 	limit:           i64,
+	id:              [20]u8,
 }
 cache_mutex: sync.Mutex
 cache_active: map[string]int
@@ -64,6 +65,7 @@ open_disk_cache :: proc(
 ) -> Disk_Cache {
 	cache := Disk_Cache {
 		limit = limit,
+		id    = id,
 	}
 	if id == ([20]u8{}) || limit <= 0 {return cache}
 	if directory == "" {
@@ -161,10 +163,40 @@ cache_make_room :: proc(directory: string, limit, reserve: i64) -> bool {
 	return total + reserve <= limit
 }
 
+// The decoder and the background fetcher hold separate handles to one track.
+// Either can create the file; the other adopts it on its next read or write.
+adopt_disk_file :: proc(cache: ^Disk_Cache) -> bool {
+	if cache.file != nil {return true}
+	if cache.id == {} || cache.path == "" || !os.exists(cache.path) {return false}
+	id, limit := cache.id, cache.limit
+	directory := strings.clone(cache.directory)
+	defer delete(directory)
+	close_disk_cache(cache)
+	cache^ = open_disk_cache(id, directory, limit)
+	return cache.file != nil
+}
+
+// Another handle (the background fetcher) can store blocks in the same file.
+// A block missing from this handle's table is re-read from the file once.
+disk_has_block :: proc(cache: ^Disk_Cache, block: int) -> bool {
+	if cache.file == nil {return false}
+	index := block * CACHE_BLOCK_META_BYTES
+	if index < 0 || index + CACHE_BLOCK_META_BYTES > len(cache.blocks) {return false}
+	if cache.blocks[index] == 1 {return true}
+	meta: [CACHE_BLOCK_META_BYTES]u8
+	n, err := os.read_at(cache.file, meta[:], i64(CACHE_HEADER_BYTES + index))
+	if err != nil || n != len(meta) || meta[0] != 1 {return false}
+	copy(cache.blocks[index:index + len(meta)], meta[:])
+	return true
+}
+
 read_disk_range :: proc(cache: ^Disk_Cache, start: int) -> (bytes: [dynamic]u8, found: bool) {
-	if cache.file == nil || start < 0 || start >= cache.total || start % RANGE_SIZE != 0 {return}
+	if !adopt_disk_file(cache) ||
+	   start < 0 ||
+	   start >= cache.total ||
+	   start % RANGE_SIZE != 0 {return}
 	index := start / RANGE_SIZE * CACHE_BLOCK_META_BYTES
-	if cache.blocks[index] != 1 {return}
+	if !disk_has_block(cache, start / RANGE_SIZE) {return}
 	bytes = make([dynamic]u8, min(RANGE_SIZE, cache.total - start))
 	n, err := os.read_at(cache.file, bytes[:], i64(cache_payload_offset(cache.total) + start))
 	crc := endian.unchecked_get_u32le(cache.blocks[index + 1:])
@@ -190,6 +222,7 @@ write_disk_range :: proc(cache: ^Disk_Cache, start, total: int, bytes: []u8) {
 	   start >= total ||
 	   start % RANGE_SIZE != 0 ||
 	   len(bytes) != min(RANGE_SIZE, total - start) {return}
+	if !adopt_disk_file(cache) && os.exists(cache.path) {return}
 	if cache.file == nil {
 		sync.mutex_guard(&cache_mutex)
 		payload := cache_payload_offset(total)
