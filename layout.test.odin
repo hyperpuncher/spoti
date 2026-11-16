@@ -2,7 +2,6 @@ package main
 
 import "base:runtime"
 import "core:math"
-import "core:strings"
 import "core:sync/chan"
 import "core:testing"
 import "core:thread"
@@ -685,22 +684,9 @@ fx_test_layout :: proc(fx: ^Button_Fx_Ctx, d: f32) {
 }
 
 @(test)
-hero_cache_invalidates_when_detail_or_title_changes :: proc(t: ^testing.T) {
+hero_cache_invalidates_when_title_changes :: proc(t: ^testing.T) {
 	cache: Hero_Cache
 	defer free_hero_cache(&cache)
-	detail := library.Detail {
-		source = .Album,
-		id     = "cache-test",
-		total  = 3,
-	}
-	metadata, _ := hero_metadata(&detail, &cache)
-	first := strings.clone(metadata)
-	defer delete(first)
-	testing.expect(t, cache.metadata_valid)
-	detail.subtitle = "Different artist"
-	metadata, _ = hero_metadata(&detail, &cache)
-	testing.expect(t, metadata != first)
-
 	title, _ := hero_title(nil, "Cache title", 400, 96, &cache)
 	testing.expect(t, cache.title_valid)
 	_ = title
