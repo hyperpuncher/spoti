@@ -47,12 +47,13 @@ test: _prepare
 	#!/usr/bin/env bash
 	set -u
 	packages=(. ui spotify/ap spotify/shannon spotify/oauth spotify/session spotify/connect spotify/library spotify/track spotify/audio spotify/artwork spotify/http diagnostic)
+	name() { [ "$1" = . ] && echo main || echo "${1//\//_}"; }
 	pids=()
 	for package in "${packages[@]}"; do
 		threads=""
 		if [ "$package" = . ] || [ "$package" = ui ]; then threads="-define:ODIN_TEST_THREADS=1"; fi
 		# Binaries stay in build/ so asset lookup finds ../assets.
-		out=build/test-${package//\//_}
+		out=build/test-$(name "$package")
 		odin test "$package" $threads -out:"$out" {{curl_flags}} > "$out.log" 2>&1 &
 		pids+=("$!")
 	done
@@ -61,7 +62,7 @@ test: _prepare
 		wait "${pids[$i]}" && continue
 		package=${packages[$i]}
 		echo "--- $package failed"
-		cat "build/test-${package//\//_}.log"
+		cat "build/test-$(name "$package").log"
 		status=1
 	done
 	exit $status
