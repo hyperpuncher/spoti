@@ -78,12 +78,11 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			volume = clamp((mouse.x - box.x) / box.width, 0, 1)
 			app_state.volume = volume
 			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume_gain(volume))}
-			if remote_control {
-				_ = library.send_player_command(&library_client, .Volume, int(volume * 100))
-			}
+			if remote_control {remote_volume_pending = true}
 		}
 		if .LEFT not_in buttons {
 			volume_dragging = false
+			remote_volume_at = 0 // send the final value now
 			// Save once when the drag ends; the live value already feeds audio.
 			state_dirty = true
 		}

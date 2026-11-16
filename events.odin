@@ -100,6 +100,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	if fx_next_frame != 0 {show_at = fx_next_frame}
 	// A settling Connect state is sent from the frame loop.
 	if connect_settle_at != 0 {show_at = min(show_at, connect_settle_at)}
+	if remote_volume_pending {show_at = min(show_at, remote_volume_at)}
 	if search_pending {show_at = min(show_at, search_deadline)}
 	// Wall-clock deadlines count only while they are still ahead.
 	if library_client.detail_loading && time.since(library_client.detail_loading_at) < 0 {

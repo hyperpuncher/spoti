@@ -385,6 +385,20 @@ app_offer_next_track :: proc(app: ^App) {
 	offer_next_track(&app.next_track, uri, app.tracks_started, preloaded)
 }
 
+REMOTE_VOLUME_NS :: 150_000_000
+
+// Send the newest remote volume at most once per REMOTE_VOLUME_NS. A value
+// that must wait keeps remote_volume_pending; the event wait wakes for it.
+app_send_remote_volume :: proc(app: ^App) {
+	if !app.remote_volume_pending {return}
+	if !app.remote_control {app.remote_volume_pending = false; return}
+	now := sdl.GetTicksNS()
+	if now < app.remote_volume_at {return}
+	_ = library.send_player_command(&app.library_client, .Volume, int(app.volume * 100 + 0.5))
+	app.remote_volume_pending = false
+	app.remote_volume_at = now + REMOTE_VOLUME_NS
+}
+
 // The slider position is what the user, Connect and MPRIS see; loudness is
 // perceived logarithmically, so the stream gain follows a cubic curve.
 // Halfway sounds about half as loud instead of nearly full.

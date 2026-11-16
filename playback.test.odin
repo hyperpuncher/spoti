@@ -280,3 +280,42 @@ unavailable_queue_ends_without_retrying_when_nothing_follows :: proc(t: ^testing
 	testing.expect(t, !discard_play_track(&queue, "good", &index))
 	testing.expect_value(t, len(queue), 0)
 }
+
+// A volume drag on a remote device sends the newest value at most once per
+// REMOTE_VOLUME_NS, so it cannot exhaust the Web API rate limit.
+@(test)
+remote_volume_sends_only_the_newest_value_per_interval :: proc(t: ^testing.T) {
+	worker: thread.Thread
+	app := App {
+		remote_control = true,
+	}
+	client := &app.library_client
+	client.state, client.worker = .Ready, &worker
+	client.requests, _ = chan.create_buffered(chan.Chan(library.Request), 8, context.allocator)
+	client.results, _ = chan.create_buffered(chan.Chan(library.Result), 1, context.allocator)
+	defer {client.worker = nil; library.stop(client)}
+	sent :: proc(client: ^library.Client) -> (values: [dynamic]int) {
+		for request in chan.try_recv(client.requests) {
+			append(&values, request.command_value)
+			library.free_request(request)
+		}
+		return
+	}
+	for value in ([]f32{0.2, 0.3, 0.4}) {
+		app.volume, app.remote_volume_pending = value, true
+		app_send_remote_volume(&app)
+	}
+	first := sent(client)
+	defer delete(first)
+	testing.expect_value(t, len(first), 1)
+	if len(first) == 1 {testing.expect_value(t, first[0], 20)}
+	testing.expect(t, app.remote_volume_pending)
+	// Once the interval passes, only the newest value goes out.
+	app.remote_volume_at = 0
+	app_send_remote_volume(&app)
+	second := sent(client)
+	defer delete(second)
+	testing.expect_value(t, len(second), 1)
+	if len(second) == 1 {testing.expect_value(t, second[0], 40)}
+	testing.expect(t, !app.remote_volume_pending)
+}

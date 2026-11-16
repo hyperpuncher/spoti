@@ -537,6 +537,10 @@ App :: struct {
 	shuffle:                bool,
 	volume:                 f32,
 	volume_dragging:        bool,
+	// A remote volume change waits until REMOTE_VOLUME_NS after the last one
+	// sent, so a drag sends a few Web API calls instead of one per motion.
+	remote_volume_pending:  bool,
+	remote_volume_at:       u64, // next allowed send, in SDL ticks
 	seek_dragging:          bool,
 	start_paused:           bool,
 	seek_ms:                int,
@@ -761,6 +765,7 @@ main :: proc() {
 		// track on a playlist card or plays the row. Dragging never plays.
 		app_transport(&app, &frame, visible)
 		app_connect_publish(&app)
+		app_send_remote_volume(&app)
 		app_persist(&app, &frame)
 	}
 }
