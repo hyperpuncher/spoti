@@ -341,6 +341,11 @@ request :: proc(
 		c_range := strings.clone_to_cstring(options.range)
 		defer delete(c_range)
 		if curl.easy_setopt(client, .RANGE, c_range) != .E_OK {return nil, 0, false}
+	} else if curl.easy_setopt(client, .ACCEPT_ENCODING, cstring("")) != .E_OK {
+		// JSON compresses several times over; curl offers every built-in
+		// decoder and inflates before write_response applies the limit.
+		// Ranged reads keep identity bytes so offsets stay exact.
+		return nil, 0, false
 	}
 	headers: ^curl.slist
 	defer {
