@@ -752,6 +752,7 @@ App :: struct {
 	duration_ms:            int,
 	displayed_ms:           int,
 	last:                   u64,
+	playback_tick:          u64, // last 30 fps playback wake, even while hidden
 	first_frame:            bool,
 	running:                bool,
 	width:                  c.int,
@@ -941,7 +942,9 @@ main :: proc() {
 			replace_string(&toast, "")
 			redraw = true
 		}
-		if !redraw && stage != .Playing {continue}
+		// A hidden window still feeds audio but skips the progress redraw;
+		// SDL sends EXPOSED when it returns.
+		if !redraw && (stage != .Playing || !window_visible(&state)) {continue}
 
 		visible := app_layout(&app, &frame)
 		app_covers(&app, &frame, visible)
@@ -967,6 +970,10 @@ main :: proc() {
 }
 
 PLAYBACK_FRAME_NS :: u64(1_000_000_000 / 30)
+
+window_visible :: proc(state: ^ui.State) -> bool {
+	return sdl.GetWindowFlags(state.window) & {.HIDDEN, .MINIMIZED, .OCCLUDED} == {}
+}
 REMOTE_POLL_NS :: u64(5_000_000_000)
 
 // Lower an SDL wait (-1 waits forever) so it ends at a tick deadline.
@@ -1042,7 +1049,11 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	now := sdl.GetTicksNS()
 	// Only steady playback uses 30 fps. Count from the last layout start,
 	// so rendering and presentation time are part of the frame budget.
-	if stage == .Playing {wait_until(&wait_ms, now, last + PLAYBACK_FRAME_NS)}
+	// The loop also feeds the audio stream, so it ticks while hidden too.
+	if stage == .Playing {
+		if now - playback_tick >= PLAYBACK_FRAME_NS {playback_tick = now}
+		wait_until(&wait_ms, now, max(last, playback_tick) + PLAYBACK_FRAME_NS)
+	}
 	// Playback state changes arrive through the decoder queue, not events.
 	if worker != nil &&
 	   stage != .Playing &&
