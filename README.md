@@ -47,7 +47,7 @@ paru -S spoti-git
 ### macos
 
 ```sh
-brew i hyperpuncher/tap/spoti
+brew install hyperpuncher/tap/spoti
 ```
 
 ## development
