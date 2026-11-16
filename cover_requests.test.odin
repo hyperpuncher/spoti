@@ -144,3 +144,33 @@ player_cover_remains_until_the_replacement_texture_is_ready :: proc(t: ^testing.
 	retain_player_cover(&displayed, "next", &textures)
 	testing.expect_value(t, displayed, "next")
 }
+
+// Eviction drops the least recently used covers first, stops once the
+// budget fits, and keeps the player's cover even when it is the oldest.
+@(test)
+cover_trim_evicts_oldest_first_and_keeps_the_player_cover :: proc(t: ^testing.T) {
+	textures := Textures {
+		cover_frame = 10,
+	}
+	defer delete(textures.by_key)
+	defer delete(textures.requested)
+	Cover :: struct {
+		url:  string,
+		used: u64,
+	}
+	for cover in ([]Cover{{"player", 1}, {"old", 4}, {"older", 2}, {"fresh", 10}}) {
+		key := cover_key(cover.url)
+		textures.by_key[key] = nil
+		textures.requested[key] = {
+			bytes = 100,
+			used  = cover.used,
+		}
+		textures.cover_bytes += 100
+	}
+	trim_cover_textures(&textures, "player", "", budget = 300)
+	testing.expect_value(t, textures.cover_bytes, 300)
+	testing.expect(t, cover_key("older") not_in textures.requested)
+	for url in ([]string{"player", "old", "fresh"}) {
+		testing.expectf(t, cover_key(url) in textures.requested, "%s evicted", url)
+	}
+}

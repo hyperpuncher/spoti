@@ -4,6 +4,7 @@ import "base:runtime"
 import libc "core:c/libc"
 import "core:fmt"
 import "core:math"
+import "core:slice"
 import "core:strings"
 import diagnostic "diagnostic"
 import library "spotify/library"
@@ -105,26 +106,28 @@ trim_cover_textures :: proc(
 ) {
 	if textures.cover_bytes <= budget {return}
 	displayed_key, desired_key := cover_key(displayed), cover_key(desired)
-	for textures.cover_bytes > budget {
-		oldest_key: u64
-		oldest_frame := max(u64)
-		found := false
-		for key, request in textures.requested {
-			if request.bytes == 0 ||
-			   request.pending ||
-			   request.used >= textures.cover_frame ||
-			   key == displayed_key ||
-			   key == desired_key {continue}
-			if request.used < oldest_frame {
-				oldest_key, oldest_frame, found = key, request.used, true
-			}
-		}
-		if !found {break}
-		sdl.DestroyTexture(textures.by_key[oldest_key])
-		textures.cover_bytes -= textures.requested[oldest_key].bytes
-		delete_key(&textures.by_key, oldest_key)
+	// Collect evictable covers once and drop the least recently used first.
+	Candidate :: struct {
+		key:  u64,
+		used: u64,
+	}
+	candidates := make([dynamic]Candidate, 0, len(textures.requested), context.temp_allocator)
+	for key, request in textures.requested {
+		if request.bytes == 0 ||
+		   request.pending ||
+		   request.used >= textures.cover_frame ||
+		   key == displayed_key ||
+		   key == desired_key {continue}
+		append(&candidates, Candidate{key, request.used})
+	}
+	slice.sort_by(candidates[:], proc(a, b: Candidate) -> bool {return a.used < b.used})
+	for candidate in candidates {
+		if textures.cover_bytes <= budget {break}
+		sdl.DestroyTexture(textures.by_key[candidate.key])
+		textures.cover_bytes -= textures.requested[candidate.key].bytes
+		delete_key(&textures.by_key, candidate.key)
 		// An evicted cover can be requested again; failures keep their retry cap.
-		delete_key(&textures.requested, oldest_key)
+		delete_key(&textures.requested, candidate.key)
 	}
 }
 
