@@ -196,7 +196,10 @@ render :: proc(
 ) {
 	textures.cover_frame += 1
 	clip_stack: [64]sdl.Rect
-	clip_depth := 0
+	clip_depth, clip_overflow := 0, 0
+	// Clear paints the page color; layout leaves page-colored boxes transparent.
+	_ = sdl.SetRenderDrawColor(state.renderer, u8(theme.bg.r), u8(theme.bg.g), u8(theme.bg.b), 255)
+	_ = sdl.RenderClear(state.renderer)
 	for i in 0 ..< commands.length {
 		command := clay.RenderCommandArray_Get(commands, i)
 		box := command.boundingBox
@@ -258,27 +261,27 @@ render :: proc(
 				)
 			}
 		case .ScissorStart:
-			clip := sdl.Rect{i32(box.x), i32(box.y), i32(box.width), i32(box.height)}
+			// Round edges like fills, so clips and the fades drawn inside them meet.
+			left, top := i32(math.round(box.x)), i32(math.round(box.y))
+			right := i32(math.round(box.x + box.width))
+			bottom := i32(math.round(box.y + box.height))
 			if clip_depth > 0 {
 				parent := clip_stack[clip_depth - 1]
-				left := max(clip.x, parent.x)
-				top := max(clip.y, parent.y)
-				right := min(clip.x + clip.w, parent.x + parent.w)
-				bottom := min(clip.y + clip.h, parent.y + parent.h)
-				clip = {left, top, max(0, right - left), max(0, bottom - top)}
+				left, top = max(left, parent.x), max(top, parent.y)
+				right, bottom = min(right, parent.x + parent.w), min(bottom, parent.y + parent.h)
 			}
-			if clip_depth < len(clip_stack) {
-				clip_stack[clip_depth] = clip
-				clip_depth += 1
-			}
-			_ = sdl.SetRenderClipRect(state.renderer, &clip)
+			// Overflow keeps the parent clip; the matching end pops nothing extra.
+			if clip_depth == len(clip_stack) {clip_overflow += 1; continue}
+			clip_stack[clip_depth] = {left, top, max(0, right - left), max(0, bottom - top)}
+			_ = sdl.SetRenderClipRect(state.renderer, &clip_stack[clip_depth])
+			clip_depth += 1
 		case .ScissorEnd:
+			if clip_overflow > 0 {clip_overflow -= 1; continue}
 			if clip_depth > 0 {clip_depth -= 1}
-			if clip_depth > 0 {
-				_ = sdl.SetRenderClipRect(state.renderer, &clip_stack[clip_depth - 1])
-			} else {
-				_ = sdl.SetRenderClipRect(state.renderer, nil)
-			}
+			_ = sdl.SetRenderClipRect(
+				state.renderer,
+				clip_depth > 0 ? &clip_stack[clip_depth - 1] : nil,
+			)
 		}
 	}
 }

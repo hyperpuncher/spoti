@@ -71,7 +71,6 @@ release_feed_page :: proc(
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 			padding = {right = u16(SCROLLBAR_OUTSET * d)},
 		},
-		backgroundColor = theme.bg,
 	},
 	) {
 		if clay.UI()(
@@ -140,7 +139,6 @@ release_feed_page :: proc(
 						childGap = u16(24 * d),
 						childAlignment = {y = .Center},
 					},
-					border = {color = theme.card, width = {bottom = 1}},
 				},
 				) {
 					cover_element(textures, entry.image, FEED_COVER_SIZE * d, 8 * d)

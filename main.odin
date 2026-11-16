@@ -1993,8 +1993,6 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		link_album,
 		foot_artists,
 	)
-	_ = sdl.SetRenderDrawColor(state.renderer, 18, 18, 18, 255)
-	_ = sdl.RenderClear(state.renderer)
 	render(&commands, &state, &textures)
 	ui.frame_done(&state)
 	trim_cover_textures(&textures, displayed_cover, player_cover)

@@ -296,7 +296,6 @@ top_bar :: proc(view: View, textures: ^Textures, fx: ^Button_Fx_Ctx, d: f32) {
 			childAlignment = {x = .Center, y = .Center},
 			childGap = u16(4 * d),
 		},
-		backgroundColor = theme.bg,
 	},
 	) {
 		icon_button(
@@ -1034,7 +1033,6 @@ layout :: proc(
 				sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 				childAlignment = {x = .Center, y = .Center},
 			},
-			backgroundColor = theme.bg,
 		},
 		) {
 			sign_in_screen(client.state, view, textures, d)
@@ -1050,7 +1048,6 @@ layout :: proc(
 				height = clay.SizingFixed(viewport_height),
 			},
 		},
-		backgroundColor = theme.bg,
 	},
 	) {
 		top_bar(view, textures, fx, d)
@@ -1089,12 +1086,7 @@ layout :: proc(
 				view.drag_active ? view.drop_target : -1,
 			)
 			if clay.UI_WithId(clay.ID("sidebar_handle"))(
-			{
-				layout = {
-					sizing = {width = clay.SizingFixed(6 * d), height = clay.SizingGrow({})},
-				},
-				backgroundColor = theme.bg,
-			},
+			{layout = {sizing = {width = clay.SizingFixed(6 * d), height = clay.SizingGrow({})}}},
 			) {}
 			detail_width := max(0, viewport_width - (sidebar_width + 6) * d)
 			queue_width: f32

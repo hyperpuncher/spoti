@@ -933,7 +933,6 @@ track_table :: proc(
 				childAlignment = {y = .Center},
 				childGap = u16(ROW_GAP * d),
 			},
-			border = {color = theme.card, width = {bottom = 1}},
 		},
 		) {
 			if clay.UI()(
@@ -1642,7 +1641,6 @@ detail_hero :: proc(
 	cache: ^Hero_Cache = nil,
 ) {
 	// Spotify-style hero: substantial artwork and a strong, bold title.
-	// No panel behind it; the cover floats on the page with a soft shadow.
 	if hero_banner(detail, textures, ui_state, available_width, viewport_height, d, cache) {return}
 	hero_cover := clamp(available_width * 0.28, 180 * d, 280 * d)
 	// Keep a density unit of slack at the text boundary.
@@ -1678,42 +1676,6 @@ detail_hero :: proc(
 			},
 		},
 		) {
-			if clay.UI()(
-			{
-				layout = {
-					sizing = {
-						width = clay.SizingFixed(hero_cover + 28 * d),
-						height = clay.SizingFixed(hero_cover + 28 * d),
-					},
-				},
-				backgroundColor = {0, 0, 0, 60},
-				cornerRadius = clay.CornerRadiusAll(18 * d),
-				floating = {
-					offset = {-14 * d, -6 * d},
-					zIndex = -1,
-					pointerCaptureMode = .Passthrough,
-					attachTo = .Parent,
-				},
-			},
-			) {}
-			if clay.UI()(
-			{
-				layout = {
-					sizing = {
-						width = clay.SizingFixed(hero_cover + 12 * d),
-						height = clay.SizingFixed(hero_cover + 12 * d),
-					},
-				},
-				backgroundColor = {0, 0, 0, 120},
-				cornerRadius = clay.CornerRadiusAll(14 * d),
-				floating = {
-					offset = {-6 * d, 0},
-					zIndex = -1,
-					pointerCaptureMode = .Passthrough,
-					attachTo = .Parent,
-				},
-			},
-			) {}
 			cover_element(textures, cover, hero_cover, 10 * d)
 		}
 		if clay.UI()(
@@ -1827,7 +1789,6 @@ detail_page :: proc(
 			sizing = {width = clay.SizingGrow({}), height = clay.SizingGrow({})},
 			padding = {right = u16(SCROLLBAR_OUTSET * d)},
 		},
-		backgroundColor = theme.bg,
 	},
 	) {
 		if client.detail_loading && (!detail.ready || detail.header_pending) {
