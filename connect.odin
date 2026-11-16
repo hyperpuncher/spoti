@@ -33,8 +33,11 @@ connect_state_equal :: proc(a, b: connect.Snapshot) -> bool {
 	)
 }
 
-// State changes are sent at once. Position-only changes are sent every five
-// seconds; the timestamp lets other devices advance their own progress bar.
+// Send state only when it changes, as librespot does. Each state carries a
+// position and a timestamp, so other devices advance their own progress bar.
+// A position that leaves that extrapolation (a seek) is a change too.
+CONNECT_POSITION_DRIFT_MS :: 1500
+
 app_connect_publish :: proc(app: ^App) {
 	using app
 	if connect_client.worker == nil {return}
@@ -68,8 +71,12 @@ app_connect_publish :: proc(app: ^App) {
 		queue_window = play_queue[first:last]
 		snapshot.queue_revision = connect_queue_revision(queue_window)
 	}
+	expected := connect_snapshot.position
+	if connect_snapshot.playing {
+		expected += int((now - connect_published_at) / 1_000_000)
+	}
 	if connect_state_equal(connect_snapshot, snapshot) &&
-	   now - connect_published_at < 5_000_000_000 {return}
+	   abs(displayed_ms - expected) <= CONNECT_POSITION_DRIFT_MS {return}
 	snapshot.tracks = make([dynamic]string, len(queue_window), context.temp_allocator)
 	for item, index in queue_window {snapshot.tracks[index] = item.uri}
 	if !connect.publish(&connect_client, snapshot) {return}
