@@ -622,15 +622,7 @@ replace_string :: proc(destination: ^string, value: string) {
 }
 
 parse_card_uri :: proc(uri: string) -> (source: library.Source, id: string, ok: bool) {
-	if strings.has_prefix(uri, "spotify:playlist:") {
-		source, id = .Playlist, uri[len("spotify:playlist:"):]
-	} else if strings.has_prefix(uri, "spotify:album:") {
-		source, id = .Album, uri[len("spotify:album:"):]
-	} else if strings.has_prefix(uri, "spotify:artist:") {
-		source, id = .Artist, uri[len("spotify:artist:"):]
-	} else {
-		return {}, "", false
-	}
+	source, id = library.split_uri(uri) or_return
 	if !library.safe_id(id) {return {}, "", false}
 	return source, id, true
 }

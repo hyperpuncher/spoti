@@ -2,7 +2,6 @@
 // then Spotify's own library order for everything else.
 package main
 
-import "core:fmt"
 import "core:slice"
 import "core:strings"
 import library "spotify/library"
@@ -54,34 +53,17 @@ sort_library_pages :: proc(
 
 // Compare a detail page with its grid URI without building a temporary URI.
 detail_matches_uri :: proc(detail: library.Detail, uri: string) -> bool {
-	switch detail.source {
-	case .Playlist:
-		prefix := "spotify:playlist:"
-		return strings.has_prefix(uri, prefix) && uri[len(prefix):] == detail.id
-	case .Album:
-		prefix := "spotify:album:"
-		return strings.has_prefix(uri, prefix) && uri[len(prefix):] == detail.id
-	case .Artist:
-		prefix := "spotify:artist:"
-		return strings.has_prefix(uri, prefix) && uri[len(prefix):] == detail.id
-	case .Liked:
-		return uri == ""
-	}
-	return false
+	if detail.source == .Liked {return uri == ""}
+	return library.uri_is(uri, detail.source, detail.id)
 }
 
 // The grid URI for the open detail, or "" for Liked Songs.
 detail_card_uri :: proc(detail: library.Detail) -> string {
-	switch detail.source {
-	case .Playlist:
-		return fmt.tprintf("spotify:playlist:%s", detail.id)
-	case .Album:
-		return fmt.tprintf("spotify:album:%s", detail.id)
-	case .Artist:
-		return fmt.tprintf("spotify:artist:%s", detail.id)
-	case .Liked:
-	}
-	return ""
+	if detail.source == .Liked {return ""}
+	return strings.concatenate(
+		{library.SOURCE_URI_PREFIX[detail.source], detail.id},
+		context.temp_allocator,
+	)
 }
 
 // Clicking the open collection is a no-op: reopening would tear down the

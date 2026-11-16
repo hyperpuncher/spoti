@@ -301,19 +301,7 @@ card_row_height :: proc(card_width, text_height, d: f32) -> f32 {
 }
 
 card_selected :: proc(entry: ^library.Entry, detail: ^library.Detail) -> bool {
-	if !detail.ready {return false}
-	prefix: string
-	switch detail.source {
-	case .Album:
-		prefix = "spotify:album:"
-	case .Playlist:
-		prefix = "spotify:playlist:"
-	case .Artist:
-		prefix = "spotify:artist:"
-	case .Liked:
-		return false
-	}
-	return strings.has_prefix(entry.uri, prefix) && entry.uri[len(prefix):] == detail.id
+	return detail.ready && library.uri_is(entry.uri, detail.source, detail.id)
 }
 
 EXPLICIT_BADGE_SIZE :: 14

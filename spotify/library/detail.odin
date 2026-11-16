@@ -19,6 +19,28 @@ Source :: enum {
 	Artist,
 }
 
+// Liked Songs has no card URI.
+SOURCE_URI_PREFIX := [Source]string {
+	.Liked    = "",
+	.Playlist = "spotify:playlist:",
+	.Album    = "spotify:album:",
+	.Artist   = "spotify:artist:",
+}
+
+// Split a card URI into its source and id, without validating the id.
+split_uri :: proc(uri: string) -> (source: Source, id: string, ok: bool) {
+	for prefix, kind in SOURCE_URI_PREFIX {
+		if prefix != "" && strings.has_prefix(uri, prefix) {return kind, uri[len(prefix):], true}
+	}
+	return
+}
+
+// True when uri names the collection source and id. Liked never matches.
+uri_is :: proc(uri: string, source: Source, id: string) -> bool {
+	prefix := SOURCE_URI_PREFIX[source]
+	return prefix != "" && strings.has_prefix(uri, prefix) && uri[len(prefix):] == id
+}
+
 // One link per artist: names render joined with separators, and each name
 // with a URI opens its own page. Sources that omit URIs render plain text.
 Artist_Link :: struct {
@@ -689,16 +711,8 @@ safe_id :: proc(id: string, account := false) -> bool {
 // Songs has no membership to check. Spotify IDs are alphanumeric, but the
 // full URI still rides percent-encoded in the query string.
 library_uri :: proc(source: Source, id: string, allocator := context.allocator) -> string {
-	if !safe_id(id) {return ""}
-	#partial switch source {
-	case .Playlist:
-		return fmt.aprintf("spotify:playlist:%s", id, allocator = allocator)
-	case .Album:
-		return fmt.aprintf("spotify:album:%s", id, allocator = allocator)
-	case .Artist:
-		return fmt.aprintf("spotify:artist:%s", id, allocator = allocator)
-	}
-	return ""
+	if !safe_id(id) || source == .Liked {return ""}
+	return strings.concatenate({SOURCE_URI_PREFIX[source], id}, allocator)
 }
 
 saved_check_url :: proc(source: Source, id: string, allocator := context.allocator) -> string {

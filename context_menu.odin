@@ -546,19 +546,10 @@ open_menu_at :: proc(
 // Maps a Spotify URI to its web URL without ever logging it. Empty for a URI
 // that has no open.spotify.com page, like the Liked Songs collection.
 spotify_web_url :: proc(uri: string, allocator := context.allocator) -> string {
-	kind, id: string
-	switch {
-	case strings.has_prefix(uri, "spotify:playlist:"):
-		kind, id = "playlist", uri[len("spotify:playlist:"):]
-	case strings.has_prefix(uri, "spotify:album:"):
-		kind, id = "album", uri[len("spotify:album:"):]
-	case strings.has_prefix(uri, "spotify:artist:"):
-		kind, id = "artist", uri[len("spotify:artist:"):]
-	case strings.has_prefix(uri, "spotify:track:"):
-		kind, id = "track", uri[len("spotify:track:"):]
-	case:
-		return ""
-	}
+	// spotify:<kind>:<id> maps to open.spotify.com/<kind>/<id>.
+	if !strings.has_prefix(uri, "spotify:") {return ""}
+	kind, _, id := strings.partition(uri[len("spotify:"):], ":")
+	if kind != "playlist" && kind != "album" && kind != "artist" && kind != "track" {return ""}
 	if len(id) == 0 {return ""}
 	return fmt.aprintf("https://open.spotify.com/%s/%s", kind, id, allocator = allocator)
 }
