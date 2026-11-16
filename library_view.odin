@@ -334,7 +334,7 @@ library_card :: proc(
 	pinned: bool = false,
 	drop_target: bool = false,
 ) {
-	hovered := clay.PointerOver(clay.ID(id, index))
+	hovered := hover(clay.ID(id, index))
 	padding := 8 * d
 	cover_size := card_width - padding * 2
 	if clay.UI_WithId(clay.ID(id, index))(
@@ -424,6 +424,7 @@ sort_button :: proc(
 	label: bool,
 	d: f32,
 ) {
+	_ = hover(clay.ID("sort_button"))
 	if clay.UI_WithId(clay.ID("sort_button"))(
 	{layout = {childGap = u16(6 * d), childAlignment = {y = .Center}}},
 	) {
@@ -667,7 +668,7 @@ track_list_row :: proc(
 	extra := album_width + date_width + count_width
 	for width in ([]f32{album_width, date_width, count_width}) {if width > 0 {extra += ROW_GAP * d}}
 	artist_box := max(0, row_text - title_box - extra)
-	hovered := clay.PointerOver(clay.ID("track_row", u32(index)))
+	hovered := hover(clay.ID("track_row", u32(index)))
 	if clay.UI_WithId(clay.ID("track_row", u32(index)))(
 	{
 		layout = {
@@ -1321,7 +1322,7 @@ metadata_link :: proc(
 	style: clay.TextElementConfig,
 ) {
 	config := style
-	if linked && clay.PointerOver(clay.ID(id, index)) {config.textColor = theme.text}
+	if linked && hover(clay.ID(id, index)) {config.textColor = theme.text}
 	if !linked {
 		clay.Text(name, config)
 		return

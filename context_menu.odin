@@ -232,7 +232,7 @@ context_menu :: proc(
 		// every other menu fits its labels exactly.
 		reserve := menu.selected >= 0 && menu.selected < menu.count
 		for index in 0 ..< menu.count {
-			hovered := clay.PointerOver(clay.ID("menu_item", u32(index)))
+			hovered := hover(clay.ID("menu_item", u32(index)))
 			if clay.UI_WithId(clay.ID("menu_item", u32(index)))(
 			{
 				layout = {
@@ -331,7 +331,7 @@ playlist_picker :: proc(menu: ^Context_Menu, d, viewport_width, viewport_height:
 			list_spacer(visible.before - gap)
 			for index in visible.first ..< visible.last {
 				entry := menu.picker_items[index]
-				hovered := clay.PointerOver(clay.ID("picker_item", u32(index)))
+				hovered := hover(clay.ID("picker_item", u32(index)))
 				if clay.UI_WithId(clay.ID("picker_item", u32(index)))(
 				{
 					layout = {
@@ -430,8 +430,7 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 		},
 		) {
 			for device, index in rows {
-				hovered :=
-					!device.restricted && clay.PointerOver(clay.ID("device_item", u32(index)))
+				hovered := !device.restricted && hover(clay.ID("device_item", u32(index)))
 				if clay.UI_WithId(clay.ID("device_item", u32(index)))(
 				{
 					layout = {

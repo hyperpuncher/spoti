@@ -28,7 +28,7 @@ queue_row :: proc(item: Play_Item, index: int, current: bool, width, d: f32, ui_
 			childGap = u16(8 * d),
 			childAlignment = {y = .Center},
 		},
-		backgroundColor = clay.PointerOver(id) ? theme.hover : current ? theme.selected : clay.Color{},
+		backgroundColor = hover(id) ? theme.hover : current ? theme.selected : clay.Color{},
 		cornerRadius = clay.CornerRadiusAll(6 * d),
 	},
 	) {

@@ -144,23 +144,6 @@ pointer_over :: proc(id: string, index: u32 = 0) -> bool {
 	return clay.PointerOver(clay.ID(id, index))
 }
 
-range_hovered :: proc(id: string, visible: Visible_Items) -> bool {
-	for index in visible.first ..< visible.last {
-		if pointer_over(id, u32(index)) {return true}
-	}
-	return false
-}
-
-// One hover scan for both artist link namespaces: the hero uses its own id
-// with base 0, track rows use the row slot compound ids.
-artist_links_hovered :: proc(links: []library.Artist_Link, id: string, base: u32) -> bool {
-	for ai in 0 ..< min(len(links), 64) {
-		if len(links[ai].uri) == 0 {continue}
-		if pointer_over(id, base + u32(ai)) {return true}
-	}
-	return false
-}
-
 // The caller checks the containing row or clip before looking for a link.
 artist_link_at :: proc(
 	links: []library.Artist_Link,
@@ -183,97 +166,6 @@ system_dark :: proc() -> bool {
 	return sdl.GetSystemTheme() != .LIGHT
 }
 
-update_cursor :: proc(
-	state: ^ui.State,
-	client: ^library.Client,
-	resizing: bool,
-	visible: Frame_Visible,
-	seek_enabled: bool,
-	search_mode: bool,
-	link_album: bool,
-	artist_links: []library.Artist_Link,
-) {
-	if pointer_over("footer_devices") ||
-	   pointer_over("footer_queue") ||
-	   pointer_over("queue_close") ||
-	   pointer_over("queue_current") ||
-	   pointer_over("queue_scrollbar") ||
-	   range_hovered("queue_item", visible.queue) {
-		ui.set_cursor(state, .Pointer)
-		return
-	}
-	for device, index in client.devices {
-		if !device.restricted && pointer_over("device_item", u32(index)) {
-			ui.set_cursor(state, .Pointer)
-			return
-		}
-	}
-	if seek_enabled && pointer_over("seek_slider") {ui.set_cursor(state, .Pointer); return}
-	if pointer_over("library_scrollbar") || pointer_over("detail_scrollbar") {
-		ui.set_cursor(state, .Pointer)
-		return
-	}
-	if resizing || pointer_over("sidebar_handle") {
-		ui.set_cursor(state, .Resize)
-		return
-	}
-	if pointer_over("search_clear") {
-		ui.set_cursor(state, .Pointer)
-		return
-	}
-	if pointer_over("track_input") {
-		ui.set_cursor(state, .Text)
-		return
-	}
-	if pointer_over("setup_field") {
-		ui.set_cursor(state, .Text)
-		return
-	}
-	for id in ([]string{"toolbar_back", "toolbar_library", "toolbar_releases", "sort_button", "hero_like", "hero_play", "footer_play", "footer_previous", "footer_next", "footer_repeat", "footer_shuffle", "hero_shuffle", "volume_slider", "spotify_link", "hero_copy_link", "hero_pin", "autoscroll", "setup_redirect", "setup_dashboard", "setup_save", "detail_retry"}) {
-		if (id == "hero_play" || id == "hero_shuffle") && !detail_play_enabled(client) {continue}
-		if id == "hero_copy_link" && library.detail_loading_visible(client) {continue}
-		if id == "hero_pin" &&
-		   (client.detail.source != .Playlist || library.detail_loading_visible(client)) {continue}
-		if id == "spotify_link" && client.detail_loading {continue}
-		if pointer_over(id) {
-			ui.set_cursor(state, .Pointer)
-			return
-		}
-	}
-	chip_count := search_mode ? len(SEARCH_TABS) : len(LIBRARY_TABS)
-	for index in 0 ..< chip_count {
-		if pointer_over("chip", u32(index)) {
-			ui.set_cursor(state, .Pointer)
-			return
-		}
-	}
-	if range_hovered("card", visible.cards) {ui.set_cursor(state, .Pointer); return}
-	if link_album && pointer_over("footer_title") {
-		ui.set_cursor(state, .Pointer)
-		return
-	}
-	if artist_links_hovered(artist_links, "footer_artist", 0) {
-		ui.set_cursor(state, .Pointer)
-		return
-	}
-	if client.release_feed.open && range_hovered("feed_row", visible.feed) {
-		ui.set_cursor(state, .Pointer)
-		return
-	}
-	if client.detail.ready {
-		if artist_links_hovered(client.detail.artist_links, "hero_artist_link", 0) {
-			ui.set_cursor(state, .Pointer)
-			return
-		}
-		if range_hovered("track_row", visible.tracks) ||
-		   range_hovered("release_card", visible.releases) ||
-		   range_hovered("single_card", visible.singles) {
-			ui.set_cursor(state, .Pointer)
-			return
-		}
-	}
-	ui.set_cursor(state, .Default)
-}
 
 // Artist release cards use the same history and preview path as other albums.
 open_release_card :: proc(
@@ -1410,6 +1302,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		title          = shown_title,
 		status         = shown_status,
 		album_linked   = link_album,
+		seek_enabled   = seek_enabled,
 		artist_links   = foot_artists,
 		button         = button,
 		progress       = progress,
@@ -1561,16 +1454,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		}
 	} else {autoscroll_moving = false}
 	t2 := sdl.GetTicksNS()
-	update_cursor(
-		&state,
-		&library_client,
-		resizing,
-		visible,
-		seek_enabled,
-		search_mode,
-		link_album,
-		foot_artists,
-	)
+	// Widgets request their cursor during layout; drags keep theirs.
+	ui.set_cursor(&state, resizing ? .Resize : layout_cursor)
 	// A hidden window keeps layout, input and transport state current but
 	// draws nothing: present blocks for frame callbacks the compositor
 	// withholds. SDL sends EXPOSED when the window returns.

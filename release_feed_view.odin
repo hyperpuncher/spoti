@@ -114,6 +114,7 @@ release_feed_page :: proc(
 			for index in visible.first ..< visible.last {
 				release := &feed.items[index]
 				entry := &release.entry
+				_ = hover(clay.ID("feed_row", u32(index)))
 				if clay.UI_WithId(clay.ID("feed_row", u32(index)))(
 				{
 					layout = {

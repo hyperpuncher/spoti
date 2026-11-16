@@ -88,6 +88,7 @@ View :: struct {
 	setup_error:    string, // borrowed; setup screen error line
 	caption_width:  f32, // native Windows controls, render pixels
 	album_linked:   bool, // footer title opens the playing album
+	seek_enabled:   bool, // the progress bar accepts clicks and drags
 	artist_links:   []library.Artist_Link, // borrowed; each footer artist opens its own page
 	pinned:         bool,
 	sign_in:        bool, // a library browser approval is waiting for a click
@@ -126,7 +127,7 @@ chip :: proc(label: string, id: u32, active: bool, d: f32) {
 			padding = clay.PaddingAll(u16(14 * d)),
 			childAlignment = {y = .Center},
 		},
-		backgroundColor = active ? theme.text : clay.PointerOver(clay.ID("chip", id)) ? theme.hover : theme.card,
+		backgroundColor = active ? theme.text : hover(clay.ID("chip", id)) ? theme.hover : theme.card,
 		cornerRadius = clay.CornerRadiusAll(16 * d),
 	},
 	) {
@@ -153,6 +154,18 @@ Button_Fx_Ctx :: struct {
 	next_frame: u64, // a stepped animation wants a frame at this tick, or 0
 }
 
+// The cursor this layout asks for. Widgets call hover() while declaring
+// themselves, so the hover test and the pointer cursor cannot drift apart.
+// Layout runs on the UI thread only, like Clay's own context.
+layout_cursor: ui.Cursor_Kind
+
+// Hover for an interactive element; it also requests the pointer cursor.
+hover :: proc(id: clay.ElementId, cursor := ui.Cursor_Kind.Pointer) -> bool {
+	if !clay.PointerOver(id) {return false}
+	layout_cursor = cursor
+	return true
+}
+
 // Icon scale for a button id plus its hover state. Disabled buttons skip
 // the map entirely and only report hover for the cursor.
 button_fx :: proc(
@@ -166,8 +179,8 @@ button_fx :: proc(
 ) {
 	scale = 1
 	element_id := clay.ID(id, index)
-	hovered = clay.PointerOver(element_id)
 	if !enabled {return scale, false}
+	hovered = hover(element_id)
 	fx := ctx.anims[element_id.id]
 	if hovered && ctx.mouse_down {
 		fx.held = true
@@ -208,6 +221,7 @@ input_text :: proc(view: View) {
 
 search_input :: proc(view: View, textures: ^Textures, width: clay.SizingAxis, d: f32) {
 	has_text := view.input_editor != nil && len(view.input_editor.input) > 0
+	_ = hover(clay.ID("track_input"), .Text)
 	if clay.UI_WithId(clay.ID("track_input"))(
 	{
 		layout = {
@@ -223,7 +237,7 @@ search_input :: proc(view: View, textures: ^Textures, width: clay.SizingAxis, d:
 		icon_element(textures, "search", .Muted, 16 * d)
 		input_text(view)
 		if has_text {
-			hovered := clay.PointerOver(clay.ID("search_clear"))
+			hovered := hover(clay.ID("search_clear"))
 			if clay.UI_WithId(clay.ID("search_clear"))(
 			{
 				layout = {
@@ -469,6 +483,7 @@ player_bar :: proc(
 				// Hug boxes so exactly the text is clickable. The title is
 				// already white; the pointer alone marks it, while the
 				// artist brightens like every other quiet icon.
+				if view.album_linked {_ = hover(clay.ID("footer_title"))}
 				if clay.UI_WithId(clay.ID("footer_title"))(
 				{layout = {sizing = {width = clay.SizingFit({})}}},
 				) {
@@ -571,6 +586,7 @@ player_bar :: proc(
 			},
 			) {
 				clay.Text(view.elapsed, {fontId = 1, fontSize = 12, textColor = theme.muted})
+				if view.seek_enabled {_ = hover(clay.ID("seek_slider"))}
 				if clay.UI_WithId(clay.ID("seek_slider"))(
 				{
 					layout = {
@@ -638,6 +654,7 @@ player_bar :: proc(
 				icon_size = 18,
 			)
 			icon_element(textures, "volume-2", .Muted, 18 * d)
+			_ = hover(clay.ID("volume_slider"))
 			if clay.UI_WithId(clay.ID("volume_slider"))(
 			{
 				layout = {
@@ -685,6 +702,7 @@ autoscroll_indicator :: proc(view: View, textures: ^Textures, d: f32) {
 	// themes; dark mode flips the badge to a light circle.
 	background := theme.text
 	background.a = 220
+	_ = hover(clay.ID("autoscroll"))
 	if clay.UI_WithId(clay.ID("autoscroll"))(
 	{
 		layout = {
@@ -858,7 +876,7 @@ setup_step :: proc(
 			case .Dashboard:
 				sign_in_button("setup_dashboard", "Open dashboard", d)
 			case .Redirect:
-				hovered := clay.PointerOver(clay.ID("setup_redirect"))
+				hovered := hover(clay.ID("setup_redirect"))
 				if clay.UI_WithId(clay.ID("setup_redirect"))(
 				{
 					layout = {
@@ -879,6 +897,7 @@ setup_step :: proc(
 					icon_element(textures, "copy", hovered ? .White : .Muted, 16 * d)
 				}
 			case .Client_ID:
+				_ = hover(clay.ID("setup_field"), .Text)
 				if clay.UI_WithId(clay.ID("setup_field"))(
 				{
 					layout = {
@@ -1001,7 +1020,7 @@ sign_in_button :: proc(id, label: string, d: f32, grow := false) {
 			padding = {left = u16(20 * d), right = u16(20 * d)},
 			childAlignment = {x = .Center, y = .Center},
 		},
-		backgroundColor = clay.PointerOver(clay.ID(id)) ? theme.hero_hover : theme.green,
+		backgroundColor = hover(clay.ID(id)) ? theme.hero_hover : theme.green,
 		cornerRadius = clay.CornerRadiusAll(20 * d),
 	},
 	) {
@@ -1027,6 +1046,7 @@ layout :: proc(
 	visible: Frame_Visible
 	clay.SetLayoutDimensions({viewport_width, viewport_height})
 	clay.BeginLayout()
+	layout_cursor = .Default
 	if client.state == .Missing_Client_ID ||
 	   client.state == .Sign_In_Failed ||
 	   client.state == .Authorizing && view.sign_in {
@@ -1089,6 +1109,7 @@ layout :: proc(
 				dt,
 				view.drag_active ? view.drop_target : -1,
 			)
+			_ = hover(clay.ID("sidebar_handle"), .Resize)
 			if clay.UI_WithId(clay.ID("sidebar_handle"))(
 			{layout = {sizing = {width = clay.SizingFixed(6 * d), height = clay.SizingGrow({})}}},
 			) {}

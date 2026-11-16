@@ -56,7 +56,7 @@ scrollbar :: proc(container, name: string, d: f32) {
 			attachment = {element = .RightTop, parent = .RightTop},
 			attachTo = .ElementWithId,
 		},
-		backgroundColor = clay.PointerOver(clay.ID(name)) ? SCROLLBAR_HOVER : SCROLLBAR,
+		backgroundColor = hover(clay.ID(name)) ? SCROLLBAR_HOVER : SCROLLBAR,
 		cornerRadius = clay.CornerRadiusAll(f32(SCROLLBAR_WIDTH) / 2 * d),
 	},
 	) {}

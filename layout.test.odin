@@ -6,6 +6,7 @@ import "core:sync/chan"
 import "core:testing"
 import "core:thread"
 import library "spotify/library"
+import ui "ui"
 import clay "vendor/clay"
 import sdl "vendor:sdl3"
 
@@ -654,6 +655,48 @@ wheel_target_glides_to_rest :: proc(t: ^testing.T) {
 	testing.expect_value(t, data.scrollPosition.y, smooth.target)
 	smooth_cancel("detail_rows", &smooth)
 	testing.expect(t, !smooth.active)
+	// Layout reports the cursor of the widget under the pointer.
+	cursor_at :: proc(
+		client: ^library.Client,
+		textures: ^Textures,
+		fx: ^Button_Fx_Ctx,
+		id: string,
+	) -> ui.Cursor_Kind {
+		box := clay.GetElementData(clay.ID(id)).boundingBox
+		clay.SetPointerState({box.x + box.width / 2, box.y + box.height / 2}, false)
+		app_state: State
+		_, _ = layout(
+			{button = "pause"},
+			client,
+			&app_state,
+			.Playlists,
+			textures,
+			fx,
+			360,
+			1280,
+			820,
+			26,
+			0,
+			1,
+			nil,
+		)
+		return layout_cursor
+	}
+	testing.expect_value(
+		t,
+		cursor_at(&client, &textures, &glide_fx, "footer_next"),
+		ui.Cursor_Kind.Pointer,
+	)
+	testing.expect_value(
+		t,
+		cursor_at(&client, &textures, &glide_fx, "track_input"),
+		ui.Cursor_Kind.Text,
+	)
+	testing.expect_value(
+		t,
+		cursor_at(&client, &textures, &glide_fx, "sidebar_handle"),
+		ui.Cursor_Kind.Resize,
+	)
 	testing.expect_value(t, errors, 0)
 }
 
