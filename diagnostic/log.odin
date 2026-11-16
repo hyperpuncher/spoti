@@ -14,6 +14,8 @@ import "core:time"
 
 verbose: bool
 
+LOG_LIMIT :: 8 * 1024 * 1024
+
 state: struct {
 	mutex:         sync.Mutex,
 	file:          ^os.File,
@@ -36,6 +38,12 @@ init :: proc(enabled_verbose: bool = false) {
 	if dir_error != nil && dir_error != .Exist {return}
 	path := fmt.aprintf("%s/spoti.log", dir)
 	defer delete(path)
+	// Keep one previous log so a long-lived log cannot grow without bound.
+	if info, stat_error := os.stat(path, context.temp_allocator);
+	   stat_error == nil && info.size > LOG_LIMIT {
+		old := fmt.tprintf("%s.1", path)
+		_ = os.rename(path, old)
+	}
 	state.file, _ = os.open(path, {.Write, .Create, .Append})
 }
 
