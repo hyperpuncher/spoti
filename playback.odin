@@ -7,10 +7,12 @@ import "core:strings"
 import "core:sync"
 import "core:sync/chan"
 import "core:thread"
+import diagnostic "diagnostic"
 import audio "spotify/audio"
 import library "spotify/library"
 import player "spotify/player"
 import session "spotify/session"
+import sdl "vendor:sdl3"
 
 PREVIOUS_RESTART_MS :: 3000
 
@@ -353,6 +355,76 @@ app_finish_queue :: proc(app: ^App) {
 	app.pending_redraw = true
 }
 
+// The track that plays after the current one, using the same rules as a
+// track ending: repeat-one, then the next queue item, then the start of a
+// repeated context. -1 means playback stops.
+next_play_index :: proc(app: ^App) -> int {
+	if app.play_index < 0 || app.play_index >= len(app.play_queue) {return -1}
+	if app.repeat {return app.play_index}
+	if app.play_index + 1 < len(app.play_queue) {return app.play_index + 1}
+	if app.connect_repeat_context {return 0}
+	return -1
+}
+
+// Keep the worker's next-track offer current. Queue edits, shuffle and
+// repeat changes all flow through here before the worker takes the offer.
+app_offer_next_track :: proc(app: ^App) {
+	if app.worker == nil || app.stage == .Stopping || app.stage == .Failed {return}
+	// Once the worker holds the next track, the following one is offered at
+	// the boundary, when the queue position moves.
+	if app.upcoming.active {return}
+	next := next_play_index(app)
+	if next < 0 {offer_next_track(&app.next_track, "", app.tracks_started, nil); return}
+	uri := app.play_queue[next].uri
+	preloaded: ^session.Source
+	if app.preload_worker == nil &&
+	   app.preload_work.track == uri &&
+	   app.preload_work.source.url != "" {
+		preloaded = &app.preload_work.source
+	}
+	offer_next_track(&app.next_track, uri, app.tracks_started, preloaded)
+}
+
+clear_upcoming :: proc(app: ^App) {
+	delete(app.upcoming.name)
+	delete(app.upcoming.uri)
+	app.upcoming = {}
+}
+
+// Switch the footer, queue position and progress origin when playback
+// reaches the first sample of a gaplessly queued track. If the queue changed
+// after the worker took its offer, the queued audio is the wrong track: stop
+// and start the right one, which keeps a short gap only in that case.
+app_gapless_boundary :: proc(app: ^App) {
+	if !app.upcoming.active || app.upcoming.pending || app.stream == nil {return}
+	queued := max(0, int(sdl.GetAudioStreamQueued(app.stream)))
+	if app.sent_frames - queued / 4 < app.upcoming.boundary_frames {return}
+	index := next_play_index(app)
+	if index < 0 || app.play_queue[index].uri != app.upcoming.uri {
+		diagnostic.write("playback gapless track no longer next; restarting")
+		clear_upcoming(app)
+		if index < 0 {app_finish_queue(app); return}
+		app.play_index = index
+		_ = select_play_item(app.play_queue[:], index, &app.selected, &app.player_cover)
+		app.seek_ms, app.start_paused = 0, false
+		app_stop_audio(app)
+		app.play_after_stop = true
+		return
+	}
+	app.play_index = index
+	_ = select_play_item(app.play_queue[:], index, &app.selected, &app.player_cover)
+	item := &app.play_queue[index]
+	replace_string(&item.name, app.upcoming.name)
+	item.duration_ms = app.upcoming.duration_ms
+	replace_string(&app.title, app.upcoming.name)
+	replace_string(&app.artist, item.artist)
+	app.duration_ms = app.upcoming.duration_ms
+	app.origin_frames = app.upcoming.boundary_frames - app.upcoming.base_frames
+	app.displayed_ms = 0
+	clear_upcoming(app)
+	app.state_dirty, app.pending_redraw = true, true
+}
+
 // Accessed only by the decode worker; main clears it after joining that worker.
 Play_Source :: struct {
 	track:  string,
@@ -408,6 +480,55 @@ preload_track :: proc(pointer: rawptr) {
 	_, _ = audio.read_seek_pcm(&media, pcm)
 }
 
+// The main thread offers the track that follows the one being decoded.
+// The worker takes it when its current track ends, so the next track's
+// audio follows in the same stream with no gap. An offer names the track
+// count it follows, so an offer made before main sees the worker's latest
+// Ready packet is ignored instead of replaying a track.
+Next_Track :: struct {
+	mutex:     sync.Mutex,
+	uri:       string, // owned; "" means the queue ends after this track
+	preloaded: session.Source, // owned; a resolved source for uri, if any
+	after:     int, // the offer follows the worker's track number `after`
+}
+
+// Replace the offer with uri, or "" to end after the current track. A
+// preloaded source for the same uri is attached when it becomes available.
+offer_next_track :: proc(next: ^Next_Track, uri: string, after: int, preloaded: ^session.Source) {
+	sync.mutex_guard(&next.mutex)
+	if next.uri != uri || next.after != after {
+		delete(next.uri)
+		session.close_source(&next.preloaded)
+		next.uri = strings.clone(uri)
+		next.after = after
+	}
+	if uri != "" && preloaded != nil && next.preloaded.url == "" {
+		next.preloaded, preloaded^ = preloaded^, {}
+	}
+}
+
+clear_next_track :: proc(next: ^Next_Track) {
+	sync.mutex_guard(&next.mutex)
+	delete(next.uri)
+	session.close_source(&next.preloaded)
+	next^ = {}
+}
+
+@(private = "file")
+take_next_track :: proc(
+	next: ^Next_Track,
+	started: int,
+) -> (
+	uri: string,
+	preloaded: session.Source,
+) {
+	sync.mutex_guard(&next.mutex)
+	if next.uri == "" || next.after != started {return}
+	uri, preloaded = next.uri, next.preloaded
+	next.uri, next.preloaded = "", {}
+	return
+}
+
 Login_Work :: struct {
 	queue:     chan.Chan(player.Packet),
 	cancel:    ^bool,
@@ -415,12 +536,33 @@ Login_Work :: struct {
 	start_ms:  int,
 	source:    ^Play_Source,
 	preloaded: session.Source, // owned, transferred only after joining the preload worker
+	next:      ^Next_Track, // optional; continues gaplessly into the offered track
+	open:      type_of(session.open), // nil uses session.open; tests replace the network
+	cache:     string, // tests use a private audio cache directory
 }
 
+// Decode the requested track, then each offered next track, into one packet
+// stream. Every track starts with a Ready packet; End follows the last one.
 login_and_decode :: proc(pointer: rawptr) {
 	work := (^Login_Work)(pointer)
 	defer delete(work.track_url)
 	defer session.close_source(&work.preloaded)
+	start_ms := work.start_ms
+	for started := 1;; started += 1 {
+		if !decode_track(work, start_ms) {return}
+		if work.next == nil {break}
+		uri, preloaded := take_next_track(work.next, started)
+		if uri == "" {break}
+		delete(work.track_url)
+		session.close_source(&work.preloaded)
+		work.track_url, work.preloaded = uri, preloaded
+		start_ms = 0
+	}
+	if !sync.atomic_load(work.cancel) {_ = chan.send(work.queue, player.Packet{kind = .End})}
+}
+
+@(private = "file")
+decode_track :: proc(work: ^Login_Work, start_ms: int) -> bool {
 	source := cached_play_source(work.source, work.track_url)
 	if source == nil {
 		clear_play_source(work.source)
@@ -432,42 +574,48 @@ login_and_decode :: proc(pointer: rawptr) {
 			work.preloaded = {}
 			authorized = true
 		} else {
-			fresh, authorized = session.open(.Remember, work.cancel, work.track_url, &unavailable)
+			open := work.open != nil ? work.open : session.open
+			fresh, authorized = open(.Remember, work.cancel, work.track_url, &unavailable)
 		}
 		if !authorized {
 			if !sync.atomic_load(
 				work.cancel,
 			) {_ = chan.send(work.queue, player.Packet{kind = unavailable ? .Unavailable : .Failed})}
-			return
+			return false
 		}
 		work.source.track = strings.clone(work.track_url)
 		work.source.source = fresh
 		source = &work.source.source
 	}
-	if sync.atomic_load(work.cancel) {return}
-	name := strings.clone(source.name)
-	if !chan.send(
-		work.queue,
-		player.Packet{kind = .Ready, name = name, duration_ms = source.duration_ms},
-	) {
-		delete(name)
-		return
+	if sync.atomic_load(work.cancel) {return false}
+	ready := player.Packet {
+		kind        = .Ready,
+		name        = strings.clone(source.name),
+		uri         = strings.clone(work.track_url),
+		duration_ms = source.duration_ms,
+	}
+	if !chan.send(work.queue, ready) {
+		delete(ready.name)
+		delete(ready.uri)
+		return false
 	}
 	media := &work.source.media
 	media.url, media.key, media.file_id = source.url, source.key, source.file_id
 	media.duration_ms, media.cancel = source.duration_ms, work.cancel
+	if work.cache != "" &&
+	   media.disk.path == "" {media.disk = audio.open_disk_cache(media.file_id, work.cache)}
 	decode := player.Work {
 		media    = media,
 		queue    = work.queue,
 		cancel   = work.cancel,
-		start_ms = work.start_ms,
-		on_open  = start_track_fetch,
+		start_ms = start_ms,
+		on_open  = work.cache == "" ? start_track_fetch : nil,
 		user     = &work.source.fetch,
 	}
-	if !player.decode(&decode) && !sync.atomic_load(work.cancel) {
-		// A failed/expired CDN source must be resolved afresh on the next attempt.
-		clear_play_source(work.source)
-	}
+	if player.decode(&decode) {return true}
+	// A failed/expired CDN source must be resolved afresh on the next attempt.
+	if !sync.atomic_load(work.cancel) {clear_play_source(work.source)}
+	return false
 }
 
 // Runs on the decode worker once the file size is known. One fetcher per
@@ -489,6 +637,7 @@ release_worker :: proc(worker: ^thread.Thread, queue: chan.Chan(player.Packet), 
 	for packet in chan.try_recv(queue) {
 		delete(packet.pcm)
 		delete(packet.name)
+		delete(packet.uri)
 	}
 	chan.destroy(queue)
 }

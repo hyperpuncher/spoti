@@ -437,6 +437,19 @@ App :: struct {
 	preload_worker:         ^thread.Thread,
 	preload_work:           Preload_Work,
 	preload_attempted:      string,
+	next_track:             Next_Track, // shared with the decode worker
+	tracks_started:         int, // Ready packets from the current worker
+	// A gapless next track whose audio is queued behind the current one.
+	// The footer switches when playback reaches boundary_frames.
+	upcoming:               struct {
+		active:          bool,
+		name:            string, // owned
+		uri:             string, // owned
+		duration_ms:     int,
+		boundary_frames: int, // sent_frames where the next track starts
+		base_frames:     int, // position_frames of its first packet
+		pending:         bool, // Ready arrived; its first Audio packet has not
+	},
 	cancel:                 bool,
 	stream:                 ^sdl.AudioStream,
 	title:                  string,
@@ -527,7 +540,8 @@ App :: struct {
 	seek_dragging:          bool,
 	start_paused:           bool,
 	seek_ms:                int,
-	sent_frames:            int,
+	sent_frames:            int, // stream position after the last queued packet
+	origin_frames:          int, // stream position where the shown track's frame 0 lies
 	sample_rate:            int,
 	duration_ms:            int,
 	displayed_ms:           int,
@@ -661,6 +675,8 @@ main :: proc() {
 		clear_preload(&preload_work)
 		delete(preload_attempted)
 		clear_play_source(&play_source)
+		clear_next_track(&next_track)
+		clear_upcoming(&app)
 		clear_audio_stream(&stream)
 		library.stop(&library_client)
 		// A request can receive its retry deadline while the worker shuts down.
@@ -970,7 +986,8 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 		release_worker(worker, queue, &cancel)
 		worker = nil
 		finished = false
-		sent_frames, sample_rate = 0, 0
+		sent_frames, origin_frames, sample_rate = 0, 0, 0
+		clear_upcoming(app)
 		displayed_ms = seek_ms
 		stage = .Idle
 		if play_after_stop {
@@ -997,6 +1014,23 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 			redraw = true
 			switch packet.kind {
 			case .Ready:
+				tracks_started += 1
+				if stream != nil && sent_frames > 0 {
+					// The worker continued into the offered track. Its audio
+					// follows the current track in the same stream.
+					diagnostic.write("playback continues gaplessly")
+					clear_upcoming(app)
+					upcoming = {
+						active          = true,
+						pending         = true,
+						name            = packet.name,
+						uri             = packet.uri,
+						duration_ms     = packet.duration_ms,
+						boundary_frames = sent_frames,
+					}
+					break
+				}
+				delete(packet.uri)
 				diagnostic.write("playback metadata ready")
 				delete(title)
 				title = packet.name
@@ -1031,6 +1065,10 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 					}
 					sent_frames = packet.position_frames
 					sample_rate = packet.sample_rate
+				}
+				if upcoming.pending {
+					upcoming.pending = false
+					upcoming.base_frames = packet.position_frames
 				}
 				if stream == nil ||
 				   !sdl.PutAudioStreamData(
@@ -1081,6 +1119,8 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 			}
 		}
 	}
+	app_offer_next_track(app)
+	app_gapless_boundary(app)
 	if finished && stage == .Playing && stream != nil && sdl.GetAudioStreamQueued(stream) == 0 {
 		stage = .Ended
 		if !seek_dragging {
@@ -1106,8 +1146,10 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 		space_pressed = true
 		redraw = true
 	}
-	if stage == .Playing && play_index >= 0 && play_index + 1 < len(play_queue) {
-		next_uri := play_queue[play_index + 1].uri
+	// Resolve the track that plays next while this one plays. Repeat-one
+	// replays the cached source and needs no preload.
+	if next := next_play_index(app); stage == .Playing && next >= 0 && next != play_index {
+		next_uri := play_queue[next].uri
 		if preload_worker != nil && preload_work.track != next_uri {
 			sync.atomic_store(&preload_work.cancel, true)
 		}
@@ -1164,7 +1206,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		progress = f32(displayed_ms) / f32(duration_ms)
 		if sample_rate > 0 && stream != nil {
 			queued := max(0, sdl.GetAudioStreamQueued(stream))
-			measured_ms := (sent_frames - int(queued) / 4) * 1000 / sample_rate
+			measured_ms := (sent_frames - int(queued) / 4 - origin_frames) * 1000 / sample_rate
 			displayed_ms = max(displayed_ms, clamp(measured_ms, 0, duration_ms))
 			progress = f32(displayed_ms) / f32(duration_ms)
 		}

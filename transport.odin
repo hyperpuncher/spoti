@@ -361,6 +361,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 						track_url = strings.clone(selected),
 						start_ms  = seek_ms,
 						source    = &play_source,
+						next      = &next_track,
 					}
 					if preload_worker == nil &&
 					   preload_work.track == selected &&
@@ -382,7 +383,10 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 						clear_audio_stream(&stream)
 						finished = false
 						play_after_stop, replay_pending = false, false
-						sent_frames, sample_rate = 0, 0
+						sent_frames, origin_frames, sample_rate = 0, 0, 0
+						clear_upcoming(app)
+						clear_next_track(&next_track)
+						tracks_started = 0
 						displayed_ms = seek_ms
 						seek_ms = 0
 						stage = .Signing_In

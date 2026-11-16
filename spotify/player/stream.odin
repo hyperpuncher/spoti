@@ -20,6 +20,7 @@ Packet :: struct {
 	pcm:             []i16, // receiver owns Audio packets
 	sample_rate:     int,
 	name:            string, // receiver owns Ready packet names
+	uri:             string, // receiver owns; the track a Ready packet starts
 	duration_ms:     int,
 	position_frames: int, // absolute PCM position, including a seek offset
 	frames:          int, // valid frames in the owned, fixed-size PCM allocation
@@ -58,10 +59,8 @@ decode :: proc(pointer: rawptr) -> (ok: bool) {
 			_ = chan.send(work.queue, Packet{kind = .Failed})
 			return
 		}
-		if frames == 0 {
-			_ = chan.send(work.queue, Packet{kind = .End})
-			return true
-		}
+		// The caller reports the end, or continues with the next track.
+		if frames == 0 {return true}
 		if !chan.send(
 			work.queue,
 			Packet {
