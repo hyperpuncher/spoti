@@ -1,5 +1,6 @@
 package ui
 
+import artwork "../spotify/artwork"
 import "core:testing"
 import sdl "vendor:sdl3"
 
@@ -28,7 +29,7 @@ rounded_cover_upload_preserves_pixels_and_row_padding :: proc(t: ^testing.T) {
 		defer sdl.DestroySurface(surface)
 		// Rounding needs alpha blending even if the source used NONE.
 		if !testing.expect(t, sdl.SetSurfaceBlendMode(surface, sdl.BLENDMODE_NONE)) {return}
-		round_image_corners(surface)
+		artwork.round_corners(surface)
 		for y in 0 ..< H {
 			for value in pixels[y * PITCH + W * 4:(y + 1) * PITCH] {testing.expect_value(t, value, u8(77))}
 		}

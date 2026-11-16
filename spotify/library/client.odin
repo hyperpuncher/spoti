@@ -480,7 +480,8 @@ run_covers :: proc(pointer: rawptr) {
 			defer delete(bytes)
 			if fetched && status == 200 {
 				image, _ = artwork.decode(bytes[:])
-				if image == nil {cache_remove("cover", request.url)}
+				if image ==
+				   nil {cache_remove("cover", request.url)} else {artwork.round_corners(image)}
 			}
 		}
 		diagnostic.cover_decode_result(image != nil)

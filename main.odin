@@ -732,6 +732,7 @@ App :: struct {
 	replay_pending:         bool,
 	play_after_stop:        bool,
 	fx_animating:           bool,
+	fx_next_frame:          u64, // tick of the next stepped animation frame, or 0
 	shuffle:                bool,
 	volume:                 f32,
 	volume_dragging:        bool,
@@ -1042,14 +1043,16 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	if len(toast) > 0 {wait_until(&wait_ms, now, toast_until)}
 	// These deadlines change what the frame shows, so reaching one redraws.
 	show_at := max(u64)
+	if fx_next_frame != 0 {show_at = fx_next_frame}
 	if search_pending {show_at = min(show_at, search_deadline)}
-	if library_client.detail_loading {
+	// Wall-clock deadlines count only while they are still ahead.
+	if library_client.detail_loading && time.since(library_client.detail_loading_at) < 0 {
 		show_at = min(show_at, ticks_at(library_client.detail_loading_at, now))
 	}
-	if library_client.state == .Ready {
+	if library_client.state == .Ready && time.since(library_client.page_at) < 0 {
 		show_at = min(show_at, ticks_at(library_client.page_at, now))
 	}
-	if show_at > now && show_at != max(u64) {wait_until(&wait_ms, now, show_at)}
+	if show_at != max(u64) {wait_until(&wait_ms, now, show_at)}
 	if library_client.release_feed.open &&
 	   !library_client.release_feed.done &&
 	   time.since(library_client.release_feed.wait_until) < 0 {
@@ -1264,7 +1267,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 		}
 	}
 	// A timed wake redraws: deadlines above change what the frame shows.
-	show_due := show_at != max(u64) && show_at > now && sdl.GetTicksNS() >= show_at
+	show_due := show_at != max(u64) && sdl.GetTicksNS() >= show_at
 	return has_event || show_due || ui.editor_blink_delay(&editor, sdl.GetTicks()) == 0,
 		fades_animating
 }
@@ -1440,7 +1443,6 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 		request.pending = false
 		textures.requested[cover.key] = request
 		if cover.image != nil {
-			ui.round_image_corners(cover.image)
 			texture := ui.create_texture(&state, cover.image)
 			if texture != nil {
 				textures.by_key[cover.key] = texture
@@ -1960,6 +1962,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		if pos == previous {break}
 	}
 	fx_animating = fx.animating
+	fx_next_frame = fx.next_frame
 	if middle_clicked {
 		middle_clicked = false
 		for id in ([]string{"queue_rows", "library_grid", "detail_rows"}) {
@@ -2187,14 +2190,14 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			for index in visible.feed.first ..< visible.feed.last {
 				if !hit_clipped("feed_row", "detail_rows", mouse_click, u32(index)) {continue}
 				release := &library_client.release_feed.items[index]
-				if hit(release_feed_action("save", index), mouse_click) {
+				if hit_index("feed_save", mouse_click, u32(index)) {
 					_ = library.toggle_like(
 						&library_client,
 						.Album,
 						release.entry.uri[len("spotify:album:"):],
 						!release_feed_saved(&library_client, release),
 					)
-				} else if hit(release_feed_action("play", index), mouse_click) {
+				} else if hit_index("feed_play", mouse_click, u32(index)) {
 					if release_feed_open_album(&library_client, release.entry) {
 						replace_string(&release_play_uri, release.entry.uri)
 					}

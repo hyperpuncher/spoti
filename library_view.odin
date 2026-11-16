@@ -593,8 +593,14 @@ sidebar :: proc(
 	return
 }
 
+SPINNER_STEP_MS :: 80
+
+// The spinner changes every step, so it asks for one frame per step
+// instead of redrawing at the display rate.
 loading_spinner :: proc(fx: ^Button_Fx_Ctx, d: f32) {
-	fx.animating = true
+	ticks := sdl.GetTicks()
+	next := (ticks / SPINNER_STEP_MS + 1) * SPINNER_STEP_MS * 1_000_000
+	fx.next_frame = fx.next_frame == 0 ? next : min(fx.next_frame, next)
 	if clay.UI()(
 	{
 		layout = {
@@ -610,7 +616,7 @@ loading_spinner :: proc(fx: ^Button_Fx_Ctx, d: f32) {
 			},
 		},
 		) {
-			phase := int((sdl.GetTicks() / 80) % 8)
+			phase := int((ticks / SPINNER_STEP_MS) % 8)
 			for offset, index in ([8]clay.Vector2{{0, -1}, {0.707, -0.707}, {1, 0}, {0.707, 0.707}, {0, 1}, {-0.707, 0.707}, {-1, 0}, {-0.707, -0.707}}) {
 				color := theme.muted
 				color.a = 48 + f32((index - phase + 8) % 8) * (207.0 / 7)

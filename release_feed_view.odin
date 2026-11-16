@@ -9,10 +9,6 @@ import clay "vendor/clay"
 FEED_COVER_SIZE :: 168
 FEED_ROW_HEIGHT :: FEED_COVER_SIZE + 24
 
-release_feed_action :: proc(action: string, index: int) -> string {
-	return fmt.aprintf("feed_%s_%d", action, index, allocator = context.temp_allocator)
-}
-
 release_age_label :: proc(released_at, now: time.Time) -> string {
 	age := time.diff(released_at, now)
 	if age < time.Minute {return "just now"}
@@ -180,7 +176,7 @@ release_feed_page :: proc(
 						{layout = {childGap = u16(12 * d), childAlignment = {y = .Center}}},
 						) {
 							round_play_button(
-								release_feed_action("play", index),
+								"feed_play",
 								"play-filled",
 								textures,
 								fx,
@@ -189,15 +185,17 @@ release_feed_page :: proc(
 								15,
 								theme.text,
 								theme.footer_hover,
+								index = u32(index),
 							)
 							saved := release_feed_saved(client, release)
 							icon_button(
-								release_feed_action("save", index),
+								"feed_save",
 								saved ? "circle-check" : "circle-plus",
 								library.like_pending(client, .Album, entry.uri[len("spotify:album:"):]) ? .Disabled : saved ? .Green : .Muted,
 								textures,
 								fx,
 								d,
+								index = u32(index),
 							)
 						}
 					}

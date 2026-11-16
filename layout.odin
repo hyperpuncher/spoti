@@ -150,6 +150,7 @@ Button_Fx_Ctx :: struct {
 	anims:      ^map[u32]Button_Fx,
 	mouse_down: bool,
 	animating:  bool, // a UI animation is running; main keeps frames coming
+	next_frame: u64, // a stepped animation wants a frame at this tick, or 0
 }
 
 // Icon scale for a button id plus its hover state. Disabled buttons skip
@@ -158,12 +159,13 @@ button_fx :: proc(
 	ctx: ^Button_Fx_Ctx,
 	id: string,
 	enabled: bool = true,
+	index: u32 = 0,
 ) -> (
 	scale: f32,
 	hovered: bool,
 ) {
 	scale = 1
-	element_id := clay.ID(id)
+	element_id := clay.ID(id, index)
 	hovered = clay.PointerOver(element_id)
 	if !enabled {return scale, false}
 	fx := ctx.anims[element_id.id]
@@ -343,8 +345,9 @@ icon_button :: proc(
 	d: f32,
 	icon_size: f32 = 21,
 	target_size: f32 = 32,
+	index: u32 = 0,
 ) {
-	scale, hovered := button_fx(fx, id, tint != .Disabled)
+	scale, hovered := button_fx(fx, id, tint != .Disabled, index)
 	active := tint
 	if hovered {
 		#partial switch tint {
@@ -355,7 +358,7 @@ icon_button :: proc(
 		}
 	}
 	size := icon_size * d * scale
-	if clay.UI_WithId(clay.ID(id))(
+	if clay.UI_WithId(clay.ID(id, index))(
 	{
 		layout = {
 			sizing = {
@@ -377,9 +380,10 @@ round_play_button :: proc(
 	d, size, icon_size: f32,
 	background, hover: clay.Color,
 	enabled := true,
+	index: u32 = 0,
 ) {
-	scale, over := button_fx(fx, id, enabled)
-	if clay.UI_WithId(clay.ID(id))(
+	scale, over := button_fx(fx, id, enabled, index)
+	if clay.UI_WithId(clay.ID(id, index))(
 	{
 		layout = {
 			sizing = {width = clay.SizingFixed(size * d), height = clay.SizingFixed(size * d)},

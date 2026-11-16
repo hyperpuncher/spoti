@@ -212,38 +212,6 @@ fill :: proc(state: ^State, rect: sdl.FRect, color: sdl.Color) {
 	if color.a == 255 {_ = sdl.SetRenderDrawBlendMode(state.renderer, sdl.BLENDMODE_BLEND)}
 }
 
-// Apply a small antialiased rounded alpha edge once at the source image's
-// native resolution. This avoids SDL_RenderGeometry's non-antialiased edge and
-// remains smooth at every destination size.
-round_image_corners :: proc(surface: ^sdl.Surface) {
-	if surface == nil || surface.format != .RGBA32 || !sdl.LockSurface(surface) {return}
-	defer sdl.UnlockSurface(surface)
-	width, height, pitch := int(surface.w), int(surface.h), int(surface.pitch)
-	pixels := ([^]u8)(surface.pixels)[:pitch * height]
-	radius := max(2, int(f32(min(width, height)) * 0.045 + 0.5))
-	samples: int = 4
-	for y in 0 ..< height {
-		corner_y := y < radius || y >= height - radius
-		if !corner_y {continue}
-		for x in 0 ..< width {
-			if x >= radius && x < width - radius {continue}
-			covered := 0
-			for sy in 0 ..< samples {
-				for sx in 0 ..< samples {
-					px := f32(x) + (f32(sx) + 0.5) / f32(samples)
-					py := f32(y) + (f32(sy) + 0.5) / f32(samples)
-					cx := px < f32(radius) ? f32(radius) : f32(width - radius)
-					cy := py < f32(radius) ? f32(radius) : f32(height - radius)
-					dx, dy := px - cx, py - cy
-					if dx * dx + dy * dy <= f32(radius * radius) {covered += 1}
-				}
-			}
-			alpha := &pixels[y * pitch + x * 4 + 3]
-			alpha^ = u8(u32(alpha^) * u32(covered) / u32(samples * samples))
-		}
-	}
-}
-
 create_texture :: proc {
 	create_texture_pixels,
 	create_texture_surface,
