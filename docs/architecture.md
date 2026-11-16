@@ -28,8 +28,9 @@ failed sends release the same owned result. partial worker startup uses the
 normal shutdown path to close, drain, and release its queues.
 
 `main.odin` keeps an owned `App` and a short-lived `Frame`. its frame stages
-handle events, navigation, library results, playback, scrolling, layout,
-artwork, commands, and persistence. stage order matters: a playback transfer
+handle events (`events.odin`), navigation, library results, playback,
+scrolling (`scroll.odin`), layout, artwork, clicks (`click.odin`), transport
+(`transport.odin`), and persistence. stage order matters: a playback transfer
 must stop local audio before the playback stage, not during layout.
 
 ## ownership
