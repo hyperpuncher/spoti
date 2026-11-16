@@ -49,6 +49,8 @@ static void unlock_state(void) {
 static struct {
 	char title[512];
 	char artist[512];
+	char album[512];
+	char art_url[1024];
 	int64_t duration_us;
 	int64_t position_us;
 	int playing;
@@ -151,13 +153,16 @@ GETTER(get_can_previous)
 
 GETTER(get_metadata)
 	lock_state();
-	int r = sd_bus_message_append(
-		reply, "a{sv}", 4,
-		"mpris:trackid", "o", "/org/spoti/track",
-		"mpris:length", "x", state.duration_us,
-		"xesam:title", "s", state.title,
-		"xesam:artist", "as", 1, state.artist
-	);
+	// Empty album or art is omitted: shells show a blank string or a broken
+	// image for empty values instead of their fallback.
+	int r = sd_bus_message_open_container(reply, 'a', "{sv}");
+	if (r >= 0) r = sd_bus_message_append(reply, "{sv}", "mpris:trackid", "o", "/org/spoti/track");
+	if (r >= 0) r = sd_bus_message_append(reply, "{sv}", "mpris:length", "x", state.duration_us);
+	if (r >= 0) r = sd_bus_message_append(reply, "{sv}", "xesam:title", "s", state.title);
+	if (r >= 0) r = sd_bus_message_append(reply, "{sv}", "xesam:artist", "as", 1, state.artist);
+	if (r >= 0 && state.album[0]) r = sd_bus_message_append(reply, "{sv}", "xesam:album", "s", state.album);
+	if (r >= 0 && state.art_url[0]) r = sd_bus_message_append(reply, "{sv}", "mpris:artUrl", "s", state.art_url);
+	if (r >= 0) r = sd_bus_message_close_container(reply);
 	unlock_state();
 	GETTER_END
 
@@ -347,10 +352,17 @@ int spoti_mpris_take_command(int *command, int64_t *value) {
 	return 1;
 }
 
-void spoti_mpris_set_track(const char *title, const char *artist, int64_t duration_us) {
+void spoti_mpris_set_track(
+	const char *title, const char *artist, const char *album, const char *art_url,
+	int64_t duration_us
+) {
 	lock_state();
 	snprintf(state.title, sizeof state.title, "%s", title != NULL ? title : "");
 	snprintf(state.artist, sizeof state.artist, "%s", artist != NULL ? artist : "");
+	snprintf(state.album, sizeof state.album, "%s", album != NULL ? album : "");
+	// A URL that does not fit would be truncated into a broken link; drop it.
+	if (art_url == NULL || strlen(art_url) >= sizeof state.art_url) art_url = "";
+	snprintf(state.art_url, sizeof state.art_url, "%s", art_url);
 	state.duration_us = duration_us;
 	changed_pending = 1;
 	unlock_state();

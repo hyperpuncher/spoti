@@ -3,6 +3,7 @@
 // this file owns the worker thread, change detection and the command queue.
 package mpris
 
+import "core:fmt"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -16,7 +17,7 @@ foreign sd_bus {
 	spoti_mpris_service :: proc() ---
 	spoti_mpris_wait :: proc(timeout_us: i64) -> i32 ---
 	spoti_mpris_take_command :: proc(command: ^i32, value: ^i64) -> i32 ---
-	spoti_mpris_set_track :: proc(title, artist: cstring, duration_us: i64) ---
+	spoti_mpris_set_track :: proc(title, artist, album, art_url: cstring, duration_us: i64) ---
 	spoti_mpris_set_status :: proc(playing, shuffle, repeat, can_seek, can_next, can_previous: i32, volume: f64) ---
 	spoti_mpris_set_position :: proc(position_us: i64) ---
 	spoti_mpris_seeked :: proc(position_us: i64) ---
@@ -52,28 +53,29 @@ poll :: proc() -> (command: Command, position_ms: int, ok: bool) {
 	return Command(numeric_command), int(numeric_value / 1000), true
 }
 
-last_title, last_artist: string
-last_duration_ms: int
+last_track: string // title, artist, album, art URL and length, joined
 last_status: Status
 have_last: bool
 
 update :: proc(now: Now_Playing) {
-	track_changed :=
-		!have_last ||
-		now.title != last_title ||
-		now.artist != last_artist ||
-		now.duration_ms != last_duration_ms
-	if track_changed {
+	track := fmt.tprintf(
+		"%s\x00%s\x00%s\x00%s\x00%d",
+		now.title,
+		now.artist,
+		now.album,
+		now.art_url,
+		now.duration_ms,
+	)
+	if !have_last || track != last_track {
 		spoti_mpris_set_track(
 			strings.clone_to_cstring(now.title, context.temp_allocator),
 			strings.clone_to_cstring(now.artist, context.temp_allocator),
+			strings.clone_to_cstring(now.album, context.temp_allocator),
+			strings.clone_to_cstring(now.art_url, context.temp_allocator),
 			i64(now.duration_ms) * 1000,
 		)
-		delete(last_title)
-		delete(last_artist)
-		last_title = strings.clone(now.title)
-		last_artist = strings.clone(now.artist)
-		last_duration_ms = now.duration_ms
+		delete(last_track)
+		last_track = strings.clone(track)
 	}
 	if !have_last || now.status != last_status {
 		spoti_mpris_set_status(
@@ -102,8 +104,7 @@ close :: proc() {
 		worker = nil
 	}
 	spoti_mpris_stop()
-	delete(last_title)
-	delete(last_artist)
-	last_title, last_artist = "", ""
+	delete(last_track)
+	last_track = ""
 	have_last = false
 }

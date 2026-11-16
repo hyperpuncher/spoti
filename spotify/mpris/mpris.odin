@@ -15,6 +15,8 @@ Status :: struct {
 Now_Playing :: struct {
 	title:        string,
 	artist:       string,
+	album:        string,
+	art_url:      string, // https cover image, or ""
 	duration_ms:  int,
 	position_ms:  int,
 	using status: Status,

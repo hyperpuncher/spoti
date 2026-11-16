@@ -404,6 +404,8 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			{
 				title = title,
 				artist = artist,
+				album = play_index >= 0 && play_index < len(play_queue) ? play_queue[play_index].album : "",
+				art_url = player_cover,
 				duration_ms = duration_ms,
 				position_ms = displayed_ms,
 				playing = stage == .Playing,
