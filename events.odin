@@ -98,6 +98,8 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	// These deadlines change what the frame shows, so reaching one redraws.
 	show_at := max(u64)
 	if fx_next_frame != 0 {show_at = fx_next_frame}
+	// A settling Connect state is sent from the frame loop.
+	if connect_settle_at != 0 {show_at = min(show_at, connect_settle_at)}
 	if search_pending {show_at = min(show_at, search_deadline)}
 	// Wall-clock deadlines count only while they are still ahead.
 	if library_client.detail_loading && time.since(library_client.detail_loading_at) < 0 {

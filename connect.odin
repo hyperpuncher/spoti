@@ -37,6 +37,27 @@ connect_state_equal :: proc(a, b: connect.Snapshot) -> bool {
 // position and a timestamp, so other devices advance their own progress bar.
 // A position that leaves that extrapolation (a seek) is a change too.
 CONNECT_POSITION_DRIFT_MS :: 1500
+// A track start passes buffering, metadata and playing within ~200 ms.
+// A change waits until the state holds still this long, then sends once.
+CONNECT_SETTLE_NS :: u64(250_000_000)
+
+// Identity of a candidate state, so a settle window restarts on any change.
+connect_state_key :: proc(s: connect.Snapshot) -> u64 {
+	key := hash.fnv64a(transmute([]u8)s.uri)
+	key = hash.fnv64a(transmute([]u8)s.context_uri, key)
+	flags := [?]bool {
+		s.active,
+		s.playing,
+		s.paused,
+		s.buffering,
+		s.shuffle,
+		s.repeat_context,
+		s.repeat_track,
+	}
+	key = hash.fnv64a(transmute([]u8)flags[:], key)
+	numbers := [?]u64{u64(s.index), s.queue_revision, u64(s.duration), u64(transmute(u32)s.volume)}
+	return hash.fnv64a(([^]u8)(&numbers)[:size_of(numbers)], key)
+}
 
 app_connect_publish :: proc(app: ^App) {
 	using app
@@ -76,7 +97,15 @@ app_connect_publish :: proc(app: ^App) {
 		expected += int((now - connect_published_at) / 1_000_000)
 	}
 	if connect_state_equal(connect_snapshot, snapshot) &&
-	   abs(displayed_ms - expected) <= CONNECT_POSITION_DRIFT_MS {return}
+	   abs(displayed_ms - expected) <= CONNECT_POSITION_DRIFT_MS {
+		connect_settle_at = 0
+		return
+	}
+	if key := connect_state_key(snapshot); key != connect_settle_key || connect_settle_at == 0 {
+		connect_settle_key = key
+		connect_settle_at = now + CONNECT_SETTLE_NS
+	}
+	if now < connect_settle_at {return}
 	snapshot.tracks = make([dynamic]string, len(queue_window), context.temp_allocator)
 	for item, index in queue_window {snapshot.tracks[index] = item.uri}
 	if !connect.publish(&connect_client, snapshot) {return}
@@ -86,4 +115,5 @@ app_connect_publish :: proc(app: ^App) {
 	connect_snapshot.context_uri = strings.clone(snapshot.context_uri)
 	connect_snapshot.tracks = nil
 	connect_published_at = now
+	connect_settle_at = 0
 }

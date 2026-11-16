@@ -571,6 +571,8 @@ App :: struct {
 	connect_client:         connect.Client,
 	connect_snapshot:       connect.Snapshot,
 	connect_published_at:   u64,
+	connect_settle_key:     u64, // candidate state waiting to settle
+	connect_settle_at:      u64, // tick to send it, or 0
 	connect_repeat_context: bool,
 	transfer_here:          bool,
 	app_state:              State,
