@@ -205,7 +205,11 @@ draw_rounded :: proc(state: ^State, rect: sdl.FRect, radius: [4]f32, color: sdl.
 fill :: proc(state: ^State, rect: sdl.FRect, color: sdl.Color) {
 	_ = sdl.SetRenderDrawColor(state.renderer, color.r, color.g, color.b, color.a)
 	area := rect
+	// Opaque fills skip blending; the software renderer otherwise blends
+	// every rectangle through a temporary surface.
+	if color.a == 255 {_ = sdl.SetRenderDrawBlendMode(state.renderer, sdl.BLENDMODE_NONE)}
 	_ = sdl.RenderFillRect(state.renderer, &area)
+	if color.a == 255 {_ = sdl.SetRenderDrawBlendMode(state.renderer, sdl.BLENDMODE_BLEND)}
 }
 
 // Apply a small antialiased rounded alpha edge once at the source image's
