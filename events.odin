@@ -123,6 +123,8 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 			#partial switch event.type {
 			case .QUIT, .WINDOW_CLOSE_REQUESTED:
 				running = false
+			case .WINDOW_EXPOSED, .WINDOW_SHOWN, .WINDOW_RESTORED:
+				first_frame = true
 			case .SYSTEM_THEME_CHANGED:
 				next_dark := system_dark()
 				if next_dark != theme_dark {

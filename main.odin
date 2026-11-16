@@ -828,8 +828,8 @@ main :: proc() {
 			replace_string(&toast, "")
 			redraw = true
 		}
-		// A hidden window still feeds audio but skips the progress redraw;
-		// SDL sends EXPOSED when it returns.
+		// A hidden window still feeds audio from the stages above, but its
+		// progress bar needs no frames. SDL sends EXPOSED when it returns.
 		if !redraw && (stage != .Playing || !window_visible(&state)) {continue}
 
 		visible := app_layout(&app, &frame)
@@ -1569,8 +1569,13 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		link_album,
 		foot_artists,
 	)
-	render(&commands, &state, &textures)
-	ui.frame_done(&state)
+	// A hidden window keeps layout, input and transport state current but
+	// draws nothing: present blocks for frame callbacks the compositor
+	// withholds. SDL sends EXPOSED when the window returns.
+	if window_visible(&state) {
+		render(&commands, &state, &textures)
+		ui.frame_done(&state)
+	}
 	trim_cover_textures(&textures, displayed_cover, player_cover)
 	t3 := sdl.GetTicksNS()
 	stage_sum[0] += f64(t1 - t0) / 1e6
