@@ -20,14 +20,19 @@ import "core:thread"
 FETCH_BYTES :: 16 * RANGE_SIZE
 
 Fetch :: struct {
-	url:     string, // owned; signed CDN URL, never logged
-	file_id: [20]u8,
-	total:   int, // encrypted file size
-	start:   int, // first block to fetch, aligned to RANGE_SIZE
-	cancel:  bool, // atomic
-	thread:  ^thread.Thread,
-	get:     type_of(http.get), // tests replace the network
-	cache:   string, // tests use a private cache directory
+	url:         string, // owned; signed CDN URL, never logged
+	file_id:     [20]u8,
+	total:       int, // encrypted file size
+	start:       int, // first block to fetch, aligned to RANGE_SIZE
+	cancel:      bool, // atomic
+	// The request in flight, as [first, last) block numbers. The decoder waits
+	// for these blocks instead of downloading them a second time.
+	flight:      [2]int, // atomic pair, guarded by flight_lock
+	flight_lock: sync.Mutex,
+	done:        sync.Cond,
+	thread:      ^thread.Thread,
+	get:         type_of(http.get), // tests replace the network
+	cache:       string, // tests use a private cache directory
 }
 
 // Fetch the file from start to the end, then from the beginning to start.
@@ -60,8 +65,30 @@ stop_fetch :: proc(fetch: ^Fetch, finish := false) {
 	if fetch.thread == nil {return}
 	if !finish {sync.atomic_store(&fetch.cancel, true)}
 	thread.destroy(fetch.thread)
+	set_flight(fetch, 0, 0)
 	delete(fetch.url)
 	fetch^ = {}
+}
+
+@(private = "file")
+set_flight :: proc(fetch: ^Fetch, first, last: int) {
+	sync.mutex_guard(&fetch.flight_lock)
+	fetch.flight = {first, last}
+	sync.cond_broadcast(&fetch.done)
+}
+
+// Block until the fetcher finishes a request that covers block, or return
+// at once if it is not downloading that block. Returns true if the caller
+// should look on disk again.
+fetch_wait :: proc(fetch: ^Fetch, block: int) -> bool {
+	if fetch == nil || fetch.thread == nil {return false}
+	sync.mutex_guard(&fetch.flight_lock)
+	waited := false
+	for block >= fetch.flight[0] && block < fetch.flight[1] {
+		sync.cond_wait(&fetch.done, &fetch.flight_lock)
+		waited = true
+	}
+	return waited
 }
 
 run_fetch :: proc(pointer: rawptr) {
@@ -85,6 +112,8 @@ run_fetch :: proc(pointer: rawptr) {
 		    step + count < blocks &&
 		    block + count < blocks &&
 		    !disk_has_block(&disk, block + count) {count += 1}
+		set_flight(fetch, block, block + count)
+		defer set_flight(fetch, 0, 0)
 		start := block * RANGE_SIZE
 		end := min(start + count * RANGE_SIZE, fetch.total) - 1
 		range := fmt.tprintf("%d-%d", start, end)

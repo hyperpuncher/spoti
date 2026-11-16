@@ -92,3 +92,71 @@ fetch_downloads_from_the_play_position_and_wraps :: proc(t: ^testing.T) {
 		testing.expect_value(t, bytes[0], u8(start % 251))
 	}
 }
+
+// A second fake CDN, so the parallel tests never share request logs.
+@(private = "file")
+wait_cdn: struct {
+	mutex:    sync.Mutex,
+	total:    int,
+	requests: [dynamic]string,
+}
+
+@(private = "file")
+wait_get :: proc(
+	_: string,
+	options: http.Options = {},
+	_: rawptr = nil,
+) -> (
+	body: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	sync.mutex_guard(&wait_cdn.mutex)
+	append(&wait_cdn.requests, strings.clone(options.range))
+	first, _, last := strings.partition(options.range, "-")
+	start, _ := strconv.parse_int(first)
+	end, _ := strconv.parse_int(last)
+	body = make([dynamic]u8, end - start + 1)
+	for &byte, index in body {byte = u8((start + index) % 251)}
+	options.range_info^ = {start, end, wait_cdn.total, true}
+	return body, 206, true
+}
+
+// A decoder that needs a block the fetcher is downloading waits for it and
+// reads it from disk instead of requesting it again.
+@(test)
+decoder_waits_for_a_block_in_flight :: proc(t: ^testing.T) {
+	dir, err := os.make_directory_temp("", "spoti-fetch-wait-*", context.allocator)
+	if !testing.expect(t, err == nil) {return}
+	defer {_ = os.remove_all(dir); delete(dir)}
+	defer {
+		for request in wait_cdn.requests {delete(request)}
+		delete(wait_cdn.requests)
+		wait_cdn = {}
+	}
+	wait_cdn.total = 4 * RANGE_SIZE
+	id: [20]u8
+	id[0] = 5
+	fetch: Fetch
+	// The fetcher announces blocks 0..4 and then pauses before storing them.
+	sync.mutex_lock(&wait_cdn.mutex)
+	if !testing.expect(
+		t,
+		start_fetch(&fetch, "https://cdn.test/a", id, wait_cdn.total, 0, wait_get, dir),
+	) {sync.mutex_unlock(&wait_cdn.mutex); return}
+	for {
+		sync.mutex_guard(&fetch.flight_lock)
+		if fetch.flight[1] > 0 {break}
+	}
+	stream := Seek_Stream {
+		url   = "https://cdn.test/a",
+		size  = wait_cdn.total,
+		disk  = open_disk_cache(id, dir),
+		fetch = &fetch,
+	}
+	defer close_seek_stream(&stream)
+	sync.mutex_unlock(&wait_cdn.mutex)
+	testing.expect(t, load_seek_range(&stream, RANGE_SIZE))
+	stop_fetch(&fetch, finish = true)
+	testing.expect_value(t, len(wait_cdn.requests), 1)
+}

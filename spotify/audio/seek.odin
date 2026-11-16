@@ -34,6 +34,7 @@ Seek_Stream :: struct {
 	failed, sync_needed:                   bool,
 	file_id:                               [20]u8,
 	disk:                                  Disk_Cache,
+	fetch:                                 ^Fetch, // optional; blocks it is downloading are awaited
 }
 
 load_seek_range :: proc(s: ^Seek_Stream, start: int) -> bool {
@@ -49,6 +50,20 @@ load_seek_range :: proc(s: ^Seek_Stream, start: int) -> bool {
 			valid = true,
 		}
 		return cache_seek_range(s, start, end, info, &bytes)
+	}
+	// The fetcher may already be downloading this block; wait instead of
+	// downloading it a second time.
+	if fetch_wait(s.fetch, start / RANGE_SIZE) {
+		if bytes, found := read_disk_range(&s.disk, start); found {
+			defer delete(bytes)
+			info := http.Range_Info {
+				start = start,
+				end   = start + len(bytes) - 1,
+				total = s.disk.total,
+				valid = true,
+			}
+			return cache_seek_range(s, start, end, info, &bytes)
+		}
 	}
 	range := fmt.aprintf("%d-%d", start, end)
 	defer delete(range)

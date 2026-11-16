@@ -623,7 +623,9 @@ decode_track :: proc(work: ^Login_Work, start_ms: int) -> bool {
 start_track_fetch :: proc(media: ^audio.Seek_Stream, user: rawptr) {
 	fetch := (^audio.Fetch)(user)
 	if fetch.thread != nil {return}
-	_ = audio.start_fetch(fetch, media.url, media.file_id, media.size, media.cache_offset)
+	if audio.start_fetch(fetch, media.url, media.file_id, media.size, media.cache_offset) {
+		media.fetch = fetch
+	}
 }
 
 cancel_worker :: proc(queue: chan.Chan(player.Packet), cancel: ^bool) {
