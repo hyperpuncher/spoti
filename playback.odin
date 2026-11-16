@@ -385,6 +385,11 @@ app_offer_next_track :: proc(app: ^App) {
 	offer_next_track(&app.next_track, uri, app.tracks_started, preloaded)
 }
 
+// The slider position is what the user, Connect and MPRIS see; loudness is
+// perceived logarithmically, so the stream gain follows a cubic curve.
+// Halfway sounds about half as loud instead of nearly full.
+volume_gain :: proc(volume: f32) -> f32 {return volume * volume * volume}
+
 clear_upcoming :: proc(app: ^App) {
 	delete(app.upcoming.name)
 	delete(app.upcoming.uri)

@@ -1060,7 +1060,7 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 						nil,
 					)
 					if stream != nil {
-						_ = sdl.SetAudioStreamGain(stream, volume)
+						_ = sdl.SetAudioStreamGain(stream, volume_gain(volume))
 						if !start_paused {_ = sdl.ResumeAudioStreamDevice(stream)}
 					}
 					sent_frames = packet.position_frames

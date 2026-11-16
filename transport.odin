@@ -77,7 +77,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		if box.width > 0 {
 			volume = clamp((mouse.x - box.x) / box.width, 0, 1)
 			app_state.volume = volume
-			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
+			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume_gain(volume))}
 			if remote_control {
 				_ = library.send_player_command(&library_client, .Volume, int(volume * 100))
 			}
@@ -208,7 +208,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			volume = event.volume
 			app_state.volume = volume
 			state_dirty = true
-			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume)}
+			if stream != nil {_ = sdl.SetAudioStreamGain(stream, volume_gain(volume))}
 		case .Options:
 			if event.set_shuffle {
 				shuffle = event.shuffle
