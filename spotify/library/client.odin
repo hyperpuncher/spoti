@@ -210,22 +210,38 @@ queue_request :: proc(client: ^Client, request: ^Request) -> bool {
 
 // The access token lives about an hour. Search and pagination fire long
 // after startup, so they renew it on demand instead of failing with 401.
-// A failed renewal fails the request; the UI keeps its old state.
-ensure_tokens :: proc(client: ^Client, tokens: ^oauth.Tokens) -> bool {
-	if !oauth.expired(tokens^) {return true}
-	if sync.atomic_load(&client.cancel) {return false}
+// A failed renewal fails the request with status -1, which callers retry.
+// A rejected grant fails with 401 and is dropped, so retries cannot hammer
+// the token endpoint; signing in again needs a new approval.
+ensure_tokens :: proc(
+	client: ^Client,
+	tokens: ^oauth.Tokens,
+	refresh: type_of(oauth.refresh) = oauth.refresh,
+) -> (
+	status: int,
+) {
+	if !oauth.expired(tokens^) {return 200}
+	if sync.atomic_load(&client.cancel) {return -1}
+	if tokens.refresh == "" {return 401}
 	client_id, found := resolve_client_id()
 	defer delete(client_id)
-	found or_return
+	if !found {return 401}
 	grant := oauth.web_grant(client_id)
-	fresh, status := oauth.refresh(tokens.refresh, grant)
-	if status != .Authorized {return false}
+	fresh, result := refresh(tokens.refresh, grant)
+	if result == .Rejected {
+		diagnostic.write("library refresh rejected; sign-in required")
+		credential.clear(.Library)
+		oauth.wipe_tokens(tokens)
+		tokens.expires_at = time.time_add(time.now(), -time.Second)
+		return 401
+	}
+	if result != .Authorized {return -1}
 	oauth.wipe_tokens(tokens)
 	tokens^ = fresh
 	if len(fresh.refresh) > 0 {
 		_ = credential.save(fresh.refresh, .Library)
 	}
-	return true
+	return 200
 }
 
 // Consumes the request. Success and failure return the same owned input fields.
@@ -250,7 +266,9 @@ handle :: proc(
 		request.source == .Playlist &&
 		(request.kind == .Detail || request.kind == .More) &&
 		authorize_session(client, streaming, interactive = false)
-	if !native_playlist && !ensure_tokens(client, tokens) {result.status = -1; return}
+	if !native_playlist {
+		if status := ensure_tokens(client, tokens); status != 200 {result.status = status; return}
+	}
 	#partial switch request.kind {
 	case .Index:
 		if request.list == .Playlists && (request.offset == 0 || request.account != "") {
@@ -323,7 +341,7 @@ handle :: proc(
 			detail.liked = request.saved
 			if !request.saved && time.since(client.saved_at) >= 0 {
 				liked, known := false, false
-				if ensure_tokens(client, tokens) {
+				if ensure_tokens(client, tokens) == 200 {
 					liked, known = fetch_saved(tokens.access, request.source, request.id, reuse)
 				}
 				if known {
@@ -1306,7 +1324,8 @@ apply :: proc(client: ^Client, result: Result) {
 						time.now(),
 						rate_limit_delay(client, local.retry_after),
 					)
-				} else if local.status >= 500 || local.status <= 0 {
+				} else if local.status >= 500 ||
+				   local.status <= 0 && local.status != PLAYLIST_AUTH_REQUIRED {
 					client.page_at = time.time_add(time.now(), PAGE_RETRY_BACKOFF)
 				} else {
 					// Transient failures wait out the backoff instead of spending

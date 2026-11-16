@@ -47,8 +47,11 @@ authorize_session :: proc(
 		force,
 		interactive = interactive,
 	)
-	if !ok {return false}
+	// Drop the worker copy on failure. The shared grant and the keyring keep
+	// any refresh token that is still valid, and a rejected one must not be
+	// replayed on every request.
 	oauth.wipe_tokens(tokens)
+	if !ok {return false}
 	tokens^ = fresh
 	return !sync.atomic_load(&client.cancel)
 }
