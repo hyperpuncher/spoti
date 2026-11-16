@@ -39,6 +39,7 @@ prompt_arrived :: proc(kind: oauth.Prompt, url: string) {
 	sync.mutex_guard(&prompt_mutex)
 	delete(prompt_urls[kind])
 	prompt_urls[kind] = len(url) > 0 ? strings.clone(url) : ""
+	if WAKE_EVENT != 0 {wake_app(nil)}
 }
 
 prompt_pending :: proc(kind: oauth.Prompt) -> bool {
@@ -95,7 +96,6 @@ header_can_drag :: proc(point: sdl.FPoint, d: f32, controls: sdl.FRect) -> bool 
 	return true
 }
 
-@(private = "file")
 wake_app :: proc "c" (_: rawptr) {
 	event := sdl.Event {
 		type = sdl.EventType(WAKE_EVENT),
@@ -832,6 +832,7 @@ main :: proc() {
 	load_fades(&state, &textures)
 	WAKE_EVENT = sdl.RegisterEvents(1)
 	mpris_active = mpris.start(WAKE_EVENT != 0 ? wake_app : nil)
+	if WAKE_EVENT != 0 {library_client.wake = wake_app}
 	oauth.set_prompt_handler(prompt_arrived)
 	app_state = load_state()
 	http.web_api_defer_until(time.from_nanoseconds(app_state.web_api_resume_ns))
@@ -914,7 +915,7 @@ main :: proc() {
 		app_library(&app, &frame)
 		if remote_control {
 			now := sdl.GetTicksNS()
-			if now - remote_polled_at >= 5_000_000_000 {
+			if now - remote_polled_at >= REMOTE_POLL_NS {
 				remote_polled_at = now
 				_ = library.refresh_player_state(&library_client)
 			}
@@ -957,6 +958,39 @@ main :: proc() {
 }
 
 PLAYBACK_FRAME_NS :: u64(1_000_000_000 / 30)
+REMOTE_POLL_NS :: u64(5_000_000_000)
+
+// Lower an SDL wait (-1 waits forever) so it ends at a tick deadline.
+wait_until :: proc(wait_ms: ^i32, now, deadline: u64) {
+	remaining :=
+		deadline > now ? i32(min((deadline - now + 999_999) / 1_000_000, u64(max(i32)))) : 0
+	wait_ms^ = wait_ms^ < 0 ? remaining : min(wait_ms^, remaining)
+}
+
+// SDL ticks for a wall-clock deadline; past deadlines return now.
+ticks_at :: proc(at: time.Time, now: u64) -> u64 {
+	delay := -time.since(at)
+	return delay > 0 ? now + u64(delay) : now
+}
+
+// Work whose result only a worker can deliver. With a wake event these
+// results push SDL events; without one the loop polls.
+app_waiting_on_workers :: proc(app: ^App) -> bool {
+	client := &app.library_client
+	for pending in client.pending {if pending {return true}}
+	return(
+		client.state == .Authorizing ||
+		client.state == .Loading ||
+		client.detail_loading ||
+		client.search_loading ||
+		client.covers_pending > 0 ||
+		client.devices_pending ||
+		client.transfer_pending ||
+		client.release_feed.pending ||
+		app.connect_client.worker != nil ||
+		app.preload_worker != nil \
+	)
+}
 
 // Event wait plus the drain switch. Fills the frame flags the later stages
 // read and reports whether anything arrived plus whether fades animate.
@@ -988,65 +1022,43 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	   fx_animating ||
 	   fades_animating ||
 	   first_frame ||
-	   pending_redraw {
+	   pending_redraw ||
+	   len(library_client.cover_queue) > 0 {
+		// Cover uploads are spread over frames; keep draining the backlog.
 		wait_ms = 0
-	} else {
-		// Idle work still polls for results so they appear promptly.
-		if stage == .Signing_In ||
-		   stage == .Buffering ||
-		   stage == .Stopping ||
-		   (stage == .Ended && replay_pending) ||
-		   (stage == .Failed && worker != nil) {wait_ms = 40}
-		if library_client.state == .Authorizing ||
-		   library_client.state == .Loading ||
-		   library_client.detail_loading ||
-		   library_client.search_loading ||
-		   library_client.covers_pending > 0 ||
-		   (library_client.release_feed.open &&
-				   !library_client.release_feed.done &&
-				   library.release_worker_ready(&library_client)) {wait_ms = 40}
-		for pending in library_client.pending {
-			if pending {wait_ms = 40; break}
-		}
-		if preload_worker != nil && stage != .Playing {wait_ms = 40}
+	} else if WAKE_EVENT == 0 && app_waiting_on_workers(app) {
+		// Without a wake event, worker results need a short poll.
+		wait_ms = 40
 	}
+	now := sdl.GetTicksNS()
 	// Only steady playback uses 30 fps. Count from the last layout start,
 	// so rendering and presentation time are part of the frame budget.
-	if stage == .Playing && wait_ms != 0 {
-		elapsed := sdl.GetTicksNS() - last
-		remaining_ms := i32(0)
-		if elapsed < PLAYBACK_FRAME_NS {
-			remaining_ms = i32((PLAYBACK_FRAME_NS - elapsed + 999_999) / 1_000_000)
-		}
-		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
+	if stage == .Playing {wait_until(&wait_ms, now, last + PLAYBACK_FRAME_NS)}
+	// Playback state changes arrive through the decoder queue, not events.
+	if worker != nil &&
+	   stage != .Playing &&
+	   stage != .Paused {wait_until(&wait_ms, now, now + 40_000_000)}
+	if remote_control {wait_until(&wait_ms, now, remote_polled_at + REMOTE_POLL_NS)}
+	if len(toast) > 0 {wait_until(&wait_ms, now, toast_until)}
+	// These deadlines change what the frame shows, so reaching one redraws.
+	show_at := max(u64)
+	if search_pending {show_at = min(show_at, search_deadline)}
+	if library_client.detail_loading {
+		show_at = min(show_at, ticks_at(library_client.detail_loading_at, now))
 	}
-	if (connect_client.worker != nil && WAKE_EVENT == 0) ||
-	   library_client.devices_pending ||
-	   library_client.transfer_pending ||
-	   remote_control {
-		wait_ms = wait_ms < 0 ? 40 : min(wait_ms, 40)
+	if library_client.state == .Ready {
+		show_at = min(show_at, ticks_at(library_client.page_at, now))
+	}
+	if show_at > now && show_at != max(u64) {wait_until(&wait_ms, now, show_at)}
+	if library_client.release_feed.open &&
+	   !library_client.release_feed.done &&
+	   time.since(library_client.release_feed.wait_until) < 0 {
+		wait_until(&wait_ms, now, ticks_at(library_client.release_feed.wait_until, now))
 	}
 	// If the wake event could not be registered, poll the bus instead.
-	if mpris_active && WAKE_EVENT == 0 && wait_ms < 0 {wait_ms = 100}
-	if search_pending {
-		tick := sdl.GetTicksNS()
-		remaining_ms := i32(0)
-		if search_deadline > tick {
-			remaining_ms = i32((search_deadline - tick) / 1_000_000)
-		}
-		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
-	}
-	page_wait :=
-		wait_ms != 0 && library_client.state == .Ready && time.since(library_client.page_at) < 0
-	if page_wait {
-		delay := -time.since(library_client.page_at)
-		remaining_ms := i32(
-			clamp(int((delay + time.Millisecond - 1) / time.Millisecond), 1, int(max(i32))),
-		)
-		wait_ms = wait_ms < 0 ? remaining_ms : min(wait_ms, remaining_ms)
-	}
+	if mpris_active && WAKE_EVENT == 0 {wait_until(&wait_ms, now, now + 100_000_000)}
 	if blink_wait := ui.editor_blink_delay(&editor, sdl.GetTicks()); blink_wait >= 0 {
-		wait_ms = wait_ms < 0 ? blink_wait : min(wait_ms, blink_wait)
+		wait_until(&wait_ms, now, now + u64(blink_wait) * 1_000_000)
 	}
 	has_event := sdl.WaitEventTimeout(&event, wait_ms)
 	if has_event {
@@ -1251,10 +1263,9 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 			if !sdl.PollEvent(&event) {break}
 		}
 	}
-	// A page backoff must expire without requiring mouse movement to wake it.
-	return has_event ||
-		page_wait && time.since(library_client.page_at) >= 0 ||
-		ui.editor_blink_delay(&editor, sdl.GetTicks()) == 0,
+	// A timed wake redraws: deadlines above change what the frame shows.
+	show_due := show_at != max(u64) && show_at > now && sdl.GetTicksNS() >= show_at
+	return has_event || show_due || ui.editor_blink_delay(&editor, sdl.GetTicks()) == 0,
 		fades_animating
 }
 

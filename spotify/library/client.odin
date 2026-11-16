@@ -156,6 +156,8 @@ Client :: struct {
 	write_removed:         bool, // last write removed an item rather than added one
 	stale_playlist:        string, // owned; a playlist changed by a write, re-fetched on open
 	release_feed:          Release_Feed,
+	// Optional; workers call it after each send so an idle UI wakes at once.
+	wake:                  proc "c" (_: rawptr),
 }
 
 run :: proc(pointer: rawptr) {
@@ -171,7 +173,7 @@ run :: proc(pointer: rawptr) {
 	diagnostic.writef("library auth=%v", auth)
 	if auth != .Ready {
 		if auth != .Cancelled {
-			_ = chan.send(client.results, Result{kind = .Auth, auth = auth})
+			_ = send(client, Result{kind = .Auth, auth = auth})
 		}
 		return
 	}
@@ -486,12 +488,16 @@ run_covers :: proc(pointer: rawptr) {
 			key   = request.key,
 			image = image,
 		}
-		if !chan.send(client.cover_results, result) {artwork.free_image(&result.image)}
+		if !chan.send(client.cover_results, result) {artwork.free_image(&result.image); continue}
+		if client.wake != nil {client.wake(nil)}
 	}
 }
 
 send :: proc(client: ^Client, result: Result) -> bool {
-	if chan.send(client.results, result) {return true}
+	if chan.send(client.results, result) {
+		if client.wake != nil {client.wake(nil)}
+		return true
+	}
 	free_result(result)
 	return false
 }
@@ -1507,5 +1513,7 @@ stop :: proc(client: ^Client) {
 	delete(client.likes_pending)
 	for i in 0 ..< len(client.cover_queue) {artwork.free_image(&client.cover_queue[i].image)}
 	delete(client.cover_queue)
-	client^ = {}
+	client^ = {
+		wake = client.wake,
+	}
 }
