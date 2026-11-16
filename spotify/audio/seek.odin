@@ -12,6 +12,7 @@ import stb "vendor:stb/vorbis"
 SPOTIFY_OGG_OFFSET :: 0xa7
 RANGE_SIZE :: 64 * 1024
 MAX_OGG_PAGE_BYTES :: 65307
+OGG_PAGE_HEADER_BYTES :: 27
 SEEK_PREROLL_SECONDS :: 4
 
 // Keep one decrypted range and one bounded decoder input buffer.
@@ -243,7 +244,10 @@ open_seek_stream :: proc(s: ^Seek_Stream) -> bool {
 	}
 	end := s.size - SPOTIFY_OGG_OFFSET
 	if s.failed {return false}
-	if s.total_frames < 0 || last_end != end {
+	// stb can report the final granule before consuming the last few bytes of
+	// its page. A remainder shorter than an Ogg page header (27 bytes) cannot
+	// hold another page, so the scanned granule is still exact.
+	if s.total_frames < 0 || end - last_end >= OGG_PAGE_HEADER_BYTES {
 		if s.duration_ms <= 0 || s.sample_rate <= 0 {return false}
 		expected := s.duration_ms * s.sample_rate / 1000
 		if s.total_frames < 0 {
