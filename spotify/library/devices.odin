@@ -191,7 +191,7 @@ transfer_playback :: proc(
 	ok: bool,
 ) {
 	if !valid_device_id(device_id) {return 0, false}
-	body := fmt.aprintf(`{"device_ids":["%s"],"play":%v}`, device_id, play, context.temp_allocator)
+	body := fmt.tprintf(`{"device_ids":["%s"],"play":%v}`, device_id, play)
 	response, code, sent := http.json_request(
 		"PUT",
 		TRANSFER_ADDRESS,

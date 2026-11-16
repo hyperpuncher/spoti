@@ -256,7 +256,7 @@ app_queue_detail :: proc(app: ^App, index: int) -> bool {
 stamp_queue_album :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
 	if detail.source != .Album || len(detail.id) == 0 {return}
 	// Temp-scoped: only read while stamping, the queue keeps heap clones.
-	uri := fmt.aprintf("spotify:album:%s", detail.id, allocator = context.temp_allocator)
+	uri := fmt.tprintf("spotify:album:%s", detail.id)
 	for &item in items {
 		if item.queued || len(item.album_uri) > 0 {continue}
 		item.album_uri = strings.clone(uri)

@@ -69,8 +69,7 @@ parse_artist_overview :: proc(body: []u8, detail: ^Detail) -> bool {
 	if json.unmarshal(body, &response, allocator = context.temp_allocator) != nil ||
 	   len(response.errors) > 0 {return false}
 	artist := response.data.artist
-	if artist.uri !=
-		   fmt.aprintf("spotify:artist:%s", detail.id, allocator = context.temp_allocator) ||
+	if artist.uri != fmt.tprintf("spotify:artist:%s", detail.id) ||
 	   artist.profile.name == "" ||
 	   len(artist.discography.top.items) > TOP_TRACKS_MAX {return false}
 	allocator := virtual.arena_allocator(&detail.arena)
@@ -114,13 +113,7 @@ fetch_artist_overview :: proc(
 	cancel: ^bool,
 	cache_only: bool = false,
 ) -> bool {
-	key := fmt.aprintf(
-		"artist-overview:%s:%s:%s",
-		ARTIST_OVERVIEW_HASH,
-		detail.id,
-		country,
-		allocator = context.temp_allocator,
-	)
+	key := fmt.tprintf("artist-overview:%s:%s:%s", ARTIST_OVERVIEW_HASH, detail.id, country)
 	if cached, hit := cache_read("api", key, cache_only ? API_STALE : PAGE_TTL); hit {
 		defer delete(cached)
 		if parse_artist_overview(cached[:], detail) {return true}
@@ -130,7 +123,7 @@ fetch_artist_overview :: proc(
 		uri, locale: string,
 		prerelease:  bool `json:"includePrerelease"`,
 	}
-	variables.uri = fmt.aprintf("spotify:artist:%s", detail.id, allocator = context.temp_allocator)
+	variables.uri = fmt.tprintf("spotify:artist:%s", detail.id)
 	encoded, encoded_ok := persisted_query_request(
 		"queryArtistOverview",
 		ARTIST_OVERVIEW_HASH,

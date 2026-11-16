@@ -92,7 +92,7 @@ read_release_feed :: proc(client: ^Client, tokens: ^oauth.Tokens, result: ^Resul
 
 release_day :: proc(at: time.Time) -> string {
 	year, month, day := time.date(at)
-	return fmt.aprintf("%04d-%02d-%02d", year, int(month), day, allocator = context.temp_allocator)
+	return fmt.tprintf("%04d-%02d-%02d", year, int(month), day)
 }
 
 parse_new_releases :: proc(
@@ -220,13 +220,7 @@ fetch_release_feed :: proc(
 ) {
 	if !safe_id(account, account = true) || offset < 0 || offset > 1_000_000 {return}
 	allocator := virtual.arena_allocator(&result.rows_arena)
-	key := fmt.aprintf(
-		"native-release-feed:%s:%s:%d",
-		account,
-		RELEASE_FEED_HASH,
-		offset,
-		allocator = context.temp_allocator,
-	)
+	key := fmt.tprintf("native-release-feed:%s:%s:%d", account, RELEASE_FEED_HASH, offset)
 	if cached, found := cache_read("api", key, PAGE_TTL); found {
 		defer delete(cached)
 		result.new_releases, result.next_offset, result.has_more, result.ok = parse_new_releases(

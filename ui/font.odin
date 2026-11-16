@@ -21,27 +21,21 @@ asset_path :: proc(relative: string) -> (path: string, ok: bool) {
 	if exe, err := os.get_executable_path(context.temp_allocator); err == nil {
 		dir := filepath.dir(string(exe))
 		for root in ([]string{"../Resources", "../share/spoti", ".", "assets", "../assets"}) {
-			candidate := fmt.aprintf(
-				"%s/%s/%s",
-				dir,
-				root,
-				relative,
-				allocator = context.temp_allocator,
-			)
+			candidate := fmt.tprintf("%s/%s/%s", dir, root, relative)
 			if os.exists(candidate) {return strings.clone(candidate), true}
 		}
 	}
-	candidate := fmt.aprintf("assets/%s", relative, allocator = context.temp_allocator)
+	candidate := fmt.tprintf("assets/%s", relative)
 	if os.exists(candidate) {return strings.clone(candidate), true}
 	return "", false
 }
 
 resolve_bundled :: proc(file: string) -> (path: string, ok: bool) {
 	if override, found := os.lookup_env("SPOTI_FONTS", context.temp_allocator); found {
-		candidate := fmt.aprintf("%s/%s", override, file, allocator = context.temp_allocator)
+		candidate := fmt.tprintf("%s/%s", override, file)
 		if os.exists(candidate) {return strings.clone(candidate), true}
 	}
-	return asset_path(fmt.aprintf("fonts/%s", file, allocator = context.temp_allocator))
+	return asset_path(fmt.tprintf("fonts/%s", file))
 }
 
 // Valid for headless font tests too. No SDL video, window, or worker is needed.

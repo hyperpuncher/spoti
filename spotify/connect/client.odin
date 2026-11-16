@@ -162,10 +162,9 @@ put_state :: proc(
 ) -> bool {
 	body := encode_state(client.device_id, session_id, snapshot, reason, sender, message)
 	defer delete(body)
-	address := fmt.aprintf(
+	address := fmt.tprintf(
 		"https://spclient.wg.spotify.com/connect-state/v1/devices/%s",
 		client.device_id,
-		allocator = context.temp_allocator,
 	)
 	response, code, ok := http.protobuf_request(
 		"PUT",
@@ -233,12 +232,7 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 	defer delete(host)
 	if host == "" {return}
 	encoded := net.percent_encode(access, context.temp_allocator)
-	address := fmt.aprintf(
-		"wss://%s/?access_token=%s",
-		host,
-		encoded,
-		allocator = context.temp_allocator,
-	)
+	address := fmt.tprintf("wss://%s/?access_token=%s", host, encoded)
 	socket, connected := http.ws_open(address, &client.cancel)
 	if !connected {diagnostic.write("connect Dealer connection failed"); return}
 	defer http.ws_close(&socket)
@@ -246,10 +240,9 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 	connection_id := ""
 	defer delete(connection_id)
 	defer if connection_id != "" && sync.atomic_load(&client.cancel) {
-		cleanup_address := fmt.aprintf(
+		cleanup_address := fmt.tprintf(
 			"https://spclient.wg.spotify.com/connect-state/v1/devices/%s",
 			client.device_id,
-			allocator = context.temp_allocator,
 		)
 		_, _ = http.write("DELETE", cleanup_address, {bearer = access}, reuse)
 	}

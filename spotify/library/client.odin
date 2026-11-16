@@ -1157,7 +1157,7 @@ apply :: proc(client: ^Client, result: Result) {
 			client.pending[local.list] = false
 			client.last_http_status = local.status
 			diagnostic.result(
-				fmt.aprintf("index-%v", local.list, allocator = context.temp_allocator),
+				fmt.tprintf("index-%v", local.list),
 				false,
 				local.status,
 				0,
@@ -1225,7 +1225,7 @@ apply :: proc(client: ^Client, result: Result) {
 			destination.total = local.page.total
 		}
 		diagnostic.result(
-			fmt.aprintf("index-%v", local.list, allocator = context.temp_allocator),
+			fmt.tprintf("index-%v", local.list),
 			local.ok,
 			local.status,
 			len(destination.items),

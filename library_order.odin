@@ -74,11 +74,11 @@ detail_matches_uri :: proc(detail: library.Detail, uri: string) -> bool {
 detail_card_uri :: proc(detail: library.Detail) -> string {
 	switch detail.source {
 	case .Playlist:
-		return fmt.aprintf("spotify:playlist:%s", detail.id, allocator = context.temp_allocator)
+		return fmt.tprintf("spotify:playlist:%s", detail.id)
 	case .Album:
-		return fmt.aprintf("spotify:album:%s", detail.id, allocator = context.temp_allocator)
+		return fmt.tprintf("spotify:album:%s", detail.id)
 	case .Artist:
-		return fmt.aprintf("spotify:artist:%s", detail.id, allocator = context.temp_allocator)
+		return fmt.tprintf("spotify:artist:%s", detail.id)
 	case .Liked:
 	}
 	return ""

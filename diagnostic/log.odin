@@ -75,9 +75,8 @@ http :: proc(address: string, status, bytes: int, ms: f64, retry_after: int = 0)
 	failed := status < 200 || status >= 300
 	if !failed && !sync.atomic_load(&verbose) {return}
 	endpoint, paging := sanitize_endpoint(address, context.temp_allocator)
-	retry :=
-		retry_after > 0 ? fmt.aprintf(" retry-after=%ds", retry_after, allocator = context.temp_allocator) : ""
-	line := fmt.aprintf(
+	retry := retry_after > 0 ? fmt.tprintf(" retry-after=%ds", retry_after) : ""
+	line := fmt.tprintf(
 		"http %s%s status=%d bytes=%d ms=%.0f%s",
 		endpoint,
 		paging,
@@ -85,19 +84,18 @@ http :: proc(address: string, status, bytes: int, ms: f64, retry_after: int = 0)
 		bytes,
 		ms,
 		retry,
-		allocator = context.temp_allocator,
 	)
 	write(line)
 }
 
 // Formatted dev line without a scoping block per call site.
 writef :: proc(format: string, args: ..any) {
-	write(fmt.aprintf(format, ..args, allocator = context.temp_allocator))
+	write(fmt.tprintf(format, ..args))
 }
 
 result :: proc(kind: string, ok: bool, status, rows, total: int, more: bool) {
 	if !sync.atomic_load(&verbose) {return}
-	line := fmt.aprintf(
+	line := fmt.tprintf(
 		"library result=%s ok=%v status=%d rows=%d total=%d more=%v",
 		kind,
 		ok,
@@ -105,14 +103,13 @@ result :: proc(kind: string, ok: bool, status, rows, total: int, more: bool) {
 		rows,
 		total,
 		more,
-		allocator = context.temp_allocator,
 	)
 	write(line)
 }
 
 // Frame-stage averages and maxima over the last window, for scroll hitches.
 frame :: proc(events, layout, render: f64, max_events, max_layout, max_render: f64) {
-	line := fmt.aprintf(
+	line := fmt.tprintf(
 		"frame ms avg/max events+poll=%.1f/%.1f layout=%.1f/%.1f render+present=%.1f/%.1f",
 		events,
 		max_events,
@@ -120,7 +117,6 @@ frame :: proc(events, layout, render: f64, max_events, max_layout, max_render: f
 		max_layout,
 		render,
 		max_render,
-		allocator = context.temp_allocator,
 	)
 	write(line)
 }
@@ -170,7 +166,7 @@ keep_segment :: proc(segment: string) -> bool {
 
 paging_offset :: proc(query: string, allocator := context.allocator) -> string {
 	for key in ([]string{"offset", "from"}) {
-		prefix := fmt.aprintf("%s=", key, allocator = context.temp_allocator)
+		prefix := fmt.tprintf("%s=", key)
 		start := strings.index(query, prefix)
 		if start < 0 {continue}
 		digits := query[start + len(prefix):]

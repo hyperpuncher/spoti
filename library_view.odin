@@ -130,7 +130,7 @@ track_skeleton :: proc(index: int, d: f32) {
 		},
 		) {
 			clay.Text(
-				fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
+				fmt.tprintf("%d", index + 1),
 				{fontId = 1, fontSize = 15, textColor = theme.muted},
 			)
 		}
@@ -517,10 +517,9 @@ sidebar :: proc(
 				status = "Searching..."
 			} else if client.search_error != 0 {
 				if client.search_error > 0 {
-					status = fmt.aprintf(
+					status = fmt.tprintf(
 						"Search failed (HTTP %d). Press Enter to retry.",
 						client.search_error,
-						allocator = context.temp_allocator,
 					)
 				} else {
 					status = "Search failed. Press Enter to retry."
@@ -729,7 +728,7 @@ track_list_row :: proc(
 				icon_element(textures, "play-filled", .White, 12 * d)
 			} else {
 				clay.Text(
-					fmt.aprintf("%d", index + 1, allocator = context.temp_allocator),
+					fmt.tprintf("%d", index + 1),
 					{fontId = 1, fontSize = 15, textColor = theme.muted},
 				)
 			}
@@ -852,7 +851,7 @@ added_at_text :: proc(milliseconds: i64) -> string {
 	at := time.unix(milliseconds / 1000, milliseconds % 1000 * 1_000_000)
 	year, month, day := time.date(at)
 	name, _ := fmt.enum_value_to_string(month)
-	return fmt.aprintf("%s %d, %d", name[:3], day, year, allocator = context.temp_allocator)
+	return fmt.tprintf("%s %d, %d", name[:3], day, year)
 }
 
 // Track-row text budgets for one container width: the flowing title cap,
@@ -1447,20 +1446,11 @@ hero_metadata_uncached :: proc(detail: ^library.Detail) -> (metadata, summary: s
 	count_label := detail.source == .Artist ? "releases" : "songs"
 	if detail.total == 1 {count_label = detail.source == .Artist ? "release" : "song"}
 	if detail.source == .Artist && detail.monthly_listeners > 0 {
-		summary = fmt.aprintf(
-			"%s monthly listeners",
-			count_text(detail.monthly_listeners),
-			allocator = context.temp_allocator,
-		)
+		summary = fmt.tprintf("%s monthly listeners", count_text(detail.monthly_listeners))
 	} else if detail.source == .Playlist && detail.rows_error != 0 {
 		summary = "tracks unavailable"
 	} else {
-		summary = fmt.aprintf(
-			"%s %s",
-			count_text(i64(detail.total)),
-			count_label,
-			allocator = context.temp_allocator,
-		)
+		summary = fmt.tprintf("%s %s", count_text(i64(detail.total)), count_label)
 	}
 	// Linked album artists render separately. At most three parts share this line.
 	parts := [3]string {
@@ -1487,29 +1477,12 @@ hero_metadata_uncached :: proc(detail: ^library.Detail) -> (metadata, summary: s
 	seconds := duration_ms / 1000
 	minutes := seconds / 60
 	if minutes >= 60 {
-		return metadata, fmt.aprintf(
-			"%s, %d hr %d min",
-			summary,
-			minutes / 60,
-			minutes % 60,
-			allocator = context.temp_allocator,
-		)
+		return metadata, fmt.tprintf("%s, %d hr %d min", summary, minutes / 60, minutes % 60)
 	}
 	if minutes > 0 {
-		return metadata, fmt.aprintf(
-			"%s, %d min %d sec",
-			summary,
-			minutes,
-			seconds % 60,
-			allocator = context.temp_allocator,
-		)
+		return metadata, fmt.tprintf("%s, %d min %d sec", summary, minutes, seconds % 60)
 	}
-	return metadata, fmt.aprintf(
-		"%s, %d sec",
-		summary,
-		seconds,
-		allocator = context.temp_allocator,
-	)
+	return metadata, fmt.tprintf("%s, %d sec", summary, seconds)
 }
 
 hero_metadata :: proc(
@@ -1584,7 +1557,7 @@ hero_banner :: proc(
 	if metadata == "" {
 		metadata = summary
 	} else if summary != "" {
-		metadata = fmt.aprintf("%s • %s", metadata, summary, allocator = context.temp_allocator)
+		metadata = fmt.tprintf("%s • %s", metadata, summary)
 	}
 	if clay.UI_WithId(clay.ID("hero_banner"))(
 	{layout = {sizing = {width = clay.SizingFixed(available), height = clay.SizingFixed(height)}}},
@@ -1698,8 +1671,7 @@ detail_hero :: proc(
 			clay.Text(title, title_style)
 			metadata, summary := hero_metadata(detail, cache)
 			if len(detail.artist_links) > 0 {
-				tail :=
-					metadata == "" ? "" : fmt.aprintf(" • %s", metadata, allocator = context.temp_allocator)
+				tail := metadata == "" ? "" : fmt.tprintf(" • %s", metadata)
 				tail_width := hero_text_width(ui_state, tail, 14, 0)
 				if clay.UI()(
 				{
@@ -1742,11 +1714,7 @@ detail_hero :: proc(
 
 http_error_text :: proc(status: int) -> string {
 	if status > 0 {
-		return fmt.aprintf(
-			"Spotify returned HTTP %d. Please try again.",
-			status,
-			allocator = context.temp_allocator,
-		)
+		return fmt.tprintf("Spotify returned HTTP %d. Please try again.", status)
 	}
 	return "Could not reach Spotify. Please try again."
 }

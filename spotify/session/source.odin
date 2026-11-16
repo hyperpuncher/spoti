@@ -289,7 +289,7 @@ fetch_track_metadata :: proc(
 	if unavailable != nil {unavailable^ = false}
 	if cancelled(cancel) {return}
 	short := track.base62_id(id, context.temp_allocator)
-	uri := fmt.aprintf("spotify:track:%s", short, allocator = context.temp_allocator)
+	uri := fmt.tprintf("spotify:track:%s", short)
 	request := make([dynamic]u8)
 	defer delete(request)
 	ap.extension_request(&request, uri, ap.TRACK_V4)

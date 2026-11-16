@@ -171,8 +171,8 @@ release_date_text :: proc(date, precision: string, allocator: runtime.Allocator)
 		return release_year(date, allocator)
 	}
 	iso_date := date[:length]
-	if month_only {iso_date = fmt.aprintf("%s-01", iso_date, allocator = context.temp_allocator)}
-	stamp := fmt.aprintf("%sT00:00:00Z", iso_date, allocator = context.temp_allocator)
+	if month_only {iso_date = fmt.tprintf("%s-01", iso_date)}
+	stamp := fmt.tprintf("%sT00:00:00Z", iso_date)
 	at, consumed := time.rfc3339_to_time_utc(stamp)
 	if consumed != len(stamp) {return release_year(date, allocator)}
 	year, month, day := time.date(at)

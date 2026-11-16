@@ -115,12 +115,11 @@ fetch_playlist_body :: proc(
 	status: int,
 	ok: bool,
 ) {
-	address := fmt.aprintf(
+	address := fmt.tprintf(
 		"https://spclient.wg.spotify.com/playlist/v2/playlist/%s?decorate=revision,length,attributes,owner&from=%d&length=%d",
 		id,
 		offset,
 		PLAYLIST_PAGE_SIZE,
-		allocator = context.temp_allocator,
 	)
 	return api_get(access, address, 512 * 1024, reuse, ttl = PAGE_TTL, refresh = refresh)
 }
@@ -404,11 +403,7 @@ playlist_track_row :: proc(
 				raw: [16]u8
 				copy(raw[:], artist_gid)
 				id := track.base62_id(raw, context.temp_allocator)
-				artist_uri = fmt.aprintf(
-					"spotify:artist:%s",
-					id,
-					allocator = context.temp_allocator,
-				)
+				artist_uri = fmt.tprintf("spotify:artist:%s", id)
 			}
 			if len(artist_name) > 0 {
 				append(&artists, Artist{name = string(artist_name), uri = artist_uri})
@@ -420,7 +415,7 @@ playlist_track_row :: proc(
 				raw: [16]u8
 				copy(raw[:], album_gid)
 				id := track.base62_id(raw, context.temp_allocator)
-				album_uri = fmt.aprintf("spotify:album:%s", id, allocator = context.temp_allocator)
+				album_uri = fmt.tprintf("spotify:album:%s", id)
 			}
 			if album_title, _, album_title_valid := ap.get_bytes(bytes, 2);
 			   album_title_valid && len(album_title) > 0 {
@@ -451,11 +446,7 @@ playlist_album_images :: proc(body: []u8, images: ^[dynamic]Image, group: bool =
 			pixels := int(width >> 1)
 			if pixels == 0 {pixels = size == 1 ? 64 : size == 2 ? 640 : size == 3 ? 1200 : 300}
 			encoded := hex.encode(id, context.temp_allocator)
-			url := fmt.aprintf(
-				"https://i.scdn.co/image/%s",
-				string(encoded),
-				allocator = context.temp_allocator,
-			)
+			url := fmt.tprintf("https://i.scdn.co/image/%s", string(encoded))
 			append(images, Image{url = url, width = pixels})
 		}
 	}

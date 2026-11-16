@@ -284,8 +284,7 @@ append_entry :: proc(items: ^[dynamic]Entry, row: $T, allocator: runtime.Allocat
 	} else when T == Artist {
 		if row.id == "" {return}
 		uri := row.uri
-		if uri ==
-		   "" {uri = fmt.aprintf("spotify:artist:%s", row.id, allocator = context.temp_allocator)}
+		if uri == "" {uri = fmt.tprintf("spotify:artist:%s", row.id)}
 		append_card_entry(items, row.name, uri, cover_url(row.images), "Artist", "", 0, allocator)
 	} else when T == Track_Ref {
 		if !track_available(row) || row.name == "" || len(row.uri) > 128 {return}

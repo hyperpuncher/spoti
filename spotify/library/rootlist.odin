@@ -26,12 +26,11 @@ cached_rootlist :: proc() -> (page: Page, ok: bool) {
 
 rootlist_address :: proc(account: string, offset: int) -> string {
 	encoded := net.percent_encode(account, context.temp_allocator)
-	return fmt.aprintf(
+	return fmt.tprintf(
 		"https://spclient.wg.spotify.com/playlist/v2/user/%s/rootlist?decorate=revision,attributes,length,owner,capabilities,status_code&from=%d&length=%d",
 		encoded,
 		offset,
 		ROOTLIST_PAGE_SIZE,
-		allocator = context.temp_allocator,
 	)
 }
 
@@ -161,11 +160,7 @@ playlist_attributes :: proc(body: []u8) -> (ref: Playlist_Ref, ok: bool) {
 		if !target_valid || !url_valid {return}
 		address := string(url)
 		if strings.has_prefix(address, "spotify:image:") {
-			address = fmt.aprintf(
-				"https://i.scdn.co/image/%s",
-				address[len("spotify:image:"):],
-				allocator = context.temp_allocator,
-			)
+			address = fmt.tprintf("https://i.scdn.co/image/%s", address[len("spotify:image:"):])
 		}
 		width := 300
 		switch string(target) {
@@ -180,14 +175,7 @@ playlist_attributes :: proc(body: []u8) -> (ref: Playlist_Ref, ok: bool) {
 		encoded := hex.encode(picture, context.temp_allocator)
 		append(
 			&images,
-			Image {
-				url = fmt.aprintf(
-					"https://i.scdn.co/image/%s",
-					string(encoded),
-					allocator = context.temp_allocator,
-				),
-				width = 300,
-			},
+			Image{url = fmt.tprintf("https://i.scdn.co/image/%s", string(encoded)), width = 300},
 		)
 	}
 	ref.images = images[:]

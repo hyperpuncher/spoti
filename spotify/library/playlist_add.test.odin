@@ -78,11 +78,7 @@ playlist_add_resolves_full_albums_and_reports_partial_writes :: proc(t: ^testing
 		testing.expect_value(t, ok, !partial)
 		testing.expect_value(t, status, partial ? 429 : 201)
 		for uri, index in fixture.added {
-			testing.expect_value(
-				t,
-				uri,
-				fmt.aprintf("spotify:track:%022d", index, allocator = context.temp_allocator),
-			)
+			testing.expect_value(t, uri, fmt.tprintf("spotify:track:%022d", index))
 		}
 	}
 	fixture := Playlist_Add_Fixture {

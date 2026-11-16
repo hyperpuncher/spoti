@@ -205,7 +205,7 @@ parse_artist_top_message :: proc(
 		raw: [16]u8
 		copy(raw[:], gid)
 		short := track.base62_id(raw, context.temp_allocator)
-		found[count] = fmt.aprintf("spotify:track:%s", short, allocator = context.temp_allocator)
+		found[count] = fmt.tprintf("spotify:track:%s", short)
 		count += 1
 	}
 	if count == 0 {return nil, true}

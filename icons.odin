@@ -108,7 +108,7 @@ load_icons :: proc(state: ^ui.State, textures: ^Textures) {
 	if textures.icon_size == size {return}
 	textures.icon_size = size
 	for name in ICON_NAMES {
-		relative := fmt.aprintf("icons/%s.svg", name, allocator = context.temp_allocator)
+		relative := fmt.tprintf("icons/%s.svg", name)
 		path, found := ui.asset_path(relative)
 		if !found {continue}
 		bytes, read_error := os.read_entire_file_from_path(path, context.allocator)

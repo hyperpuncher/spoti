@@ -143,7 +143,7 @@ encode_state :: proc(
 			put_string(&provided, 6, "context")
 			ap.put_bytes(&player, track_index < index ? 19 : 20, provided[:])
 		}
-		revision := fmt.aprintf("%d", snapshot.queue_revision, allocator = context.temp_allocator)
+		revision := fmt.tprintf("%d", snapshot.queue_revision)
 		put_string(&player, 24, revision)
 	}
 	device := make([dynamic]u8)
@@ -185,11 +185,7 @@ parse_transfer :: proc(data: []u8) -> (event: Event, ok: bool) {
 		if !gid_valid || len(gid) != 16 {return}
 		id: [16]u8
 		copy(id[:], gid)
-		current_uri = fmt.aprintf(
-			"spotify:track:%s",
-			track.base62_id(id, context.temp_allocator),
-			allocator = context.temp_allocator,
-		)
+		current_uri = fmt.tprintf("spotify:track:%s", track.base62_id(id, context.temp_allocator))
 	}
 	if !append_uri(&event, current_uri) {return}
 	event.target_uri = strings.clone(current_uri)

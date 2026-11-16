@@ -601,6 +601,14 @@ ensure_covers :: proc(
 	}
 }
 
+// Ask the decoder to stop and drop queued audio. The worker reports
+// .Stopping finished through the packet queue.
+app_stop_audio :: proc(app: ^App) {
+	cancel_worker(app.queue, &app.cancel)
+	clear_audio_stream(&app.stream)
+	app.stage = .Stopping
+}
+
 clear_audio_stream :: proc(stream: ^^sdl.AudioStream) {
 	if stream^ != nil {sdl.DestroyAudioStream(stream^); stream^ = nil}
 }
@@ -1095,10 +1103,10 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 				}
 				if input_active {
 					key_mod := event.key.mod
-					gui := .LGUI in key_mod || .RGUI in key_mod
+					gui := key_mod & sdl.KMOD_GUI != {}
 					alt := .LALT in key_mod || .RALT in key_mod
-					shift := .LSHIFT in key_mod || .RSHIFT in key_mod
-					cmd := .LCTRL in key_mod || .RCTRL in key_mod || gui
+					shift := key_mod & sdl.KMOD_SHIFT != {}
+					cmd := key_mod & (sdl.KMOD_CTRL | sdl.KMOD_GUI) != {}
 					switch event.key.key {
 					case sdl.K_ESCAPE:
 						ui.editor_move(&editor, editor.editing.selection[0])
@@ -1215,8 +1223,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 					case sdl.K_RIGHT:
 						if .LALT in event.key.mod {nav_forward_pressed = true}
 					case sdl.K_K:
-						mod := event.key.mod
-						if .LCTRL in mod || .RCTRL in mod || .LGUI in mod || .RGUI in mod {
+						if event.key.mod & (sdl.KMOD_CTRL | sdl.KMOD_GUI) != {} {
 							if !input_active {
 								input_active = sdl.StartTextInput(state.window)
 								ui.editor_move(&editor, len(input))
@@ -1225,11 +1232,7 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 					}
 				}
 			case .TEXT_INPUT:
-				if input_active &&
-				   .LCTRL not_in sdl.GetModState() &&
-				   .RCTRL not_in sdl.GetModState() &&
-				   .LGUI not_in sdl.GetModState() &&
-				   .RGUI not_in sdl.GetModState() {
+				if input_active && sdl.GetModState() & (sdl.KMOD_CTRL | sdl.KMOD_GUI) == {} {
 					added := string(event.text.text)
 					if input_text_ok(added) {
 						input_changed =
@@ -1364,27 +1367,24 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 	// Stop local audio before entering remote control. This must happen
 	// before app_playback, not in layout, where the frame flag is lost.
 	if last_transfer_pending && !library_client.transfer_pending {
-		delete(toast)
 		if library_client.transfer_ok && !transfer_here {
-			toast = strings.clone("Playback transferred")
+			show_toast(app, "Playback transferred")
 			if preload_worker != nil {sync.atomic_store(&preload_work.cancel, true)}
 			play_after_stop, replay_pending = false, false
 			seek_dragging, start_paused = false, false
 			seek_ms = 0
 			if worker != nil && stage != .Stopping {
-				cancel_worker(queue, &cancel)
-				clear_audio_stream(&stream)
-				stage = .Stopping
+				app_stop_audio(app)
 			}
 			remote_control = true
 			remote_polled_at = 0
 			_ = library.refresh_devices(&library_client)
 		} else {
-			toast = strings.clone(
+			show_toast(
+				app,
 				library_client.transfer_ok ? "Playback transferred" : "Couldn't transfer playback",
 			)
 		}
-		toast_until = sdl.GetTicksNS() + 2_500_000_000
 	}
 	last_transfer_pending = library_client.transfer_pending
 	// Sort before layout so a landed revalidation or a fresh pin paints in
@@ -1489,9 +1489,7 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 		play_after_stop, replay_pending = false, false
 	}
 	if stop_pressed && worker != nil && stage != .Stopping {
-		cancel_worker(queue, &cancel)
-		clear_audio_stream(&stream)
-		stage = .Stopping
+		app_stop_audio(app)
 	}
 	if stage == .Stopping && thread.is_done(worker) {
 		redraw = true
@@ -1599,9 +1597,7 @@ app_playback :: proc(app: ^App, frame: ^Frame) {
 				}
 				start_paused, replay_pending, seek_dragging = false, false, false
 				seek_ms = 0
-				clear_audio_stream(&stream)
-				cancel_worker(queue, &cancel)
-				stage = .Stopping
+				app_stop_audio(app)
 				state_dirty = true
 				show_toast(app, "Unavailable track removed")
 			case .Failed:
@@ -1761,11 +1757,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		shown_status = artist
 	}
 	if remote_control && len(library_client.remote_device) > 0 {
-		shown_status = fmt.aprintf(
-			"Controlling %s",
-			library_client.remote_device,
-			allocator = context.temp_allocator,
-		)
+		shown_status = fmt.tprintf("Controlling %s", library_client.remote_device)
 	}
 	shown_input := input
 	if library_client.state != .Missing_Client_ID {
@@ -1810,9 +1802,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 			verb =
 				library_client.write_partial ? "Some tracks added; couldn't finish adding to" : library_client.write_removed ? "Couldn't remove from" : "Couldn't add to"
 		}
-		delete(toast)
-		toast = fmt.aprintf("%s %s", verb, library_client.write_name)
-		toast_until = sdl.GetTicksNS() + 2_500_000_000
+		show_toast(app, fmt.tprintf("%s %s", verb, library_client.write_name))
 	}
 	last_write_pending = library_client.write_pending
 	width, height = ui.size(&state)
@@ -2045,7 +2035,7 @@ app_input_click :: proc(app: ^App, frame: ^Frame) {
 		&editor,
 		frame.mouse_click.x,
 		frame.click_count,
-		.LSHIFT in mod || .RSHIFT in mod,
+		mod & sdl.KMOD_SHIFT != {},
 	)
 	pending_redraw = true
 }
@@ -2653,9 +2643,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			if event.set_repeat_context {connect_repeat_context = event.repeat_context}
 		case .Inactive:
 			if worker != nil && stage != .Stopping {
-				cancel_worker(queue, &cancel)
-				clear_audio_stream(&stream)
-				stage = .Stopping
+				app_stop_audio(app)
 			}
 			play_after_stop, replay_pending = false, false
 			remote_control = false
@@ -2759,9 +2747,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	if restart_playback || seek_requested {
 		replay_pending = false
 		if worker != nil {
-			cancel_worker(queue, &cancel)
-			clear_audio_stream(&stream)
-			stage = .Stopping
+			app_stop_audio(app)
 			play_after_stop = true
 		} else {
 			space_pressed = true

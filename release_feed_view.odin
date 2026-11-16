@@ -19,13 +19,7 @@ release_age_label :: proc(released_at, now: time.Time) -> string {
 		unit, step = "hour", time.Hour
 	}
 	count := int(age / step)
-	return fmt.aprintf(
-		"%d %s%s ago",
-		count,
-		unit,
-		count == 1 ? "" : "s",
-		allocator = context.temp_allocator,
-	)
+	return fmt.tprintf("%d %s%s ago", count, unit, count == 1 ? "" : "s")
 }
 
 // Open an album detail under the feed without changing the visible feed or history.
@@ -100,11 +94,7 @@ release_feed_page :: proc(
 			} else if len(feed.items) == 0 {
 				status = "No music releases in the last seven days."
 			} else {
-				status = fmt.aprintf(
-					"%d releases",
-					len(feed.items),
-					allocator = context.temp_allocator,
-				)
+				status = fmt.tprintf("%d releases", len(feed.items))
 			}
 			clay.Text(status, {fontSize = 13, textColor = theme.muted})
 		}

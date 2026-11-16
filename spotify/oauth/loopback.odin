@@ -91,11 +91,10 @@ wait_for_code :: proc(
 		found, outcome := parse_callback(line, state)
 		body := "Sign-in was not accepted. Return to spoti."
 		if outcome == .Authorized {body = "Sign-in complete. Return to spoti."}
-		response := fmt.aprintf(
+		response := fmt.tprintf(
 			"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: %d\r\n\r\n%s",
 			len(body),
 			body,
-			allocator = context.temp_allocator,
 		)
 		written := 0
 		for written < len(response) {

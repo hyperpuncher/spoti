@@ -423,7 +423,7 @@ frame_done :: proc(state: ^State) {
 	if state.debug {
 		width, _ := size(state)
 		density := scale(state)
-		label := fmt.aprintf("%d", state.fps, allocator = context.temp_allocator)
+		label := fmt.tprintf("%d", state.fps)
 		label_width, _ := text_size(state, label, 14 * density, 1)
 		if label_width > 0 {
 			text(

@@ -24,11 +24,7 @@ test_gid :: proc(seed: u8) -> [16]u8 {
 }
 
 test_top_uri :: proc(gid: [16]u8) -> string {
-	return fmt.aprintf(
-		"spotify:track:%s",
-		track.base62_id(gid, context.temp_allocator),
-		allocator = context.temp_allocator,
-	)
+	return fmt.tprintf("spotify:track:%s", track.base62_id(gid, context.temp_allocator))
 }
 
 // Wraps an Artist message in the BatchedExtensionResponse envelope the
