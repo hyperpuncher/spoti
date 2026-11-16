@@ -404,9 +404,29 @@ Smooth :: struct {
 	active: bool,
 }
 
-smooth_for :: proc(container: string, grid, detail, queue: ^Smooth) -> ^Smooth {
-	if container == "queue_rows" {return queue}
-	return container == "library_grid" ? grid : detail
+// Wheel glides. The order is the wheel priority: popovers before the queue
+// panel before the page.
+Scroll_Area :: enum {
+	Device_Picker,
+	Playlist_Picker,
+	Queue,
+	Grid,
+	Detail,
+}
+
+SCROLL_AREA_ID := [Scroll_Area]string {
+	.Device_Picker   = "device_picker",
+	.Playlist_Picker = "playlist_picker",
+	.Queue           = "queue_rows",
+	.Grid            = "library_grid",
+	.Detail          = "detail_rows",
+}
+
+// Stop the glide on a container a drag or autoscroll now drives.
+smooth_cancel_id :: proc(smooth: ^[Scroll_Area]Smooth, container: string) {
+	for id, area in SCROLL_AREA_ID {
+		if id == container {smooth_cancel(id, &smooth[area])}
+	}
 }
 
 // Live detail_rows offset for history saves; zero when the page is closed.
@@ -466,6 +486,11 @@ smooth_step :: proc(container: string, smooth: ^Smooth, dt: f32) -> bool {
 
 // Direct offset writes (drag, autoscroll) cancel the glide so they never
 // fight it; the target re-arms from the new position on the next tick.
+smooth_active :: proc(smooth: ^[Scroll_Area]Smooth) -> bool {
+	for glide in smooth {if glide.active {return true}}
+	return false
+}
+
 smooth_cancel :: proc(container: string, smooth: ^Smooth) {
 	data := clay.GetScrollContainerData(clay.ID(container))
 	if data.found && data.scrollPosition != nil {smooth.target = data.scrollPosition.y}
@@ -701,11 +726,7 @@ App :: struct {
 	autoscroll_container:   string,
 	autoscroll_anchor:      sdl.FPoint,
 	autoscroll_moving:      bool,
-	grid_smooth:            Smooth,
-	detail_smooth:          Smooth,
-	picker_smooth:          Smooth,
-	device_smooth:          Smooth,
-	queue_smooth:           Smooth,
+	smooth:                 [Scroll_Area]Smooth,
 	toast:                  string,
 	setup_error:            string, // setup screen error, owned
 	toast_until:            u64,
@@ -1008,20 +1029,15 @@ app_events :: proc(app: ^App, frame: ^Frame) -> (bool, bool) {
 	input_limit := library_client.state == .Missing_Client_ID ? 64 : 512
 	event: sdl.Event
 	wait_ms: i32 = -1 // no redraw while idle; SDL events wake the window
-	fades_animating :=
-		(textures.fade_top_alpha != 0 && textures.fade_top_alpha != 1) ||
-		(textures.fade_bottom_alpha != 0 && textures.fade_bottom_alpha != 1) ||
-		(textures.fade_detail_top_alpha != 0 && textures.fade_detail_top_alpha != 1) ||
-		(textures.fade_detail_bottom_alpha != 0 && textures.fade_detail_bottom_alpha != 1)
+	fades_animating := false
+	for alpha in ([4]f32{textures.fade_top_alpha, textures.fade_bottom_alpha, textures.fade_detail_top_alpha, textures.fade_detail_bottom_alpha}) {
+		if alpha != 0 && alpha != 1 {fades_animating = true}
+	}
 	// Anything animating renders at the display rate, so the idle poll
 	// below can never throttle a scroll glide or a button spring.
 	if editor.selecting ||
 	   autoscroll_moving ||
-	   grid_smooth.active ||
-	   detail_smooth.active ||
-	   picker_smooth.active ||
-	   device_smooth.active ||
-	   queue_smooth.active ||
+	   smooth_active(&smooth) ||
 	   resizing ||
 	   dragging ||
 	   seek_dragging ||
@@ -1658,11 +1674,9 @@ app_glide :: proc(app: ^App, frame: ^Frame) {
 	using app
 	using frame
 	smooth_dt := f32(sdl.GetTicksNS() - last) / 1e9
-	if smooth_step("playlist_picker", &picker_smooth, smooth_dt) {redraw = true}
-	if smooth_step("device_picker", &device_smooth, smooth_dt) {redraw = true}
-	if smooth_step("queue_rows", &queue_smooth, smooth_dt) {redraw = true}
-	if smooth_step("library_grid", &grid_smooth, smooth_dt) {redraw = true}
-	if smooth_step("detail_rows", &detail_smooth, smooth_dt) {redraw = true}
+	for &glide, area in smooth {
+		if smooth_step(SCROLL_AREA_ID[area], &glide, smooth_dt) {redraw = true}
+	}
 	// The autoscroll step runs after layout, so a gliding frame must
 	// not take the idle continue. Last frame's flag keeps held-still
 	// autoscroll advancing until it parks in the dead zone.
@@ -1874,13 +1888,10 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		current_uri    = selected,
 		playing        = stage == .Playing,
 	}
-	wheel_used := scroll_wheel("device_picker", wheel.y, density, &device_smooth)
-	if !wheel_used {wheel_used = scroll_wheel("playlist_picker", wheel.y, density, &picker_smooth)}
-	if !wheel_used {wheel_used = scroll_wheel("queue_rows", wheel.y, density, &queue_smooth)}
-	if !wheel_used {wheel_used = scroll_wheel("library_grid", wheel.y, density, &grid_smooth)}
-	if !wheel_used {
-		wheel_used = scroll_wheel("detail_rows", wheel.y, density, &detail_smooth)
-		if wheel_used {detail_scroll_armed = false}
+	for &glide, area in smooth {
+		if !scroll_wheel(SCROLL_AREA_ID[area], wheel.y, density, &glide) {continue}
+		if area == .Detail {detail_scroll_armed = false}
+		break
 	}
 	t0 := sdl.GetTicksNS()
 	now := sdl.GetTicksNS()
@@ -1910,8 +1921,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		   data.found && data.scrollPosition != nil {
 			data.scrollPosition.y = 0
 		}
-		detail_smooth.target = 0
-		detail_smooth.active = false
+		smooth[.Detail].target = 0
+		smooth[.Detail].active = false
 	}
 	when ODIN_OS == .Windows {view.caption_width = ui.windows_caption_width(state.window)}
 	commands: clay.ClayArray(clay.RenderCommand)
@@ -1948,8 +1959,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		pos := clamp(detail_scroll_target, min(0, viewport - content), 0)
 		previous := scroll_data.scrollPosition.y
 		scroll_data.scrollPosition.y = pos
-		detail_smooth.target = pos
-		detail_smooth.active = false
+		smooth[.Detail].target = pos
+		smooth[.Detail].active = false
 		// Keep the target while a partial page is still too short to reach it.
 		if pos == detail_scroll_target || loaded {detail_scroll_armed = false}
 		if pos == previous {break}
@@ -1971,10 +1982,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		}
 	}
 	if autoscroll_container != "" {
-		smooth_cancel(
-			autoscroll_container,
-			smooth_for(autoscroll_container, &grid_smooth, &detail_smooth, &queue_smooth),
-		)
+		smooth_cancel_id(&smooth, autoscroll_container)
 		data := clay.GetScrollContainerData(clay.ID(autoscroll_container))
 		if !data.found || .MIDDLE not_in buttons {
 			autoscroll_container = ""
@@ -2155,7 +2163,7 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		toggle_queue := hit("footer_queue", mouse_click)
 		if toggle_queue || hit("queue_close", mouse_click) {
 			queue_open = toggle_queue && !queue_open
-			queue_smooth = {}
+			smooth[.Queue] = {}
 			if data := clay.GetScrollContainerData(clay.ID("queue_rows"));
 			   data.found && data.scrollPosition != nil {data.scrollPosition.y = 0}
 			pending_redraw = true
@@ -2492,10 +2500,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		if .LEFT not_in buttons {
 			scrollbar_drag = {}
 		} else if drag_scrollbar(&scrollbar_drag, mouse.y, density) {
-			smooth_cancel(
-				scrollbar_drag.container,
-				smooth_for(scrollbar_drag.container, &grid_smooth, &detail_smooth, &queue_smooth),
-			)
+			smooth_cancel_id(&smooth, scrollbar_drag.container)
 			redraw = true
 		}
 	}
