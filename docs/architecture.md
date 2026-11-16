@@ -124,7 +124,8 @@ one FIFO run. queue and search tracks use the same add-to-playlist picker.
 
 Dealer requests become UI events. reply only after the UI accepts a command;
 reject unsupported commands. publish actual local playback state. send state
-changes at once and position-only changes every five seconds. stop local
+only when it changes, or when the position drifts more than 1.5 s from the
+last timestamped position, as after a seek. stop local
 audio when another device takes playback.
 
 footer controls target the remote device while remote control is active.
@@ -133,9 +134,10 @@ transfer completion is handled before the playback stage.
 
 ## rendering and caching
 
-steady playback redraws at up to 30 fps. input events wake the loop at once;
-scrolling, dragging, and UI animations use the display rate. paused views do
-not redraw continuously when no other work needs a frame.
+steady playback redraws at up to 30 fps while the window is visible. input
+events and worker results wake the loop at once; scrolling, dragging, and UI
+animations use the display rate. idle waits end at the next real deadline,
+such as a toast, a search debounce or a spinner step. there is no idle poll.
 
 icon tint variants share one texture per icon. image commands borrow their
 tint from the UI-owned palette. rounded masks not used in the current frame

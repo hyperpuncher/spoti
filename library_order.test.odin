@@ -4,7 +4,7 @@ import "core:testing"
 import library "spotify/library"
 
 @(test)
-detail_uri_matches_source_and_id_without_building_a_string :: proc(t: ^testing.T) {
+detail_uri_matches_source_and_exact_id :: proc(t: ^testing.T) {
 	album := library.Detail {
 		source = .Album,
 		id     = "album-1",
