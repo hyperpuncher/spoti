@@ -105,7 +105,7 @@ Client :: struct {
 	state:                 State,
 	pages:                 [Kind]Page,
 	pending:               [Kind]bool,
-	pages_dirty:           [Kind]bool, // pages that landed; the owner re-sorts before layout
+	pages_dirty:           [Kind]bool, // index changes to sort before layout
 	detail:                Detail,
 	prev_detail:           Detail, // last page left, with its rows; instant back-nav
 	prev_at:               time.Time,
@@ -584,6 +584,7 @@ start :: proc(client: ^Client) -> (ok: bool) {
 			free_page(destination)
 			destination^ = page
 			destination.items.allocator = virtual.arena_allocator(&destination.arena)
+			client.pages_dirty[kind] = true
 		}
 		client.pending[kind] = true
 		_ = chan.send(client.requests, Request{kind = .Index, list = kind, refresh = true})
@@ -937,21 +938,15 @@ sync_library_membership :: proc(client: ^Client, source: Source, id: string, lik
 			if source == .Album {
 				for release in client.release_feed.items {
 					if release.entry.uri != uri {continue}
-					entry := clone_entry(release.entry, allocator)
-					entry.saved = true
-					inject_at(&page.items, 0, entry)
-					page.total += 1
+					insert_saved_entry(page, clone_entry(release.entry, allocator))
+					client.pages_dirty[kind] = true
 					return
 				}
 			}
 			return
 		}
-		entry := clone_detail_entry(client.detail, uri, allocator)
-		entry.saved = true
-		// The default order is Spotify's, which lists newest first, so a
-		// just-liked card goes back to the front where the heart was clicked.
-		inject_at(&page.items, 0, entry)
-		page.total += 1
+		insert_saved_entry(page, clone_detail_entry(client.detail, uri, allocator))
+		client.pages_dirty[kind] = true
 	} else {
 		for entry, index in page.items {
 			if entry.uri != uri {continue}
@@ -960,6 +955,16 @@ sync_library_membership :: proc(client: ^Client, source: Source, id: string, lik
 			return
 		}
 	}
+}
+
+insert_saved_entry :: proc(page: ^Page, entry: Entry) {
+	entry := entry
+	page.local_order -= 1
+	entry.library_order = page.local_order
+	entry.added_at = time.to_unix_seconds(time.now())
+	entry.saved = true
+	inject_at(&page.items, 0, entry)
+	page.total += 1
 }
 
 source_kind :: proc(source: Source) -> (kind: Kind, ok: bool) {
@@ -1234,12 +1239,19 @@ apply :: proc(client: ^Client, result: Result) {
 			allocator := virtual.arena_allocator(&destination.arena)
 			destination.items.allocator = allocator
 			for entry in local.page.items {
-				append(&destination.items, clone_entry(entry, allocator))
+				copy := clone_entry(entry, allocator)
+				copy.library_order += destination.next_offset
+				append(&destination.items, copy)
 			}
 			destination.cursor = strings.clone(local.page.cursor, allocator)
 			destination.account = strings.clone(local.page.account, allocator)
 			destination.has_more = local.page.has_more
-			destination.next_offset = local.page.next_offset
+			// Cursor pages report only their own row count.
+			if i == .Artists {
+				destination.next_offset += local.page.next_offset
+			} else {
+				destination.next_offset = local.page.next_offset
+			}
 			destination.total = local.page.total
 		}
 		diagnostic.result(

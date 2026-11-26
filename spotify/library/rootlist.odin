@@ -123,7 +123,7 @@ parse_rootlist :: proc(body: []u8, account: string, offset: int) -> (result: Pag
 	page.ready = true
 	page.account = strings.clone(account, allocator)
 	page.total, page.next_offset, page.has_more = int(total), offset + len(items), truncated != 0
-	for &entry in page.items {entry.saved = true}
+	mark_index_entries(&page)
 	ok = true
 	return page, true
 }

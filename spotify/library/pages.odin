@@ -11,6 +11,7 @@ import "core:hash"
 import "core:mem/virtual"
 import "core:net"
 import "core:strings"
+import "core:time"
 
 Kind :: enum {
 	Playlists,
@@ -27,6 +28,8 @@ Entry :: struct {
 	subtitle:      string, // owner or artists
 	year:          string, // album release year, e.g. "2024"
 	saved:         bool, // came from a library tab, so membership needs no check
+	library_order: int, // original index order; negative for new local saves
+	added_at:      i64, // Unix seconds; zero if not reported
 	explicit:      bool, // track entries only
 	duration_ms:   int, // track entries only
 	total:         int, // track count where Spotify reports one
@@ -47,6 +50,7 @@ Page :: struct {
 	next_offset: int,
 	cursor:      string,
 	has_more:    bool,
+	local_order: int, // decreases for each local save until the index is refreshed
 }
 
 free_page :: proc(page: ^Page) {
@@ -55,23 +59,18 @@ free_page :: proc(page: ^Page) {
 }
 
 clone_entry :: proc(entry: Entry, allocator: runtime.Allocator) -> Entry {
-	return {
-		name = strings.clone(entry.name, allocator),
-		uri = strings.clone(entry.uri, allocator),
-		image = strings.clone(entry.image, allocator),
-		subtitle = strings.clone(entry.subtitle, allocator),
-		year = strings.clone(entry.year, allocator),
-		saved = entry.saved,
-		explicit = entry.explicit,
-		duration_ms = entry.duration_ms,
-		total = entry.total,
-		album = strings.clone(entry.album, allocator),
-		album_uri = strings.clone(entry.album_uri, allocator),
-		first_artist = strings.clone(entry.first_artist, allocator),
-		artist_uri = strings.clone(entry.artist_uri, allocator),
-		owner_id = strings.clone(entry.owner_id, allocator),
-		collaborative = entry.collaborative,
-	}
+	copy := entry
+	copy.name = strings.clone(entry.name, allocator)
+	copy.uri = strings.clone(entry.uri, allocator)
+	copy.image = strings.clone(entry.image, allocator)
+	copy.subtitle = strings.clone(entry.subtitle, allocator)
+	copy.year = strings.clone(entry.year, allocator)
+	copy.album = strings.clone(entry.album, allocator)
+	copy.album_uri = strings.clone(entry.album_uri, allocator)
+	copy.first_artist = strings.clone(entry.first_artist, allocator)
+	copy.artist_uri = strings.clone(entry.artist_uri, allocator)
+	copy.owner_id = strings.clone(entry.owner_id, allocator)
+	return copy
 }
 
 Image :: struct {
@@ -141,7 +140,8 @@ Playlist_Item :: struct {
 }
 
 Saved_Album :: struct {
-	album: Album_Ref,
+	added_at: string,
+	album:    Album_Ref,
 }
 
 Artist_Cursor :: struct {
@@ -254,7 +254,14 @@ track_available :: proc(track: Track_Ref) -> bool {
 // Saved-item wrappers and direct search/rootlist objects share one card builder.
 append_entry :: proc(items: ^[dynamic]Entry, row: $T, allocator: runtime.Allocator) {
 	when T == Saved_Album {
+		index := len(items^)
 		append_entry(items, row.album, allocator)
+		if len(items^) > index && row.added_at != "" {
+			added, consumed := time.rfc3339_to_time_utc(row.added_at)
+			if consumed == len(row.added_at) {
+				items^[index].added_at = max(0, time.to_unix_seconds(added))
+			}
+		}
 	} else when T == Saved_Track {
 		append_entry(items, row.track, allocator)
 	} else when T == Playlist_Ref {
@@ -413,8 +420,15 @@ parse_index :: proc(body: []u8, kind: Kind) -> (page: Page, ok: bool) {
 		ok = build_page(&page, decoded.artists)
 	}
 	if !ok {free_page(&page); return}
-	for &entry in page.items {entry.saved = true}
+	mark_index_entries(&page)
 	return
+}
+
+mark_index_entries :: proc(page: ^Page) {
+	for &entry, index in page.items {
+		entry.saved = true
+		entry.library_order = index
+	}
 }
 
 // Stable cache key for a cover URL on the UI side.

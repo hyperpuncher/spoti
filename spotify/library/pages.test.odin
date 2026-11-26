@@ -50,16 +50,6 @@ cover_selection_uses_card_and_hero_sizes :: proc(t: ^testing.T) {
 }
 
 @(test)
-artist_window_uses_its_own_cursor :: proc(t: ^testing.T) {
-	artists: string = `{"artists":{"items":[{"name":"An Artist","id":"abc","uri":"spotify:artist:abc","images":[{"url":"https://i.scdn.co/image/artist","width":300}]}],"total":42,"next":"next","cursors":{"after":"abc"}}}`
-	page, ok := parse_index(transmute([]u8)artists, .Artists)
-	defer free_page(&page)
-	testing.expect(t, ok && len(page.items) == 1 && page.cursor == "abc" && page.has_more)
-	testing.expect(t, page.items[0].uri == "spotify:artist:abc")
-	testing.expect(t, page.items[0].image == "https://i.scdn.co/image/artist")
-}
-
-@(test)
 saved_tracks_use_current_shapes :: proc(t: ^testing.T) {
 	arena: virtual.Arena
 	if virtual.arena_init_growing(&arena) != nil {

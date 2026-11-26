@@ -1,5 +1,5 @@
 // Library card ordering: the user's pins lead, then cards played most recently,
-// then Spotify's own library order for everything else.
+// then save dates when available and Spotify's order as a fallback.
 package main
 
 import "core:slice"
@@ -10,10 +10,12 @@ Rated_Entry :: struct {
 	index:       int,
 	pin_rank:    int,
 	recent_rank: int,
+	source_rank: int,
+	added_at:    i64,
 }
 
-// One stable pass orders pins, then optional play history. Equal ranks
-// keep Spotify's existing order.
+// Order pins first, then optional play history. Break ties with the
+// save date and original order, not the order left behind by the previous sort.
 sort_library_page :: proc(page: ^library.Page, kind: library.Kind, app_state: ^State) {
 	if len(page.items) < 2 {return}
 	rated := make([]Rated_Entry, len(page.items), context.temp_allocator)
@@ -21,32 +23,29 @@ sort_library_page :: proc(page: ^library.Page, kind: library.Kind, app_state: ^S
 		rated[index] = {
 			index       = index,
 			pin_rank    = state_rank(app_state.pinned, entry.uri),
+			source_rank = entry.library_order,
+			added_at    = entry.added_at,
 			recent_rank = app_state.sort[kind] == .Played ? state_rank(app_state.recent, entry.uri) : max(int),
 		}
 	}
-	slice.stable_sort_by(rated, proc(a, b: Rated_Entry) -> bool {
+	less :: proc(a, b: Rated_Entry) -> bool {
 		if a.pin_rank != b.pin_rank {return a.pin_rank < b.pin_rank}
-		return a.recent_rank < b.recent_rank
-	})
+		if a.recent_rank != b.recent_rank {return a.recent_rank < b.recent_rank}
+		if a.added_at != b.added_at {return a.added_at > b.added_at}
+		return a.source_rank < b.source_rank
+	}
+	if slice.is_sorted_by(rated, less) {return}
+	slice.stable_sort_by(rated, less)
 	indices := make([]int, len(rated), context.temp_allocator)
 	for entry, index in rated {indices[index] = entry.index}
 	slice.sort_from_permutation_indices(page.items[:], indices)
 }
 
-// Sorting only when a page changed keeps page merges cheap. A length check
-// alone would miss a revalidation that replaces a page with the same count,
-// silently dropping the pins, so any landed page forces a re-sort too.
-sort_library_pages :: proc(
-	client: ^library.Client,
-	app_state: ^State,
-	counts: ^[library.Kind]int,
-	force: bool,
-) {
+// A local sort change can affect all tabs. A page update only affects its tab.
+sort_library_pages :: proc(client: ^library.Client, app_state: ^State, force: bool) {
 	for kind in library.Kind {
-		page := &client.pages[kind]
-		if !force && !client.pages_dirty[kind] && len(page.items) == counts[kind] {continue}
-		sort_library_page(page, kind, app_state)
-		counts[kind] = len(page.items)
+		if force ||
+		   client.pages_dirty[kind] {sort_library_page(&client.pages[kind], kind, app_state)}
 	}
 	client.pages_dirty = {}
 }

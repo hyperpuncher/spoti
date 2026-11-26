@@ -72,11 +72,10 @@ free_state :: proc(app_state: ^State) {
 	app_state^ = {}
 }
 
-// Card order per library tab. Spotify's own order leads with the newest
-// additions on every tab; recently played uses local play history, so both
-// options cost nothing.
+// Card order per library tab. Default uses save dates where available,
+// otherwise source order. Recently played uses local play history.
 Sort :: enum {
-	Default, // what Spotify returns
+	Default, // recently added first where dates are available
 	Played, // recently played first; unplayed last
 }
 

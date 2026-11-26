@@ -493,7 +493,6 @@ App :: struct {
 	nav_forward_pressed:    bool,
 	library_prompt_shown:   bool,
 	playback_prompt_opened: bool,
-	page_counts:            [library.Kind]int,
 	menu:                   Context_Menu,
 	device_open:            bool, // the Connect device panel is showing
 	queue_open:             bool,
@@ -884,7 +883,7 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 	last_transfer_pending = library_client.transfer_pending
 	// Sort before layout so a landed revalidation or a fresh pin paints in
 	// the correct order on the same frame instead of the next one.
-	sort_library_pages(&library_client, &app_state, &page_counts, order_dirty)
+	sort_library_pages(&library_client, &app_state, order_dirty)
 	order_dirty = false
 	library_prompt = prompt_pending(.Library)
 	if library_prompt != library_prompt_shown {

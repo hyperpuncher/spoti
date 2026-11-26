@@ -120,6 +120,25 @@ index_pagination_grows_after_arena_ownership_transfer :: proc(t: ^testing.T) {
 }
 
 @(test)
+artist_cursor_pages_preserve_library_order :: proc(t: ^testing.T) {
+	client: Client
+	destination := &client.pages[.Artists]
+	defer free_page(destination)
+	cursors := [3]string{"a", "b", ""}
+	for body, index in ([]string{`{"artists":{"items":[{"id":"a","name":"A","images":[{"url":"https://i.scdn.co/image/artist","width":300}]}],"total":3,"next":"more","cursors":{"after":"a"}}}`, `{"artists":{"items":[{"id":"b","name":"B"}],"total":3,"next":"more","cursors":{"after":"b"}}}`, `{"artists":{"items":[{"id":"c","name":"C"}],"total":3}}`}) {
+		page, ok := parse_index(transmute([]u8)body, .Artists)
+		if !testing.expect(t, ok) {return}
+		apply(&client, Result{kind = .Index, list = .Artists, page = page, ok = true})
+		if !testing.expect_value(t, len(destination.items), index + 1) {return}
+		testing.expect_value(t, destination.items[index].library_order, index)
+		testing.expect_value(t, destination.cursor, cursors[index])
+		testing.expect_value(t, destination.has_more, index < 2)
+	}
+	testing.expect_value(t, destination.items[0].uri, "spotify:artist:a")
+	testing.expect_value(t, destination.items[0].image, "https://i.scdn.co/image/artist")
+}
+
+@(test)
 discography_selection_clones_metadata_before_releasing_detail :: proc(t: ^testing.T) {
 	client: Client
 	if virtual.arena_init_growing(&client.detail.arena) != nil {testing.fail_now(t, "arena")}
