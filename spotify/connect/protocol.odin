@@ -162,6 +162,15 @@ encode_state :: proc(
 	return out
 }
 
+// A missing owner is not a handoff. Keep the last explicit owner so an
+// unrelated update cannot turn a repeated remote owner into a new one.
+cluster_device_change :: proc(data: []u8, previous: string) -> string {
+	cluster, found, valid := ap.get_bytes(data, 1)
+	if !found || !valid {return ""}
+	active, _, owner_valid := ap.get_bytes(cluster, 2)
+	return owner_valid && string(active) != previous ? string(active) : ""
+}
+
 append_uri :: proc(event: ^Event, uri: string) -> bool {
 	if len(event.tracks) >= MAX_TRACKS {return false}
 	if _, valid := track.parse_id(uri); !valid {return false}

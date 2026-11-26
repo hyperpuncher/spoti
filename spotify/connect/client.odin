@@ -323,23 +323,12 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 						deliver = true
 					}
 				} else if envelope.uri == "hm://connect-state/v1/cluster" {
-					cluster, found, valid := ap.get_bytes(data, 1)
-					if found && valid {
-						active, _, active_valid := ap.get_bytes(cluster, 2)
-						if active_valid {
-							device := string(active)
-							changed_device := device != active_device
-							local_active := device == client.device_id
-							if snapshot.active && !local_active {
-								event.action, deliver = .Inactive, true
-								snapshot.active = false
-							} else if changed_device && device != "" && !local_active {
-								event.action, deliver = .Remote_Active, true
-							}
-							if changed_device {
-								delete(active_device)
-								active_device = strings.clone(device)
-							}
+					if device := cluster_device_change(data, active_device); device != "" {
+						delete(active_device)
+						active_device = strings.clone(device)
+						if device != client.device_id {
+							event.action = snapshot.active ? .Inactive : .Remote_Active
+							deliver, snapshot.active = true, false
 						}
 					}
 				}

@@ -152,6 +152,29 @@ connect_state_reports_shuffle_with_the_rebuilt_queue :: proc(t: ^testing.T) {
 }
 
 @(test)
+only_explicit_owner_changes_can_trigger_a_handoff :: proc(t: ^testing.T) {
+	cluster, update := make([dynamic]u8), make([dynamic]u8)
+	defer delete(cluster)
+	defer delete(update)
+	ap.put_number(&cluster, 1, 123)
+	ap.put_bytes(&update, 1, cluster[:])
+	testing.expect_value(t, cluster_device_change(update[:], "phone"), "")
+
+	owners := [?]string{"", "phone", "spoti"}
+	for owner in owners {
+		clear(&cluster)
+		clear(&update)
+		put_string(&cluster, 2, owner)
+		ap.put_bytes(&update, 1, cluster[:])
+		testing.expect_value(
+			t,
+			cluster_device_change(update[:], "phone"),
+			owner == "phone" ? "" : owner,
+		)
+	}
+}
+
+@(test)
 partial_options_do_not_clear_unrelated_modes :: proc(t: ^testing.T) {
 	body := `{"command":{"endpoint":"set_options","repeating_track":false}}`
 	event, _, ok := parse_command(transmute([]u8)body)
