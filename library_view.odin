@@ -1650,7 +1650,9 @@ page_error_text :: proc(status: int) -> string {
 }
 
 detail_error_notice :: proc(client: ^library.Client, d: f32) {
-	clay.Text(page_error_text(client.detail_error), {fontSize = 14, textColor = theme.muted})
+	message :=
+		client.detail.source == .Radio ? "Couldn't load radio. Check that local playback is set up and try again." : page_error_text(client.detail_error)
+	clay.Text(message, {fontSize = 14, textColor = theme.muted})
 	if client.state == .Ready && time.since(client.page_at) >= 0 {
 		sign_in_button("detail_retry", "Try again", d)
 	}
@@ -1732,6 +1734,8 @@ detail_page :: proc(
 		},
 		) {
 			play_enabled := detail_play_enabled(client)
+			loading := library.detail_loading_visible(client)
+			has_library_actions := detail.source != .Liked && detail.source != .Radio
 			// Artists play their Popular tracks; the queue builds from
 			// the same rows as every other collection.
 			{
@@ -1747,19 +1751,22 @@ detail_page :: proc(
 					theme.hero_hover,
 					play_enabled,
 				)
-				icon_button(
-					"hero_shuffle",
-					"shuffle",
-					!play_enabled ? .Disabled : view.shuffle ? .Green : .Muted,
-					textures,
-					fx,
-					d,
-				)
+				if detail.source != .Radio {
+					icon_button(
+						"hero_shuffle",
+						"shuffle",
+						!play_enabled ? .Disabled : view.shuffle ? .Green : .Muted,
+						textures,
+						fx,
+						d,
+					)
+				}
 			}
-			if client.detail.source != .Liked {
-				like_disabled :=
-					library.detail_loading_visible(client) ||
-					library.like_pending(client, detail.source, detail.id)
+			if detail.source == .Artist {
+				icon_button("hero_radio", "radio", loading ? .Disabled : .Muted, textures, fx, d)
+			}
+			if has_library_actions {
+				like_disabled := loading || library.like_pending(client, detail.source, detail.id)
 				icon_button(
 					"hero_like",
 					client.detail.liked ? "circle-check" : "circle-plus",
@@ -1773,30 +1780,32 @@ detail_page :: proc(
 				icon_button(
 					"hero_pin",
 					view.pinned ? "pin-filled" : "pin-off",
-					library.detail_loading_visible(client) ? .Disabled : view.pinned ? .Green : .Muted,
+					loading ? .Disabled : view.pinned ? .Green : .Muted,
 					textures,
 					fx,
 					d,
 				)
 			}
-			if client.detail.source != .Liked {
+			if has_library_actions {
 				icon_button(
 					"hero_copy_link",
 					"link",
-					library.detail_loading_visible(client) ? .Disabled : .Muted,
+					loading ? .Disabled : .Muted,
 					textures,
 					fx,
 					d,
 				)
 			}
-			icon_button(
-				"spotify_link",
-				"external-link",
-				library.detail_loading_visible(client) ? .Disabled : .Muted,
-				textures,
-				fx,
-				d,
-			)
+			if detail.source != .Radio {
+				icon_button(
+					"spotify_link",
+					"external-link",
+					loading ? .Disabled : .Muted,
+					textures,
+					fx,
+					d,
+				)
+			}
 		}
 		// All collection pages share the same space below their controls.
 		list_spacer(24 * d)

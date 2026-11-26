@@ -74,15 +74,9 @@ fetch_artist_top_tracks :: proc(
 	request := playlist_metadata_request(uris)
 	defer delete(request)
 	if len(request) == 0 {return {}, 200, true}
-	metadata, metadata_status, received := http.protobuf_request(
-		"POST",
-		ap.EXTENDED_METADATA_ADDRESS,
-		request[:],
-		{bearer = access, limit = ARTIST_METADATA_LIMIT},
-		reuse,
-	)
+	metadata, metadata_status, received := fetch_track_metadata_batch(access, request[:], reuse)
 	defer delete(metadata)
-	if !received || metadata_status != 200 {
+	if !received {
 		if stale, hit := read_artist_top_cache(
 			artist_key,
 			tracks_key,

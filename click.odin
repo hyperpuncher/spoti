@@ -1,6 +1,7 @@
 #+feature using-stmt
 package main
 
+import "core:fmt"
 import "core:strings"
 import library "spotify/library"
 import oauth "spotify/oauth"
@@ -22,6 +23,13 @@ app_input_click :: proc(app: ^App, frame: ^Frame) {
 		mod & sdl.KMOD_SHIFT != {},
 	)
 	pending_redraw = true
+}
+
+app_open_radio :: proc(app: ^App, seed, name, image: string) -> bool {
+	uri := library.radio_uri(seed)
+	if uri == "" {return false}
+	title := name != "" ? fmt.tprintf("%s Radio", name) : "Song Radio"
+	return open_entry_page(&app.nav_ctx, library.Entry{uri = uri, name = title, image = image})
 }
 
 app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
@@ -109,6 +117,15 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 						}
 					} else if menu.track >= 0 && menu.track < len(library_client.detail.rows) {
 						track_selected = app_queue_detail(app, menu.track)
+					}
+				case .Song_Radio:
+					row: library.Track_Row
+					if idx := menu.track; idx >= 0 && idx < len(library_client.detail.rows) {
+						candidate := library_client.detail.rows[idx]
+						if candidate.uri == menu.uri {row = candidate}
+					}
+					if !app_open_radio(app, menu.uri, row.name, row.image) {
+						show_toast(app, "Couldn't open song radio")
 					}
 				case .Add_To_Queue:
 					if !app_enqueue_uri(app, menu.uri) {
@@ -312,7 +329,18 @@ app_click :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				}
 			}
 			if !handled && library_client.detail.ready {
-				if hit("hero_like", mouse_click) {
+				if detail := &library_client.detail;
+				   detail.source == .Artist &&
+				   !library.detail_loading_visible(&library_client) &&
+				   hit("hero_radio", mouse_click) {
+					handled = app_open_radio(
+						app,
+						detail_card_uri(detail^),
+						detail.name,
+						detail.image,
+					)
+					if !handled {show_toast(app, "Couldn't open artist radio")}
+				} else if hit("hero_like", mouse_click) {
 					detail := library_client.detail
 					if detail.source != .Liked &&
 					   !library_client.detail_loading &&

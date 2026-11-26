@@ -79,15 +79,9 @@ fetch_playlist_rows :: proc(
 		cache_write("api", window_key, body[:])
 		return nil, window.total, window.next_offset, window.next_offset < window.total, 200, true
 	}
-	metadata, metadata_code, received := http.protobuf_request(
-		"POST",
-		"https://spclient.wg.spotify.com/extended-metadata/v0/extended-metadata",
-		request[:],
-		{bearer = access, limit = 2 * 1024 * 1024},
-		reuse,
-	)
+	metadata, metadata_code, received := fetch_track_metadata_batch(access, request[:], reuse)
 	defer delete(metadata)
-	if !received || metadata_code != 200 {
+	if !received {
 		if cached_rows, cached_total, cached_next, cached_more, cached := read_playlist_cache(
 			id,
 			offset,
@@ -274,6 +268,27 @@ playlist_metadata_request :: proc(uris: []string) -> [dynamic]u8 {
 		ap.extension_request(&request, uri, ap.TRACK_V4)
 	}
 	return request
+}
+
+// Track rows in playlists, artist top tracks and radio use the same batch format.
+fetch_track_metadata_batch :: proc(
+	access: string,
+	request: []u8,
+	reuse: rawptr,
+	cancel: ^bool = nil,
+) -> (
+	body: [dynamic]u8,
+	status: int,
+	ok: bool,
+) {
+	body, status, ok = http.protobuf_request(
+		"POST",
+		ap.EXTENDED_METADATA_ADDRESS,
+		request,
+		{bearer = access, limit = 2 * 1024 * 1024, cancel = cancel},
+		reuse,
+	)
+	return body, status, ok && status == 200
 }
 
 Playlist_Answer :: struct {

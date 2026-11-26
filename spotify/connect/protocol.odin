@@ -4,6 +4,7 @@ package connect
 
 import ap "../ap"
 import oauth "../oauth"
+import session "../session"
 import track "../track"
 import "core:encoding/base64"
 import "core:encoding/json"
@@ -241,14 +242,7 @@ parse_transfer :: proc(data: []u8) -> (event: Event, ok: bool) {
 	return
 }
 
-Context :: struct {
-	uri:   string,
-	pages: []struct {
-		tracks: []struct {
-			uri, uid: string,
-		},
-	},
-}
+Context :: session.Playback_Context
 
 // A transfer already carries its current track and any explicit queue.
 // A play request starts empty. Both select the same context position.

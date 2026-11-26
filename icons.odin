@@ -49,6 +49,7 @@ ICON_NAMES :: []string {
 	"copy",
 	"command",
 	"external-link",
+	"radio",
 }
 
 // Tint lives in the texture color mod, not the pixels, so a theme switch

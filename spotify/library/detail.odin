@@ -17,6 +17,7 @@ Source :: enum {
 	Playlist,
 	Album,
 	Artist,
+	Radio,
 }
 
 // Liked Songs has no card URI.
@@ -25,6 +26,7 @@ SOURCE_URI_PREFIX := [Source]string {
 	.Playlist = "spotify:playlist:",
 	.Album    = "spotify:album:",
 	.Artist   = "spotify:artist:",
+	.Radio    = "spotify:station:",
 }
 
 // Split a card URI into its source and id, without validating the id.
@@ -223,6 +225,9 @@ fetch_detail :: proc(
 	allocator := virtual.arena_allocator(&detail.arena)
 	detail.source = source
 	switch source {
+	case .Radio:
+		free_detail(&detail)
+		return {}, -1, false
 	case .Liked:
 		detail.label = strings.clone("Playlist", allocator)
 		detail.name = strings.clone("Liked Songs", allocator)
@@ -441,7 +446,7 @@ fetch_track_page :: proc(
 		return parse_track_rows(Playlist_Item, body[:], allocator)
 	case .Liked:
 		return parse_track_rows(Saved_Track, body[:], allocator)
-	case .Artist:
+	case .Artist, .Radio:
 	}
 	return
 }
@@ -489,7 +494,7 @@ track_page_address :: proc(
 			id,
 			offset,
 		)
-	case .Artist:
+	case .Artist, .Radio:
 		return
 	}
 	return address, true
@@ -711,7 +716,7 @@ safe_id :: proc(id: string, account := false) -> bool {
 // Songs has no membership to check. Spotify IDs are alphanumeric, but the
 // full URI still rides percent-encoded in the query string.
 library_uri :: proc(source: Source, id: string, allocator := context.allocator) -> string {
-	if !safe_id(id) || source == .Liked {return ""}
+	if !safe_id(id) || source == .Liked || source == .Radio {return ""}
 	return strings.concatenate({SOURCE_URI_PREFIX[source], id}, allocator)
 }
 

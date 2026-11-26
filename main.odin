@@ -413,7 +413,7 @@ replace_string :: proc(destination: ^string, value: string) {
 
 parse_card_uri :: proc(uri: string) -> (source: library.Source, id: string, ok: bool) {
 	source, id = library.split_uri(uri) or_return
-	if !library.safe_id(id) {return {}, "", false}
+	if !(source == .Radio ? library.valid_radio_id(id) : library.safe_id(id)) {return {}, "", false}
 	return source, id, true
 }
 

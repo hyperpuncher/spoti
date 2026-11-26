@@ -17,6 +17,7 @@ Menu_Item :: enum {
 	Play,
 	Add_To_Queue,
 	Save_Album,
+	Song_Radio,
 	Pick_Sort,
 	Add_To_Playlist,
 	Remove_From_Playlist,
@@ -147,6 +148,7 @@ open_track_menu :: proc(
 		[]Menu_Entry {
 			{.Play, "Play"},
 			{.Add_To_Queue, "Add to queue"},
+			{.Song_Radio, "Go to song radio"},
 			playlist_entry,
 			{.Copy_Link, "Copy link"},
 			{.Open_In_Spotify, "Open in Spotify"},
@@ -168,6 +170,10 @@ open_link_menu :: proc(menu: ^Context_Menu, point: sdl.FPoint, uri: string) {
 				{.Open_In_Spotify, "Open in Spotify"},
 			},
 		)
+		if strings.has_prefix(uri, "spotify:track:") {
+			menu.entries[menu.count] = {.Song_Radio, "Go to song radio"}
+			menu.count += 1
+		}
 	} else {
 		set_menu(
 			menu,

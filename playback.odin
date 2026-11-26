@@ -332,6 +332,7 @@ app_queue_detail :: proc(app: ^App, index: int) -> bool {
 	queue_detail_rows(&app.play_queue, &app.library_client.detail)
 	app.queue_rows = len(app.library_client.detail.rows)
 	stamp_play_queue(&app.queue_detail, &app.queue_gen, app.library_client.detail)
+	if app.library_client.detail.source == .Radio {app.shuffle = false}
 	app.play_index = app.shuffle ? reorder_play_queue(app.play_queue[:], index, true) : index
 	return select_play_item(app.play_queue[:], app.play_index, &app.selected, &app.player_cover)
 }

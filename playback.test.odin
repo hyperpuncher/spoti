@@ -111,6 +111,29 @@ connect_load_reuses_matching_artwork_without_changing_the_incoming_queue :: proc
 }
 
 @(test)
+radio_queues_the_visible_mix_in_order_even_if_shuffle_was_on :: proc(t: ^testing.T) {
+	app := App {
+		shuffle = true,
+	}
+	defer free_play_queue(&app.play_queue)
+	defer delete(app.selected)
+	defer delete(app.player_cover)
+	defer delete(app.queue_detail)
+
+	detail := &app.library_client.detail
+	detail.source, detail.id = .Radio, "artist:0000000000000000000001"
+	detail.rows = make([dynamic]library.Track_Row, context.temp_allocator)
+	append(&detail.rows, {uri = "spotify:track:0000000000000000000002"})
+	append(&detail.rows, {uri = "spotify:track:0000000000000000000001"})
+	if !testing.expect(t, app_queue_detail(&app, 0)) {return}
+	testing.expect(t, !app.shuffle)
+	testing.expect_value(t, app.selected, detail.rows[0].uri)
+	testing.expect_value(t, app.queue_detail, "spotify:station:artist:0000000000000000000001")
+	if !testing.expect_value(t, len(app.play_queue), len(detail.rows)) {return}
+	for item, index in app.play_queue {testing.expect_value(t, item.uri, detail.rows[index].uri)}
+}
+
+@(test)
 worker_cancellation_preserves_queued_packets :: proc(t: ^testing.T) {
 	queue, err := chan.create_buffered(chan.Chan(player.Packet), 1, context.allocator)
 	if !testing.expect(t, err == nil) {return}

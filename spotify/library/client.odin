@@ -257,6 +257,17 @@ handle :: proc(
 		read_release_feed(client, streaming, &result, reuse)
 		return
 	}
+	if request.kind == .Detail && request.source == .Radio {
+		if authorize_session(client, streaming, interactive = false) {
+			result.detail, result.status, result.ok = read_radio(
+				streaming.access,
+				request.id,
+				&client.cancel,
+				reuse,
+			)
+		}
+		return
+	}
 	// Playlist reads use the streaming grant, not Web API approval.
 	native_playlist :=
 		request.source == .Playlist &&
@@ -633,7 +644,7 @@ more :: proc(client: ^Client, kind: Kind) {
 }
 
 open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry) -> bool {
-	if len(id) == 0 {return false}
+	if len(id) == 0 || source == .Radio && !valid_radio_id(id) {return false}
 	client.release_feed.open = false
 	// A playlist changed by an add or remove re-fetches in the background, but
 	// still opens from the buffer or warm cache so the list never blanks.
@@ -661,7 +672,8 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 	if source == .Playlist {
 		warm, _, warm_ok = fetch_session_playlist_detail("", id, cache_only = true)
 	}
-	if !warm_ok {warm, _, warm_ok = fetch_detail("", source, id, cache_only = true)}
+	if !warm_ok &&
+	   source != .Radio {warm, _, warm_ok = fetch_detail("", source, id, cache_only = true)}
 	if warm_ok && warm.rows_error == 0 {
 		// The page is already on disk, so it opens with its rows in place.
 		// The queued request above still revalidates it in the background.
@@ -705,6 +717,11 @@ open_detail :: proc(client: ^Client, source: Source, id: string, preview: Entry)
 				next.label = strings.clone("Album", allocator)
 			case .Artist:
 				next.label = strings.clone("Artist", allocator)
+			case .Radio:
+				next.label = "Radio"
+				if next.name == "" {
+					next.name = strings.has_prefix(id, "artist:") ? "Artist Radio" : "Song Radio"
+				}
 			}
 		}
 	}
@@ -869,7 +886,7 @@ like_pending :: proc(client: ^Client, source: Source, id: string) -> bool {
 
 // A Like result updates the detail and library after confirmation.
 toggle_like :: proc(client: ^Client, source: Source, id: string, liked: bool) -> bool {
-	if len(id) == 0 || like_pending(client, source, id) {return false}
+	if source == .Radio || len(id) == 0 || like_pending(client, source, id) {return false}
 	request := Request {
 		kind   = .Like,
 		source = source,
@@ -965,7 +982,7 @@ source_kind :: proc(source: Source) -> (kind: Kind, ok: bool) {
 		return .Albums, true
 	case .Artist:
 		return .Artists, true
-	case .Liked:
+	case .Liked, .Radio:
 		return .Playlists, false
 	}
 	return .Playlists, false
@@ -1034,6 +1051,8 @@ detail_page_fresh :: proc(
 	group: Album_Group = .Album,
 ) -> bool {
 	switch source {
+	case .Radio:
+		return false
 	case .Artist:
 		address := artist_albums_address(id, offset, group)
 		defer delete(address)
@@ -1267,7 +1286,7 @@ apply :: proc(client: ^Client, result: Result) {
 			client.detail.header_pending = false
 			client.last_http_status = local.status
 			client.detail_error = local.status != 0 ? local.status : -1
-			client.state = local.status == 401 ? .Failed : client.state
+			if local.status == 401 && local.source != .Radio {client.state = .Failed}
 			diagnostic.result("detail", false, local.status, 0, 0, false)
 			return
 		}
@@ -1281,10 +1300,13 @@ apply :: proc(client: ^Client, result: Result) {
 		)
 		// The metadata response can arrive before its larger cover. Keep the
 		// selected card's cover alive in the incoming arena until texture upload.
-		local.detail.image_preview = strings.clone(
-			client.detail.image_preview,
-			virtual.arena_allocator(&local.detail.arena),
-		)
+		allocator := virtual.arena_allocator(&local.detail.arena)
+		local.detail.image_preview = strings.clone(client.detail.image_preview, allocator)
+		if local.source == .Radio {
+			local.detail.name = strings.clone(client.detail.name, allocator)
+			local.detail.image, local.detail.image_small =
+				local.detail.image_preview, local.detail.image_preview
+		}
 		move_detail(&client.detail, &local.detail)
 		// The changed playlist now matches the server again, so later opens and
 		// pages can use the cache instead of bypassing it forever.
