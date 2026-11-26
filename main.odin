@@ -478,8 +478,8 @@ App :: struct {
 	connect_published_at:   u64,
 	connect_settle_key:     u64, // candidate state waiting to settle
 	connect_settle_at:      u64, // tick to send it, or 0
+	connect_load_pending:   bool, // publish the first active state for an accepted load
 	connect_repeat_context: bool,
-	transfer_here:          bool,
 	app_state:              State,
 	filter:                 library.Kind,
 	sidebar_width:          f32,
@@ -510,7 +510,6 @@ App :: struct {
 	setup_error:            string, // setup screen error, owned
 	toast_until:            u64,
 	last_write_pending:     bool,
-	last_transfer_pending:  bool,
 	remote_control:         bool, // the footer commands the API-active device
 	remote_polled_at:       u64, // last player-state poll, ticks
 	drag_candidate:         bool,
@@ -722,17 +721,6 @@ main :: proc() {
 		app_navigate(&app, &frame)
 		app_search(&app, &frame)
 		app_library(&app, &frame)
-		if remote_control {
-			now := sdl.GetTicksNS()
-			if now - remote_polled_at >= REMOTE_POLL_NS {
-				remote_polled_at = now
-				_ = library.refresh_player_state(&library_client)
-			}
-		}
-		if library_client.remote_gone {
-			library_client.remote_gone = false
-			remote_control = false
-		}
 		app_playback(&app, &frame)
 		// Glide wheel targets toward their offsets before the idle check so
 		// a settling glide keeps frames (and redraws) coming by itself.
@@ -855,32 +843,14 @@ app_library :: proc(app: ^App, frame: ^Frame) {
 	if library_client.worker == nil {
 		_ = library.start(&library_client)
 	}
+	was_ready := library_client.state == .Ready
 	if library.poll(&library_client, app_library_result, app) {redraw = true}
+	if !was_ready && library_client.state == .Ready && worker == nil ||
+	   remote_control && sdl.GetTicksNS() - remote_polled_at >= REMOTE_POLL_NS {
+		app_probe_remote(app)
+	}
 	library.advance_releases(&library_client)
 	if sync.atomic_exchange(&connect_client.pending, false) {redraw = true}
-	// Stop local audio before entering remote control. This must happen
-	// before app_playback, not in layout, where the frame flag is lost.
-	if last_transfer_pending && !library_client.transfer_pending {
-		if library_client.transfer_ok && !transfer_here {
-			show_toast(app, "Playback transferred")
-			if preload_worker != nil {sync.atomic_store(&preload_work.cancel, true)}
-			play_after_stop, replay_pending = false, false
-			seek_dragging, start_paused = false, false
-			seek_ms = 0
-			if worker != nil && stage != .Stopping {
-				app_stop_audio(app)
-			}
-			remote_control = true
-			remote_polled_at = 0
-			_ = library.refresh_devices(&library_client)
-		} else {
-			show_toast(
-				app,
-				library_client.transfer_ok ? "Playback transferred" : "Couldn't transfer playback",
-			)
-		}
-	}
-	last_transfer_pending = library_client.transfer_pending
 	// Sort before layout so a landed revalidation or a fresh pin paints in
 	// the correct order on the same frame instead of the next one.
 	sort_library_pages(&library_client, &app_state, order_dirty)
@@ -1203,37 +1173,27 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		clay.ResetMeasureTextCache()
 		load_icons(&state, &textures)
 	}
-	progress := f32(0)
-	if duration_ms > 0 {
-		// Kept times hold the bar steady across worker swaps; live audio
-		// refines it below.
-		progress = f32(displayed_ms) / f32(duration_ms)
-		if sample_rate > 0 && stream != nil {
-			queued := max(0, sdl.GetAudioStreamQueued(stream))
-			measured_ms := (sent_frames - int(queued) / 4 - origin_frames) * 1000 / sample_rate
-			displayed_ms = max(displayed_ms, clamp(measured_ms, 0, duration_ms))
-			progress = f32(displayed_ms) / f32(duration_ms)
-		}
+	// Keep the last local position across worker swaps. Update it only from
+	// the local stream, never from a remote playback response.
+	if duration_ms > 0 && sample_rate > 0 && stream != nil {
+		queued := max(0, sdl.GetAudioStreamQueued(stream))
+		measured_ms := (sent_frames - int(queued) / 4 - origin_frames) * 1000 / sample_rate
+		displayed_ms = max(displayed_ms, clamp(measured_ms, 0, duration_ms))
 	}
-	shown_ms := displayed_ms
-	if remote_control {
-		// The bar tracks the polled remote position; the drag preview
-		// below still wins while scrubbing.
-		shown_ms = library_client.remote_progress
-		if duration_ms > 0 {progress = f32(shown_ms) / f32(duration_ms)}
-	}
+	remote := &library_client.remote
+	shown_duration := footer_duration(app)
+	shown_ms := remote_control ? clamp(remote.progress, 0, shown_duration) : displayed_ms
 	seek_enabled =
-		duration_ms > 0 &&
+		shown_duration > 0 &&
 		(remote_control || stage == .Playing || stage == .Paused || stage == .Ended)
 	if seek_dragging && seek_enabled {
 		box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
 		preview_x: f32
 		_ = sdl.GetMouseState(&preview_x, nil)
 		point := ui.mouse_position(&state, preview_x, 0)
-		preview := seek_position_ms(point.x, box.x, box.width, duration_ms)
-		progress = f32(preview) / f32(duration_ms)
-		shown_ms = preview
+		shown_ms = seek_position_ms(point.x, box.x, box.width, shown_duration)
 	}
+	progress := shown_duration > 0 ? f32(shown_ms) / f32(shown_duration) : 0
 	button := "play"
 	if stage == .Paused {button = "resume"}
 	// Transitional stages keep the pause icon while a (re)start is in
@@ -1246,7 +1206,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	// A seek from paused lands back on paused, so its handoff keeps
 	// the resume icon instead of flashing pause.
 	if start_paused && button == "pause" {button = "resume"}
-	if remote_control {button = library_client.remote_playing ? "pause" : "play"}
+	if remote_control {button = remote.playing ? "pause" : "play"}
 	status := "Ready to play"
 	switch stage {
 	case .Signing_In:
@@ -1274,8 +1234,15 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 	if stage != .Failed && len(artist) > 0 && !(stage == .Signing_In && playback_prompt) {
 		shown_status = artist
 	}
-	if remote_control && len(library_client.remote_device) > 0 {
-		shown_status = fmt.tprintf("Controlling %s", library_client.remote_device)
+	if remote_control {
+		shown_title, shown_status = remote.title, remote.artist
+		if remote.device != "" {
+			if remote.artist != "" {
+				shown_status = fmt.tprintf("%s · %s", remote.artist, remote.device)
+			} else {
+				shown_status = fmt.tprintf("Controlling %s", remote.device)
+			}
+		}
 	}
 	shown_input := input
 	if library_client.state != .Missing_Client_ID {
@@ -1284,34 +1251,37 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		}
 	}
 	times: [2][16]u8
-	retain_player_cover(&displayed_cover, player_cover, &textures)
+	shown_cover := footer_cover(app)
+	if !remote_control {
+		retain_player_cover(&displayed_cover, shown_cover, &textures)
+		shown_cover = displayed_cover
+	}
 	// The footer links the playing album and each known artist.
 	// The live queue is the truth, even when it links nothing; the
 	// persisted record only serves the queue-less resumed footer.
 	queue_at = play_index >= 0 && play_index < len(play_queue)
 	foot_album, foot_album_uri = "", ""
 	foot_artists = nil
-	if queue_at {
-		item := play_queue[play_index]
-		foot_album, foot_album_uri = item.album, item.album_uri
-		foot_artists = item.artist_links
-	} else {
-		foot_album, foot_album_uri = app_state.last_played.album, app_state.last_played.album_uri
-		if played := &app_state.last_played;
-		   played.artist_uri != "" && artist == played.first_artist {
-			foot_artists = make([]library.Artist_Link, 1, context.temp_allocator)
-			foot_artists[0] = {
-				name = played.first_artist,
-				uri  = played.artist_uri,
+	if !remote_control {
+		if queue_at {
+			item := play_queue[play_index]
+			foot_album, foot_album_uri = item.album, item.album_uri
+			foot_artists = item.artist_links
+		} else {
+			played := &app_state.last_played
+			foot_album, foot_album_uri = played.album, played.album_uri
+			if played.artist_uri != "" && artist == played.first_artist {
+				foot_artists = make([]library.Artist_Link, 1, context.temp_allocator)
+				foot_artists[0] = {
+					name = played.first_artist,
+					uri  = played.artist_uri,
+				}
 			}
 		}
 	}
 	link_album = len(foot_album_uri) > 0
 	if shown_status != artist || artist == "" {foot_artists = nil}
-	devices_active := false
-	for device in library_client.devices {
-		if device.active {devices_active = true; break}
-	}
+	active_device := footer_active_device(app)
 	// A finished write shows its outcome for a moment; the toast is the
 	// only signal that a change the user cannot see actually landed.
 	if last_write_pending && !library_client.write_pending {
@@ -1353,9 +1323,9 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		button         = button,
 		progress       = progress,
 		elapsed        = duration_text(shown_ms, times[0][:]),
-		total          = duration_text(duration_ms, times[1][:]),
+		total          = duration_text(shown_duration, times[1][:]),
 		input          = shown_input,
-		cover          = displayed_cover,
+		cover          = shown_cover,
 		repeat         = repeat,
 		shuffle        = shuffle,
 		volume         = volume,
@@ -1374,7 +1344,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		queue_items    = play_queue[:],
 		queue_index    = play_index,
 		device_open    = device_open,
-		device_active  = devices_active,
+		active_device  = active_device,
 		device_rows    = library_client.devices[:],
 		device_loading = library_client.devices_pending,
 		device_error   = library_client.devices_error,
@@ -1387,8 +1357,8 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		scroll_active  = autoscroll_container != "",
 		scroll_x       = autoscroll_anchor.x,
 		scroll_y       = autoscroll_anchor.y,
-		current_uri    = selected,
-		playing        = stage == .Playing,
+		current_uri    = remote_control ? remote.uri : selected,
+		playing        = remote_control ? remote.playing : stage == .Playing,
 	}
 	for &glide, area in smooth {
 		if !scroll_wheel(SCROLL_AREA_ID[area], wheel.y, density, &glide) {continue}
@@ -1509,7 +1479,7 @@ app_layout :: proc(app: ^App, frame: ^Frame) -> Frame_Visible {
 		render(&commands, &state, &textures)
 		ui.frame_done(&state)
 	}
-	trim_cover_textures(&textures, displayed_cover, player_cover)
+	trim_cover_textures(&textures, displayed_cover, footer_cover(app))
 	t3 := sdl.GetTicksNS()
 	stage_sum[0] += f64(t1 - t0) / 1e6
 	stage_sum[1] += f64(t2 - t1) / 1e6
@@ -1640,5 +1610,5 @@ app_covers :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			if library.more_rows(&library_client, group) {redraw = true; break}
 		}
 	}
-	ensure_covers(&library_client, &textures, display_page, player_cover, visible)
+	ensure_covers(&library_client, &textures, display_page, footer_cover(app), visible)
 }

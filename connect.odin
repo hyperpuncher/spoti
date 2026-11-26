@@ -59,16 +59,22 @@ connect_state_key :: proc(s: connect.Snapshot) -> u64 {
 	return hash.fnv64a(([^]u8)(&numbers)[:size_of(numbers)], key)
 }
 
+app_connect_active :: proc(app: ^App) -> bool {
+	return(
+		!app.remote_control &&
+		app.worker != nil &&
+		app.stage != .Stopping &&
+		app.stage != .Failed &&
+		app.stage != .Idle \
+	)
+}
+
 app_connect_publish :: proc(app: ^App) {
 	using app
 	if connect_client.worker == nil {return}
+	if stage == .Failed {connect_load_pending = false}
 	now := sdl.GetTicksNS()
-	active :=
-		!remote_control &&
-		worker != nil &&
-		stage != .Stopping &&
-		stage != .Failed &&
-		stage != .Idle
+	active := app_connect_active(app)
 	snapshot := connect.Snapshot {
 		uri            = active ? selected : "",
 		context_uri    = active ? queue_detail : "",
@@ -96,7 +102,11 @@ app_connect_publish :: proc(app: ^App) {
 	if connect_snapshot.playing {
 		expected += int((now - connect_published_at) / 1_000_000)
 	}
-	if connect_state_equal(connect_snapshot, snapshot) &&
+	// A phone waits for a fresh active state after its load, even if the
+	// track and position match the last published state.
+	publish_load := connect_load_pending && active
+	if !publish_load &&
+	   connect_state_equal(connect_snapshot, snapshot) &&
 	   abs(displayed_ms - expected) <= CONNECT_POSITION_DRIFT_MS {
 		connect_settle_at = 0
 		return
@@ -105,10 +115,11 @@ app_connect_publish :: proc(app: ^App) {
 		connect_settle_key = key
 		connect_settle_at = now + CONNECT_SETTLE_NS
 	}
-	if now < connect_settle_at {return}
+	if !publish_load && now < connect_settle_at {return}
 	snapshot.tracks = make([dynamic]string, len(queue_window), context.temp_allocator)
 	for item, index in queue_window {snapshot.tracks[index] = item.uri}
 	if !connect.publish(&connect_client, snapshot) {return}
+	if publish_load {connect_load_pending = false}
 	connect.free_snapshot(&connect_snapshot)
 	connect_snapshot = snapshot
 	connect_snapshot.uri = strings.clone(snapshot.uri)

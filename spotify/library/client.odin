@@ -143,12 +143,8 @@ Client :: struct {
 	devices_pending:       bool,
 	devices_error:         bool,
 	transfer_pending:      bool, // Connect transfer in flight
-	transfer_ok:           bool, // Connect transfer outcome for the toast
-	transfer_name:         string, // owned; transfer target for the toast
-	remote_playing:        bool, // polled; the API-active playback plays
-	remote_progress:       int, // polled; its position in milliseconds
-	remote_device:         string, // owned; polled active device name
-	remote_gone:           bool, // the last poll found nothing active
+	player_state_pending:  bool,
+	remote:                Player_State, // owned; last polled playback
 	write_pending:         bool, // add or remove write in flight
 	write_ok:              bool, // last write result
 	write_partial:         bool, // some album tracks were added before a failure
@@ -833,14 +829,6 @@ transfer_to_device :: proc(client: ^Client, device_id: string, play: bool) -> bo
 	return true
 }
 
-// Display name of a known device for the transfer toast; empty when the
-// list no longer has it.
-transfer_device_name :: proc(client: ^Client, device_id: string) -> string {
-	for device in client.devices {
-		if device.id == device_id {return device.name}
-	}
-	return ""
-}
 // Queues one player command at the API-active device. Fire-and-forget:
 // the worker answers with a Command result that only reaches the log.
 // A full request channel drops the send, which throttles volume drags.
@@ -912,10 +900,12 @@ refresh_devices :: proc(client: ^Client) -> bool {
 // Queues a playback-state poll for the API-active device. The worker
 // answers with a Player_State result that refreshes the remote footer.
 refresh_player_state :: proc(client: ^Client) -> bool {
+	if client.player_state_pending {return false}
 	request := Request {
 		kind = .Player_State,
 	}
 	queue_request(client, &request) or_return
+	client.player_state_pending = true
 	return true
 }
 
@@ -1436,16 +1426,8 @@ apply :: proc(client: ^Client, result: Result) {
 		client.devices = local.devices
 		local.devices = nil
 	case .Transfer:
-		diagnostic.writef(
-			"library transfer status=%d ok=%v has_name=%v",
-			local.status,
-			local.ok,
-			len(transfer_device_name(client, local.device_id)) > 0,
-		)
+		diagnostic.writef("library transfer status=%d ok=%v", local.status, local.ok)
 		client.transfer_pending = false
-		client.transfer_ok = local.ok
-		delete(client.transfer_name)
-		client.transfer_name = strings.clone(transfer_device_name(client, local.device_id))
 	case .Command:
 		diagnostic.writef(
 			"library command=%v status=%d ok=%v",
@@ -1454,16 +1436,12 @@ apply :: proc(client: ^Client, result: Result) {
 			local.ok,
 		)
 	case .Player_State:
-		if !local.ok {
-			client.remote_playing = false
-			client.remote_gone = local.status == 204
-			return
+		client.player_state_pending = false
+		if local.ok || local.status == 204 {
+			free_player_state(client.remote)
+			client.remote = local.player
+			local.player = {}
 		}
-		client.remote_playing = local.player.playing
-		client.remote_progress = local.player.progress
-		delete(client.remote_device)
-		client.remote_device = local.player.device
-		local.player.device = ""
 	case .Add_To_Playlist, .Remove_From_Playlist:
 		removed := local.kind == .Remove_From_Playlist
 		client.write_pending = false
@@ -1537,8 +1515,7 @@ stop :: proc(client: ^Client) {
 	delete(client.search_query)
 	delete(client.me_id)
 	free_devices(client.devices)
-	delete(client.transfer_name)
-	delete(client.remote_device)
+	free_player_state(client.remote)
 	delete(client.write_name)
 	delete(client.stale_playlist)
 	for pending in client.likes_pending {delete(pending.id)}

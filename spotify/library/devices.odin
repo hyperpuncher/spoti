@@ -5,7 +5,6 @@ package library
 import diagnostic "../../diagnostic"
 import http "../http"
 import "core:encoding/json"
-import "core:fmt"
 import "core:strings"
 
 DEVICES_ADDRESS :: "https://api.spotify.com/v1/me/player/devices"
@@ -23,8 +22,7 @@ Device :: struct {
 	volume:     int,
 }
 
-// Device ids are opaque server strings; anything with a quote, a
-// backslash or a control byte is rejected instead of escaped.
+// Device ids are opaque server strings. Reject empty, oversized, or malformed ids.
 valid_device_id :: proc(id: string) -> bool {
 	if len(id) == 0 || len(id) > 128 {return false}
 	for ch in transmute([]u8)id {
@@ -116,20 +114,44 @@ fetch_devices :: proc(
 // Live state of the API-active playback: whether it plays, where it is,
 // and on which device. A 204 means nothing is active anywhere.
 Player_State :: struct {
-	playing:  bool,
-	progress: int,
-	device:   string, // owned; active device name, empty when none
+	playing:    bool,
+	progress:   int,
+	device:     string, // owned; active device name
+	device_id:  string, // owned; empty if Spotify does not expose a usable id
+	restricted: bool,
+	uri:        string, // owned; active track or episode
+	title:      string, // owned; active track or episode
+	artist:     string, // owned
+	cover:      string, // owned
+	duration:   int, // milliseconds
 }
 
 player_wire :: struct {
 	is_playing:  bool,
 	progress_ms: int,
 	device:      player_device_wire,
+	item:        player_item_wire,
+}
+
+player_item_wire :: struct {
+	uri:         string,
+	name:        string,
+	duration_ms: int,
+	artists:     []Artist,
+	album:       struct {
+		images: []Image,
+	},
+	images:      []Image, // episodes carry their own image
+	show:        struct {
+		name: string,
+	},
 }
 
 player_device_wire :: struct {
-	name:      string,
-	is_active: bool,
+	id:            string,
+	name:          string,
+	is_active:     bool,
+	is_restricted: bool,
 }
 
 // Parses a playback-state payload into a caller-owned state. Entries
@@ -138,10 +160,22 @@ parse_player_state :: proc(body: []u8) -> (state: Player_State, ok: bool) {
 	wire: player_wire
 	if json.unmarshal(body, &wire, allocator = context.temp_allocator) != nil {return {}, false}
 	if len(wire.device.name) == 0 || !wire.device.is_active {return {}, false}
+	item := wire.item
+	images := item.album.images
+	if len(images) == 0 {images = item.images}
+	artist := item.show.name
+	if len(item.artists) != 0 {artist = joined_artists(item.artists, context.temp_allocator)}
 	return Player_State {
 			playing = wire.is_playing,
 			progress = max(wire.progress_ms, 0),
 			device = strings.clone(wire.device.name),
+			device_id = valid_device_id(wire.device.id) ? strings.clone(wire.device.id) : "",
+			restricted = wire.device.is_restricted,
+			uri = strings.clone(item.uri),
+			title = strings.clone(item.name),
+			artist = strings.clone(artist),
+			cover = strings.clone(cover_url(images)),
+			duration = max(0, item.duration_ms),
 		},
 		true
 }
@@ -177,6 +211,25 @@ fetch_player_state :: proc(
 // Frees an owned player state.
 free_player_state :: proc(state: Player_State) {
 	delete(state.device)
+	delete(state.device_id)
+	delete(state.uri)
+	delete(state.title)
+	delete(state.artist)
+	delete(state.cover)
+}
+
+@(private)
+transfer_body :: proc(device_id: string, play: bool) -> (body: []u8, ok: bool) {
+	if !valid_device_id(device_id) {return}
+	payload := struct {
+		device_ids: [1]string,
+		play:       bool,
+	} {
+		device_ids = {device_id},
+		play       = play,
+	}
+	data, err := json.marshal(payload, allocator = context.temp_allocator)
+	return data, err == nil
 }
 
 // Moves playback to one device. Play starts it there when true, otherwise
@@ -190,16 +243,15 @@ transfer_playback :: proc(
 	status: int,
 	ok: bool,
 ) {
-	if !valid_device_id(device_id) {return 0, false}
-	body := fmt.tprintf(`{"device_ids":["%s"],"play":%v}`, device_id, play)
+	body, built := transfer_body(device_id, play)
+	if !built {return 0, false}
 	response, code, sent := http.json_request(
 		"PUT",
 		TRANSFER_ADDRESS,
-		body,
+		string(body),
 		{bearer = access},
 		reuse,
 	)
 	defer delete(response)
-	diagnostic.writef("connect transfer status=%d ok=%v", code, sent)
 	return code, sent && code == 204
 }

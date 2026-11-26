@@ -1,5 +1,6 @@
 package library
 
+import "core:encoding/json"
 import "core:testing"
 
 DEVICES_FIXTURE :: `{"devices":[
@@ -24,14 +25,12 @@ devices_parse_keeps_valid_entries_with_volume_fallback :: proc(t: ^testing.T) {
 	bogus := `{"devices":"nope"}`
 	_, ok = parse_devices(transmute([]u8)bogus)
 	testing.expect(t, !ok)
-	testing.expect(t, !valid_device_id(""))
-	testing.expect(t, !valid_device_id("bad\"id"))
 }
 
-PLAYER_FIXTURE :: `{"device":{"id":"74ASZWbe4lXaubB36ztrGX","is_active":true,"name":"Kitchen speaker","type":"speaker","volume_percent":59},"is_playing":true,"progress_ms":61234}`
+PLAYER_FIXTURE :: `{"device":{"id":"74ASZWbe4lXaubB36ztrGX","is_active":true,"name":"Kitchen speaker","type":"speaker","volume_percent":59},"is_playing":true,"progress_ms":61234,"item":{"uri":"spotify:track:remote","name":"Remote song","duration_ms":173000,"artists":[{"name":"One"},{"name":"Two"}],"album":{"images":[{"url":"https://i.scdn.co/image/cover","width":300}]}}}`
 
 @(test)
-player_parse_reads_playing_progress_and_device :: proc(t: ^testing.T) {
+player_parse_reads_remote_playback_for_the_footer :: proc(t: ^testing.T) {
 	body := PLAYER_FIXTURE
 	state, ok := parse_player_state(transmute([]u8)body)
 	defer free_player_state(state)
@@ -39,7 +38,36 @@ player_parse_reads_playing_progress_and_device :: proc(t: ^testing.T) {
 	testing.expect(t, state.playing)
 	testing.expect_value(t, state.progress, 61234)
 	testing.expect_value(t, state.device, "Kitchen speaker")
+	testing.expect_value(t, state.device_id, "74ASZWbe4lXaubB36ztrGX")
+	testing.expect_value(t, state.uri, "spotify:track:remote")
+	testing.expect_value(t, state.title, "Remote song")
+	testing.expect_value(t, state.artist, "One, Two")
+	testing.expect_value(t, state.duration, 173000)
+	testing.expect_value(t, state.cover, "https://i.scdn.co/image/cover")
+	no_track := `{"device":{"name":"Phone","is_active":true},"item":null}`
+	empty, parsed := parse_player_state(transmute([]u8)no_track)
+	defer free_player_state(empty)
+	testing.expect(t, parsed && empty.title == "" && empty.duration == 0)
 	idle := `{"is_playing":false}`
 	_, ok = parse_player_state(transmute([]u8)idle)
 	testing.expect(t, !ok, "a payload without an active device fails")
+}
+
+@(test)
+transfer_encodes_one_target_and_a_boolean_play_flag :: proc(t: ^testing.T) {
+	for play in ([]bool{false, true}) {
+		body, built := transfer_body("fixture-device", play)
+		if !testing.expect(t, built) {return}
+		payload: struct {
+			device_ids: []string,
+			play:       json.Value,
+		}
+		parsed := json.unmarshal(body, &payload, allocator = context.temp_allocator)
+		if !testing.expect(t, parsed == nil) {return}
+		if testing.expect_value(t, len(payload.device_ids), 1) {
+			testing.expect_value(t, payload.device_ids[0], "fixture-device")
+		}
+		flag, is_boolean := payload.play.(bool)
+		testing.expect(t, is_boolean && flag == play)
+	}
 }

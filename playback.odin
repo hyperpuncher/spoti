@@ -177,13 +177,62 @@ app_enqueue_detail_rows :: proc(app: ^App, detail: ^library.Detail) {
 	app_enqueue_items(app, items[:])
 }
 
+footer_duration :: proc(app: ^App) -> int {
+	return app.remote_control ? app.library_client.remote.duration : app.duration_ms
+}
+
+footer_cover :: proc(app: ^App) -> string {
+	return app.remote_control ? app.library_client.remote.cover : app.player_cover
+}
+
+footer_active_device :: proc(app: ^App) -> string {
+	if app_connect_active(app) {return app.app_state.connect_device}
+	if app.remote_control {return app.library_client.remote.device_id}
+	for device in app.library_client.devices {if device.active {return device.id}}
+	return ""
+}
+
+app_probe_remote :: proc(app: ^App) {
+	app.remote_polled_at = sdl.GetTicksNS()
+	_ = library.refresh_player_state(&app.library_client)
+}
+
 app_library_result :: proc(result: ^library.Result, user_data: rawptr) {
-	if result.kind != .Queue_Album {return}
 	app := (^App)(user_data)
-	if result.ok && len(result.detail.rows) > 0 {
-		app_enqueue_detail_rows(app, &result.detail)
-	} else {
-		show_toast(app, "Couldn't add to queue")
+	#partial switch result.kind {
+	case .Transfer:
+		if !result.ok {show_toast(app, "Couldn't transfer playback"); return}
+		show_toast(app, "Playback transferred")
+		// A transfer here will arrive as a native Load command.
+		if result.device_id == app.app_state.connect_device {return}
+		if app.preload_worker != nil {sync.atomic_store(&app.preload_work.cancel, true)}
+		app.play_after_stop, app.replay_pending = false, false
+		app.seek_dragging, app.start_paused = false, false
+		app.seek_ms = 0
+		if app.worker != nil && app.stage != .Stopping {app_stop_audio(app)}
+		app.remote_control = true
+		app_probe_remote(app)
+		_ = library.refresh_devices(&app.library_client)
+	case .Player_State:
+		if result.ok {
+			// An older poll must not override playback that just started locally.
+			leaving := app.stage == .Stopping && !app.play_after_stop
+			if app.remote_control || app.worker == nil || leaving {
+				device := result.player
+				app.remote_control =
+					device.device_id != "" &&
+					device.device_id != app.app_state.connect_device &&
+					!device.restricted
+			}
+		} else if result.status == 204 {
+			app.remote_control = false
+		}
+	case .Queue_Album:
+		if result.ok && len(result.detail.rows) > 0 {
+			app_enqueue_detail_rows(app, &result.detail)
+		} else {
+			show_toast(app, "Couldn't add to queue")
+		}
 	}
 }
 

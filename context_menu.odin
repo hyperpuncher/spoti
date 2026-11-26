@@ -446,7 +446,7 @@ device_panel :: proc(view: View, textures: ^Textures, d: f32) {
 					cornerRadius = clay.CornerRadiusAll(5 * d),
 				},
 				) {
-					if device.active {
+					if device.id == view.active_device {
 						icon_element(textures, "check", .White, 14 * d)
 					} else if clay.UI()({layout = {sizing = {width = clay.SizingFixed(14 * d)}}}) {
 					}

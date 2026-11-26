@@ -24,6 +24,7 @@ Action :: enum {
 	Volume,
 	Options,
 	Inactive,
+	Remote_Active,
 }
 
 Event :: struct {

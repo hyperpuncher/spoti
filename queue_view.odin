@@ -114,7 +114,7 @@ queue_panel :: proc(
 		row_width := width - (24 + SCROLLBAR_OUTSET) * d
 		if current {
 			clay.Text(
-				view.playing ? "Now playing" : "Current track",
+				view.playing && view.queue_items[view.queue_index].uri == view.current_uri ? "Now playing" : "Current track",
 				{fontId = 3, fontSize = 14, textColor = theme.text},
 			)
 			queue_row(

@@ -111,14 +111,18 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 	}
 	if clicked && hit("footer_devices", mouse_click) {
 		device_open = !device_open
-		if device_open {_ = library.refresh_devices(&library_client)}
+		if device_open {
+			_ = library.refresh_devices(&library_client)
+			if worker == nil && !remote_control {app_probe_remote(app)}
+		}
 	}
 	if device_open && clicked {
+		active_device := footer_active_device(app)
 		for device, index in library_client.devices {
 			if device.restricted ||
 			   !hit_clipped("device_item", "device_picker", mouse_click, u32(index)) {continue}
-			if !library.transfer_to_device(&library_client, device.id, stage == .Playing) {break}
-			transfer_here = device.id == app_state.connect_device
+			if device.id != active_device &&
+			   !library.transfer_to_device(&library_client, device.id, stage == .Playing) {break}
 			device_open = false
 			break
 		}
@@ -138,13 +142,13 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		switch command {
 		case .Play:
 			if remote_control && worker == nil {
-				if !library_client.remote_playing {
+				if !library_client.remote.playing {
 					_ = library.send_player_command(&library_client, .Play)
 				}
 			} else if stage != .Playing {space_pressed = true}
 		case .Pause:
 			if remote_control && worker == nil {
-				if library_client.remote_playing {
+				if library_client.remote.playing {
 					_ = library.send_player_command(&library_client, .Pause)
 				}
 			} else if stage == .Playing {space_pressed = true}
@@ -157,7 +161,8 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		case .Previous:
 			track_delta -= 1
 		case .Seek:
-			requested_ms, seek_requested = displayed_ms + value, true
+			position := remote_control ? library_client.remote.progress : displayed_ms
+			requested_ms, seek_requested = position + value, true
 		case .Set_Position:
 			requested_ms, seek_requested = value, true
 		case .Quit:
@@ -188,6 +193,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 			shuffle, repeat, connect_repeat_context =
 				event.shuffle, event.repeat_track, event.repeat_context
 			accepted = track_selected
+			connect_load_pending = accepted
 		case .Resume:
 			if incoming_load {start_paused = false} else if remote_control || stage == .Idle && len(play_queue) == 0 {accepted = false} else if stage != .Playing {space_pressed = true}
 		case .Pause:
@@ -220,7 +226,10 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 				app_stop_audio(app)
 			}
 			play_after_stop, replay_pending = false, false
-			remote_control = false
+			connect_load_pending = false
+			app_probe_remote(app)
+		case .Remote_Active:
+			if worker == nil && !remote_control {app_probe_remote(app)}
 		}
 		connect.acknowledge(&connect_client, event, accepted)
 		connect.free_event(event)
@@ -237,13 +246,17 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		requested_ms, seek_requested = 0, true
 		displayed_ms = 0 // a second press can now select the previous track
 	}
+	seek_duration := max(0, footer_duration(app))
 	if seek_requested {
-		seek_ms = clamp(requested_ms, 0, max(0, duration_ms))
-		start_paused = stage == .Paused
-		mpris.seeked(seek_ms)
+		position := clamp(requested_ms, 0, seek_duration)
 		if remote_control {
-			_ = library.send_player_command(&library_client, .Seek, seek_ms)
+			if seek_duration >
+			   0 {_ = library.send_player_command(&library_client, .Seek, position)}
 			seek_requested = false
+		} else {
+			seek_ms = position
+			start_paused = stage == .Paused
+			mpris.seeked(seek_ms)
 		}
 	}
 	if clicked && seek_enabled && hit("seek_slider", mouse_click) {seek_dragging = true}
@@ -251,11 +264,12 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		if !seek_enabled {seek_dragging = false} else {
 			if .LEFT not_in buttons {
 				box := clay.GetElementData(clay.ID("seek_slider")).boundingBox
-				seek_ms = seek_position_ms(mouse.x, box.x, box.width, duration_ms)
-				start_paused = stage == .Paused
+				position := seek_position_ms(mouse.x, box.x, box.width, seek_duration)
 				if remote_control {
-					_ = library.send_player_command(&library_client, .Seek, seek_ms)
+					_ = library.send_player_command(&library_client, .Seek, position)
 				} else {
+					seek_ms = position
+					start_paused = stage == .Paused
 					seek_requested = true
 				}
 				seek_dragging = false
@@ -333,7 +347,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		// Local worker starts always go through the switch below.
 		_ = library.send_player_command(
 			&library_client,
-			library_client.remote_playing ? .Pause : .Play,
+			library_client.remote.playing ? .Pause : .Play,
 		)
 		space_pressed = false
 		play_pressed = false

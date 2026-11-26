@@ -6,8 +6,81 @@ import "core:sync"
 import "core:sync/chan"
 import "core:testing"
 import "core:thread"
+import connect "spotify/connect"
 import library "spotify/library"
 import player "spotify/player"
+
+@(test)
+player_state_adopts_a_remote_device_only_without_local_playback :: proc(t: ^testing.T) {
+	app := App {
+		app_state = State{connect_device = "local"},
+	}
+	remote := library.Result {
+		kind = .Player_State,
+		ok = true,
+		player = {device_id = "phone", playing = true},
+	}
+	app_library_result(&remote, &app)
+	testing.expect(t, app.remote_control)
+
+	// A failed poll must not send the next play click to the local player.
+	failed := library.Result {
+		kind   = .Player_State,
+		status = 429,
+	}
+	app_library_result(&failed, &app)
+	testing.expect(t, app.remote_control)
+
+	local := library.Result {
+		kind = .Player_State,
+		ok = true,
+		player = {device_id = "local"},
+	}
+	app_library_result(&local, &app)
+	testing.expect(t, !app.remote_control)
+
+	worker: thread.Thread
+	app.worker = &worker
+	app.stage = .Playing
+	app.library_client.remote.device_id = "phone"
+	app_library_result(&remote, &app)
+	testing.expect(t, !app.remote_control)
+	testing.expect_value(t, footer_active_device(&app), "local")
+}
+
+@(test)
+accepted_connect_load_publishes_even_when_state_matches :: proc(t: ^testing.T) {
+	worker: thread.Thread
+	states, allocation := chan.create_buffered(chan.Chan(connect.Snapshot), 1, context.allocator)
+	if !testing.expect(t, allocation == nil) {return}
+	defer chan.destroy(states)
+	app := App {
+		worker = &worker,
+		stage = .Paused,
+		selected = "spotify:track:fixture",
+		connect_client = {worker = &worker, states = states},
+		connect_snapshot = {
+			active = true,
+			paused = true,
+			uri = strings.clone("spotify:track:fixture"),
+		},
+	}
+	defer connect.free_snapshot(&app.connect_snapshot)
+	app_connect_publish(&app)
+	unexpected, published := chan.try_recv(states)
+	connect.free_snapshot(&unexpected)
+	testing.expect(t, !published, "unchanged state should not publish without a new load")
+	app.connect_load_pending = true
+	app_connect_publish(&app)
+	snapshot, got := chan.try_recv(states)
+	if !testing.expect(t, got) {return}
+	defer connect.free_snapshot(&snapshot)
+	testing.expect(t, snapshot.active && snapshot.paused && snapshot.uri == app.selected)
+	app_connect_publish(&app)
+	unexpected, published = chan.try_recv(states)
+	connect.free_snapshot(&unexpected)
+	testing.expect(t, !published, "one accepted load must not publish the same state twice")
+}
 
 @(test)
 worker_cancellation_preserves_queued_packets :: proc(t: ^testing.T) {

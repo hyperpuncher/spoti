@@ -681,7 +681,7 @@ track_list_row :: proc(
 		cornerRadius = clay.CornerRadiusAll(4 * d),
 	},
 	) {
-		current := row.uri == view.current_uri && view.button != "play"
+		current := view.current_uri != "" && row.uri == view.current_uri && view.button != "play"
 		if current {
 			playing_bars(view.playing, d)
 		} else if clay.UI()(

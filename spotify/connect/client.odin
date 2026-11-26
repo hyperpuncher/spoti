@@ -180,10 +180,12 @@ put_state :: proc(
 	)
 	defer delete(response)
 	diagnostic.writef(
-		"connect state reason=%d status=%d ok=%v shuffle=%v command=%v sender=%v",
+		"connect state reason=%d status=%d ok=%v active=%v buffering=%v shuffle=%v command=%v sender=%v",
 		reason,
 		code,
 		ok,
+		snapshot.active,
+		snapshot.buffering,
 		snapshot.shuffle,
 		message != 0,
 		sender != "",
@@ -253,6 +255,8 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 	last_message: u32
 	ping_at := time.now()
 	waiting_for_pong := false
+	active_device := ""
+	defer delete(active_device)
 	for !sync.atomic_load(&client.cancel) {
 		defer free_all(context.temp_allocator)
 		if time.since(tokens.expires_at) >= -time.Minute {return}
@@ -318,14 +322,24 @@ run_connection :: proc(client: ^Client, tokens: oauth.Tokens, snapshot: ^Snapsho
 						}
 						deliver = true
 					}
-				} else if envelope.uri == "hm://connect-state/v1/cluster" && snapshot.active {
+				} else if envelope.uri == "hm://connect-state/v1/cluster" {
 					cluster, found, valid := ap.get_bytes(data, 1)
 					if found && valid {
 						active, _, active_valid := ap.get_bytes(cluster, 2)
-						if active_valid && string(active) != client.device_id {
-							event.action = .Inactive
-							deliver = true
-							snapshot.active = false
+						if active_valid {
+							device := string(active)
+							changed_device := device != active_device
+							local_active := device == client.device_id
+							if snapshot.active && !local_active {
+								event.action, deliver = .Inactive, true
+								snapshot.active = false
+							} else if changed_device && device != "" && !local_active {
+								event.action, deliver = .Remote_Active, true
+							}
+							if changed_device {
+								delete(active_device)
+								active_device = strings.clone(device)
+							}
 						}
 					}
 				}

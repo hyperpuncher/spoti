@@ -102,7 +102,7 @@ View :: struct {
 	queue_items:    []Play_Item, // borrowed; playback owns the queue
 	queue_index:    int,
 	device_open:    bool, // the Connect device panel is showing
-	device_active:  bool, // a Connect device is the API-active one
+	active_device:  string, // borrowed id of the current output
 	device_rows:    []library.Device, // borrowed; the last fetched list
 	device_loading: bool,
 	device_error:   bool,
@@ -113,8 +113,8 @@ View :: struct {
 	drop_target:    int, // playlist card index under the drag, or -1
 	toast:          string, // transient add-to-playlist feedback
 	scroll_active:  bool, // middle-click autoscroll anchor indicator
-	current_uri:    string, // borrowed selected track; matches a row uri while it owns playback
-	playing:        bool, // audio flowing this frame; freezes the row bars when false
+	current_uri:    string, // borrowed URI of the current local or remote track
+	playing:        bool, // the active player is playing; freezes the row bars when false
 	scroll_x:       f32,
 	scroll_y:       f32,
 }
@@ -647,7 +647,7 @@ player_bar :: proc(
 			icon_button(
 				"footer_devices",
 				"speaker",
-				view.device_active ? .Green : .Muted,
+				view.active_device != "" ? .Green : .Muted,
 				textures,
 				fx,
 				d,
