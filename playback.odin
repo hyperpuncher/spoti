@@ -292,6 +292,41 @@ queue_detail_rows :: proc(items: ^[dynamic]Play_Item, detail: ^library.Detail) {
 	stamp_queue_album(items, detail)
 }
 
+// Connect supplies track IDs, not display metadata. Reuse only exact matches.
+load_connect_queue :: proc(app: ^App, uris: []string) {
+	old := app.play_queue
+	defer free_play_queue(&old)
+	app.play_queue = make([dynamic]Play_Item, 0, len(uris))
+	detail, remote := &app.library_client.detail, &app.library_client.remote
+	fallback_cover := detail.image_small != "" ? detail.image_small : detail.image
+	tracks: for uri, index in uris {
+		for item in old {
+			if item.uri != uri || item.cover == "" {continue}
+			append(&app.play_queue, clone_play_item(item, index))
+			continue tracks
+		}
+		row := library.Track_Row {
+			uri = uri,
+		}
+		cover := ""
+		if uri == remote.uri {
+			row.name, row.artists, row.image, row.duration_ms =
+				remote.title, remote.artist, remote.cover, remote.duration
+		}
+		for candidate in detail.rows {
+			if candidate.uri != uri {continue}
+			row = candidate
+			if detail.source == .Album {
+				row.album = detail.name
+				row.album_uri = library.library_uri(.Album, detail.id, context.temp_allocator)
+				cover = fallback_cover
+			}
+			break
+		}
+		append(&app.play_queue, clone_play_item(row, index, cover))
+	}
+}
+
 // Row, menu, and hero playback share queue ownership and shuffle selection.
 app_queue_detail :: proc(app: ^App, index: int) -> bool {
 	queue_detail_rows(&app.play_queue, &app.library_client.detail)

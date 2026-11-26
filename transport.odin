@@ -180,10 +180,7 @@ app_transport :: proc(app: ^App, frame: ^Frame, visible: Frame_Visible) {
 		switch event.action {
 		case .Load:
 			remote_control = false
-			free_play_queue(&play_queue)
-			for uri, index in event.tracks {
-				append(&play_queue, Play_Item{uri = strings.clone(uri), order = index})
-			}
+			load_connect_queue(app, event.tracks[:])
 			replace_string(&queue_detail, "")
 			queue_rows = len(play_queue)
 			play_index = 0

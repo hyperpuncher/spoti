@@ -83,6 +83,34 @@ accepted_connect_load_publishes_even_when_state_matches :: proc(t: ^testing.T) {
 }
 
 @(test)
+connect_load_reuses_matching_artwork_without_changing_the_incoming_queue :: proc(t: ^testing.T) {
+	app: App
+	defer free_play_queue(&app.play_queue)
+	detail := &app.library_client.detail
+	detail.source, detail.id, detail.image = .Album, "album", "album-cover"
+	detail.rows = make([dynamic]library.Track_Row, context.temp_allocator)
+	append(&detail.rows, library.Track_Row{uri = "album-track", artists = "Album artist"})
+	append(
+		&app.play_queue,
+		Play_Item{uri = strings.clone("previous"), cover = strings.clone("previous-cover")},
+	)
+	app.library_client.remote = {
+		uri   = "remote-track",
+		cover = "remote-cover",
+	}
+
+	uris := [?]string{"album-track", "unknown", "previous", "remote-track"}
+	covers := [?]string{"album-cover", "", "previous-cover", "remote-cover"}
+	load_connect_queue(&app, uris[:])
+	if !testing.expect_value(t, len(app.play_queue), len(uris)) {return}
+	for item, index in app.play_queue {
+		testing.expect_value(t, item.uri, uris[index])
+		testing.expect_value(t, item.cover, covers[index])
+	}
+	testing.expect_value(t, app.play_queue[0].artist, "Album artist")
+}
+
+@(test)
 worker_cancellation_preserves_queued_packets :: proc(t: ^testing.T) {
 	queue, err := chan.create_buffered(chan.Chan(player.Packet), 1, context.allocator)
 	if !testing.expect(t, err == nil) {return}
